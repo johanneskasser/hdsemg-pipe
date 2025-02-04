@@ -24,7 +24,7 @@ def setup_logging():
                 'class': 'logging.FileHandler',
                 'formatter': 'standard',
                 'level': 'DEBUG',
-                'filename': 'masterwindow.log',
+                'filename': 'log/masterwindow.log',
                 'mode': 'a'
             }
         },
