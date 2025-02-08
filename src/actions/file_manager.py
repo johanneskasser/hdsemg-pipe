@@ -1,0 +1,40 @@
+import os
+from log.log_config import logger
+from state.global_state import global_state
+from actions.workers import ChannelSelectionWorker
+
+
+def start_file_processing(step):
+    """Starts processing .mat files and updates the StepWidget dynamically."""
+    if not global_state.mat_files:
+        logger.warning("No .mat files found.")
+        return
+
+    step.processed_files = 0
+    step.total_files = len(global_state.mat_files)
+    step.update_progress(step.processed_files, step.total_files)
+
+    process_next_file(step)
+
+def process_next_file(step):
+    """Processes the next .mat file in the list."""
+
+    if step.processed_files < step.total_files:
+        file_path = global_state.mat_files[step.processed_files]
+        logger.info(f"Processing file: {file_path}")
+
+        step.worker = ChannelSelectionWorker(file_path)
+        step.worker.finished.connect(lambda: file_processed(step))
+        step.worker.start()
+    else:
+        step.complete_step()
+
+def file_processed(step):
+    """Updates progress after a file is processed and moves to the next."""
+    step.processed_files += 1
+    step.update_progress(step.processed_files, step.total_files)
+
+    if step.processed_files < step.total_files:
+        process_next_file(step)
+    else:
+        step.complete_step()

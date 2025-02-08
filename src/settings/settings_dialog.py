@@ -44,7 +44,6 @@ class SettingsDialog(QDialog):
     def initChannelSelectionTab(self):
         """Initialize the 'General' settings tab."""
         channelselection_tab = channelselectiontab_init(self)
-        # Add more widgets (e.g., checkboxes, line edits) here for general settings.
         self.channel_selection_tab.setLayout(channelselection_tab)
 
     def initAdvancedTab(self):

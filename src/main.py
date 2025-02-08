@@ -1,18 +1,18 @@
+import os
 import sys
-
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QGridLayout, QAction,
-    qApp, QStyle
-)
-
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle
 from HDsEMG.pipeline.masterwindow.src.settings.settings_dialog import SettingsDialog
 from log.log_config import logger, setup_logging
-from widgets.StepWidget import StepWidget
+from actions.openfile import open_mat_file_or_folder, count_mat_files
+from actions.file_manager import start_file_processing
+from widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
+from widgets.OpenFileStepWidget import OpenFileStepWidget
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.steps = []  # Define self.steps before use
         self.initUI()
 
     def initUI(self):
@@ -25,48 +25,45 @@ class MainWindow(QMainWindow):
         grid_layout = QGridLayout(central_widget)
         grid_layout.setColumnStretch(0, 1)
 
-        step_data = [
-            {"name": "Open .mat File", "tooltip": "Select the .mat file containing your data.",
-             "button_text": "Open File", "action": self.open_file},
-            {"name": "Channel Selection", "tooltip": "Select the channels to be processed.",
-             "button_text": "Select Channels", "action": self.select_channels},
-            {"name": "Decomposition", "tooltip": "Perform signal decomposition on the selected channels.",
-             "button_text": "Decompose", "action": self.decompose},
-            {"name": "Result Visualization", "tooltip": "Visualize the results of the analysis.",
-             "button_text": "Visualize", "action": self.visualize}
-        ]
+        # Schritt 1: Datei öffnen
+        step1 = OpenFileStepWidget(0, "Open .mat File", "Select the .mat file containing your data.")
+        self.steps.append(step1)
+        grid_layout.addWidget(step1, 0, 0)
 
-        # Create StepWidget instances
-        self.steps = []
-        for i, data in enumerate(step_data):
-            step = StepWidget(data["name"], data["tooltip"], data["action"], data["button_text"])
-            self.steps.append(step)
-            grid_layout.addWidget(step, i, 0)
+        # Schritt 2: Kanal-Auswahl
+        step2 = ChannelSelectionStepWidget(1)
+        self.steps.append(step2)
+        grid_layout.addWidget(step2, 1, 0)
+
+        # Connect the fileSelected signal to update the ChannelSelectionStepWidget
+        step1.fileSelected.connect(step2.update)
+
 
         # Disable all steps except the first
         for step in self.steps[1:]:
-            step.setActionButtonEnabled(False)
+            step.setActionButtonsEnabled(False)
 
-        # Connect step completion signals
-        for i, step in enumerate(self.steps[:-1]):
-            step.stepCompleted.connect(lambda idx=i: self.enable_next_step(idx))
+            # Menu Bar
+            menubar = self.menuBar()
+            settings_menu = menubar.addMenu('Settings')
 
-        # Menu Bar
-        menubar = self.menuBar()
-        settings_menu = menubar.addMenu('Settings')
+            preferences_action = QAction('Preferences', self)
+            preferences_action.triggered.connect(self.openPreferences)
+            settings_menu.addAction(preferences_action)
 
-        preferences_action = QAction('Preferences', self)
-        preferences_action.triggered.connect(self.openPreferences)
-        settings_menu.addAction(preferences_action)
-
-        exit_action = QAction('Exit', self)
-        exit_action.triggered.connect(qApp.quit)
-        settings_menu.addAction(exit_action)
+            exit_action = QAction('Exit', self)
+            exit_action.triggered.connect(qApp.quit)
+            settings_menu.addAction(exit_action)
 
     def enable_next_step(self, index):
         """Enables the action button for the next step, if available."""
         if index + 1 < len(self.steps):
-            self.steps[index + 1].setActionButtonEnabled(True)
+            self.steps[index + 1].setActionButtonsEnabled(True)
+
+    def mark_step_completed(self, step_index):
+        """Marks a step as completed and enables the next step."""
+        if step_index < len(self.steps):
+            self.steps[step_index].complete_step()
 
     def openPreferences(self):
         """Open the settings dialog."""
@@ -76,19 +73,32 @@ class MainWindow(QMainWindow):
         else:
             logger.debug("Settings dialog closed")
 
-    # Define placeholder functions for each step's execution
-    def open_file(self):
-        logger.info("Opening .mat file...")
+    def select_file_or_folder(self, mode):
+        """Handles file or folder selection and stores it globally."""
+        selected_path = open_mat_file_or_folder(mode)
+        if not selected_path:
+            return  # User canceled selection
 
-    def select_channels(self):
-        logger.info("Selecting channels...")
+        # Store globally
+        from state.global_state import mat_files
+        mat_files.clear()
+
+        # If folder, count .mat files
+        if os.path.isdir(selected_path):
+            mat_files.extend(count_mat_files(selected_path))
+
+        self.steps[0].complete_step()  # Mark Step 1 as completed
+        self.steps[1].setActionButtonsEnabled(True)  # Enable Step 2
+
+    def start_processing_with_step(step):
+        """Start processing files and update the given step dynamically."""
+        start_file_processing(step)
 
     def decompose(self):
         logger.info("Performing decomposition...")
 
     def visualize(self):
         logger.info("Visualizing results...")
-
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
