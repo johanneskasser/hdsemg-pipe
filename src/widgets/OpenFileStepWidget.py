@@ -3,6 +3,8 @@ import os
 from PyQt5.QtWidgets import QPushButton
 from PyQt5.QtCore import pyqtSignal
 
+from config.config_enums import ChannelSelection
+from config.config_manager import config
 from widgets.BaseStepWidget import BaseStepWidget
 from actions.openfile import open_mat_file_or_folder, count_mat_files
 from state.global_state import global_state
@@ -32,3 +34,11 @@ class OpenFileStepWidget(BaseStepWidget):
             return  # Nutzer hat Abbrechen gedrückt
         self.fileSelected.emit(selected_path)
         self.complete_step()  # Schritt als abgeschlossen markieren
+
+    def check(self):
+        if config.get(ChannelSelection.WORKFOLDER_PATH) is None:
+            self.warn("Workfolder path is not set. Please set it in settings first.")
+            self.setActionButtonsEnabled(False)
+        else:
+            self.clear_status()
+            self.setActionButtonsEnabled(True)

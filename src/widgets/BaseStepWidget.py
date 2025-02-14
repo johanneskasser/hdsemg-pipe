@@ -3,14 +3,15 @@ from PyQt5.QtCore import pyqtSignal
 from log.log_config import logger
 
 class BaseStepWidget(QWidget):
-    stepCompleted = pyqtSignal(int)  # Signal, um abgeschlossene Schritte zu melden
+    stepCompleted = pyqtSignal(int)  # Signal to report completed steps
 
     def __init__(self, step_index, step_name, tooltip, parent=None):
         """
-        Basisklasse für ein Schritt-Widget.
-        :param step_index: Die Indexnummer des Schritts
-        :param step_name: Der Name des Schritts
-        :param tooltip: Tooltip-Text für das Widget
+        Base class for a step widget.
+
+        :param step_index: The index number of the step
+        :param step_name: The name of the step
+        :param tooltip: Tooltip text for the widget
         """
         super().__init__(parent)
         self.step_index = step_index
@@ -19,16 +20,14 @@ class BaseStepWidget(QWidget):
         self.layout = QHBoxLayout(self)
         self.setToolTip(tooltip)
 
-        # Schritt-Label
+        # Step Label
         self.name_label = QLabel(self.step_name)
         self.layout.addWidget(self.name_label)
 
-        # Fortschrittsanzeige (Icon)
-        self.progress_indicator = QLabel()
-        self.progress_indicator.setFixedWidth(30)
-        critical_icon = self.style().standardIcon(QStyle.SP_MessageBoxCritical)
-        self.progress_indicator.setPixmap(critical_icon.pixmap(20, 20))
-        self.layout.addWidget(self.progress_indicator)
+        # Status Indicator (Icon)
+        self.status_icon = QLabel()
+        self.status_icon.setFixedWidth(30)
+        self.layout.addWidget(self.status_icon)
 
         # Buttons
         self.buttons = []
@@ -36,17 +35,52 @@ class BaseStepWidget(QWidget):
 
         self.setLayout(self.layout)
 
+        # Default to no status
+        self.clear_status()
+
     def create_buttons(self):
-        """Erstellt Buttons. Muss von Subklassen überschrieben werden."""
+        """Creates buttons. Must be overridden by subclasses."""
         pass
 
     def complete_step(self):
-        """Markiert den Schritt als abgeschlossen."""
-        apply_icon = self.style().standardIcon(QStyle.SP_DialogApplyButton)
-        self.progress_indicator.setPixmap(apply_icon.pixmap(20, 20))
+        """Marks the step as completed."""
+        self.success("Step completed successfully")
         self.stepCompleted.emit(self.step_index)
 
     def setActionButtonsEnabled(self, enabled):
-        """Aktiviert oder deaktiviert die Action-Buttons."""
+        """Enables or disables action buttons."""
         for button in self.buttons:
             button.setEnabled(enabled)
+
+    def success(self, message):
+        """Displays a success message with a checkmark icon."""
+        success_icon = self.style().standardIcon(QStyle.SP_DialogApplyButton)
+        self.status_icon.setPixmap(success_icon.pixmap(20, 20))
+        self.setToolTip(message)
+        logger.info(f"Success: {message}")
+
+    def warn(self, message):
+        """Displays a warning message with a warning icon."""
+        warn_icon = self.style().standardIcon(QStyle.SP_MessageBoxWarning)
+        self.status_icon.setPixmap(warn_icon.pixmap(20, 20))
+        self.setToolTip(message)
+        logger.warning(f"Warning: {message}")
+
+    def error(self, message):
+        """Displays an error message with a critical error icon."""
+        error_icon = self.style().standardIcon(QStyle.SP_MessageBoxCritical)
+        self.status_icon.setPixmap(error_icon.pixmap(20, 20))
+        self.setToolTip(message)
+        logger.error(f"Error: {message}")
+
+    def info(self, message):
+        """Displays an info message"""
+        info_icon = self.style().standardIcon(QStyle.SP_InfoIcon)
+        self.status_icon.setPixmap(info_icon.pixmap(20, 20))
+        self.setToolTip(message)
+        logger.info(f"Info: {message}")
+
+    def clear_status(self):
+        """Clears the status and resets the tooltip."""
+        self.status_icon.clear()
+        self.setToolTip("")

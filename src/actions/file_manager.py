@@ -13,10 +13,11 @@ def start_file_processing(step):
     step.processed_files = 0
     step.total_files = len(global_state.mat_files)
     step.update_progress(step.processed_files, step.total_files)
+    folder_content_widget = global_state.get_widget("folder_content")
 
-    process_next_file(step)
+    process_next_file(step, folder_content_widget)
 
-def process_next_file(step):
+def process_next_file(step, folder_content_widget):
     """Processes the next .mat file in the list."""
 
     if step.processed_files < step.total_files:
@@ -24,17 +25,18 @@ def process_next_file(step):
         logger.info(f"Processing file: {file_path}")
 
         step.worker = ChannelSelectionWorker(file_path)
-        step.worker.finished.connect(lambda: file_processed(step))
+        step.worker.finished.connect(lambda: file_processed(step, folder_content_widget))
         step.worker.start()
     else:
         step.complete_step()
 
-def file_processed(step):
+def file_processed(step, folder_content_widget):
     """Updates progress after a file is processed and moves to the next."""
     step.processed_files += 1
     step.update_progress(step.processed_files, step.total_files)
+    folder_content_widget.update_folder_content()
 
     if step.processed_files < step.total_files:
-        process_next_file(step)
+        process_next_file(step, folder_content_widget)
     else:
         step.complete_step()

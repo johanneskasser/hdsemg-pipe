@@ -4,10 +4,12 @@ from PyQt5.QtWidgets import (
     QLabel, QDialogButtonBox
 )
 from .tabs.channelselection import init as channelselectiontab_init
+from .tabs.workfolder import init_workfolder_widget
 from log.log_config import logger
-
+from PyQt5.QtCore import pyqtSignal
 
 class SettingsDialog(QDialog):
+    settingsAccepted = pyqtSignal()
     def __init__(self, parent=None):
         super(SettingsDialog, self).__init__(parent)
         self.setWindowTitle("Settings")
@@ -22,17 +24,18 @@ class SettingsDialog(QDialog):
 
         # Create individual tabs
         self.channel_selection_tab = QWidget()
+        self.workfolder_tab = QWidget()
         self.advanced_tab = QWidget()
         self.network_tab = QWidget()
 
         # Add tabs to the tab widget
         self.tab_widget.addTab(self.channel_selection_tab, "Channel Selection App")
-        self.tab_widget.addTab(self.advanced_tab, "PlaceHolder1")
+        self.tab_widget.addTab(self.workfolder_tab, "Work Folder")
         self.tab_widget.addTab(self.network_tab, "PlaceHolder2")
 
         # Initialize content for each tab
         self.initChannelSelectionTab()
-        self.initAdvancedTab()
+        self.initWorkfolderTab()
         self.initNetworkTab()
 
         # Add standard dialog buttons (OK and Cancel)
@@ -46,12 +49,10 @@ class SettingsDialog(QDialog):
         channelselection_tab = channelselectiontab_init(self)
         self.channel_selection_tab.setLayout(channelselection_tab)
 
-    def initAdvancedTab(self):
-        """Initialize the 'Advanced' settings tab."""
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Advanced Settings"))
-        # Add additional advanced settings widgets here.
-        self.advanced_tab.setLayout(layout)
+    def initWorkfolderTab(self):
+        """Initialize the 'Workfolder' settings tab."""
+        workfolder_tab = init_workfolder_widget(self)
+        self.workfolder_tab.setLayout(workfolder_tab)
 
     def initNetworkTab(self):
         """Initialize the 'Network' settings tab."""
@@ -59,3 +60,9 @@ class SettingsDialog(QDialog):
         layout.addWidget(QLabel("Network Settings"))
         # Add network-related settings widgets here.
         self.network_tab.setLayout(layout)
+
+    def accept(self):
+        """Emit signal and close dialog when OK is pressed."""
+        self.settingsAccepted.emit()  # Emit signal
+        logger.info("Settings accepted and dialog closed.")
+        super().accept()  # Call parent accept method to close the dialog

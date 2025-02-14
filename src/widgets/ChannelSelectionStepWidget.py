@@ -1,10 +1,12 @@
 from PyQt5.QtWidgets import QPushButton, QLabel
-from openpyxl.styles.builtins import total
 
-from widgets.BaseStepWidget import BaseStepWidget
-from state.global_state import global_state
-from log.log_config import logger
 from actions.file_manager import start_file_processing
+from config.config_enums import ChannelSelection
+from config.config_manager import config
+from log.log_config import logger
+from state.global_state import global_state
+from widgets.BaseStepWidget import BaseStepWidget
+
 
 class ChannelSelectionStepWidget(BaseStepWidget):
     def __init__(self, step_index):
@@ -51,3 +53,11 @@ class ChannelSelectionStepWidget(BaseStepWidget):
         # Mark step as complete when all files are processed
         if processed >= total > 0:
             self.complete_step()
+
+    def check(self):
+        if config.get(ChannelSelection.EXECUTABLE_PATH) is None:
+            self.warn("Channel Selection App Executable Path is not set. Please set it in Settings first.")
+            self.setActionButtonsEnabled(False)
+        else:
+            self.clear_status()
+            self.setActionButtonsEnabled(True)

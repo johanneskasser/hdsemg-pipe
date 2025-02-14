@@ -4,6 +4,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from config.config_manager import config
 from config.config_enums import ChannelSelection
 from log.log_config import logger
+from state.global_state import global_state
 
 class ChannelSelectionWorker(QThread):
     finished = pyqtSignal()  # Signal emitted when the process is completed
@@ -33,8 +34,10 @@ class ChannelSelectionWorker(QThread):
             logger.error(f"Executable is not accessible: {channelselection_exe_path}")
             return
 
+        output_filepath = self.get_output_filepath()
+
         # Define the command with start parameters
-        command = [channelselection_exe_path, "--inputFile", self.file_path]  # Example start parameters
+        command = [channelselection_exe_path, "--inputFile", self.file_path, "--outputFile", output_filepath]
 
         try:
             # Start the application
@@ -55,3 +58,12 @@ class ChannelSelectionWorker(QThread):
 
         except Exception as e:
             logger.error(f"Failed to start Channel Selection app: {e}")
+
+    def get_output_filepath(self):
+        filename = os.path.basename(self.file_path)
+        workfolder = global_state.workfolder
+        output_filepath = os.path.join(workfolder, "channelselection", filename)
+        output_filepath = os.path.normpath(output_filepath)
+        return output_filepath
+
+

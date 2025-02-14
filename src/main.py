@@ -1,18 +1,22 @@
 import os
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QTextEdit, QFrame
 from HDsEMG.pipeline.masterwindow.src.settings.settings_dialog import SettingsDialog
 from log.log_config import logger, setup_logging
 from actions.openfile import open_mat_file_or_folder, count_mat_files
 from actions.file_manager import start_file_processing
+from state.global_state import global_state
 from widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
+from widgets.FolderContentWidget import FolderContentWidget
 from widgets.OpenFileStepWidget import OpenFileStepWidget
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.steps = []  # Define self.steps before use
+        self.folder_content_widget = None
+        self.steps = []
+        self.settingsDialog = SettingsDialog(self)
         self.initUI()
 
     def initUI(self):
@@ -20,40 +24,62 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
         self.setGeometry(100, 100, 600, 400)
 
+        # Menu Bar
+        menubar = self.menuBar()
+        settings_menu = menubar.addMenu('Settings')
+
+        preferences_action = QAction('Preferences', self)
+        preferences_action.triggered.connect(self.openPreferences)
+        settings_menu.addAction(preferences_action)
+
+        exit_action = QAction('Exit', self)
+        exit_action.triggered.connect(qApp.quit)
+        settings_menu.addAction(exit_action)
+
+
+
+        # Central Widget
+
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         grid_layout = QGridLayout(central_widget)
         grid_layout.setColumnStretch(0, 1)
 
+        # Folder Content Widget
+        self.folder_content_widget = FolderContentWidget()
+        global_state.register_widget("folder_content", self.folder_content_widget)
+        grid_layout.addWidget(self.folder_content_widget, 0, 0, 1, 1)
+
+        # Horizontal Line Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)  # Horizontal Line
+        separator.setFrameShadow(QFrame.Sunken)
+        grid_layout.addWidget(separator, 1, 0, 1, 1)  # Row after FolderContentWidget
+
         # Schritt 1: Datei öffnen
         step1 = OpenFileStepWidget(0, "Open .mat File", "Select the .mat file containing your data.")
+        global_state.register_widget("step1", step1)
         self.steps.append(step1)
-        grid_layout.addWidget(step1, 0, 0)
+        grid_layout.addWidget(step1, 2, 0)
+        step1.check()
+        self.settingsDialog.settingsAccepted.connect(step1.check)
 
         # Schritt 2: Kanal-Auswahl
         step2 = ChannelSelectionStepWidget(1)
+        global_state.register_widget("step2", step2)
         self.steps.append(step2)
-        grid_layout.addWidget(step2, 1, 0)
+        grid_layout.addWidget(step2, 3, 0)
+        step2.check()
+        self.settingsDialog.settingsAccepted.connect(step2.check)
 
         # Connect the fileSelected signal to update the ChannelSelectionStepWidget
         step1.fileSelected.connect(step2.update)
+        step1.fileSelected.connect(self.folder_content_widget.update_folder_content)
 
 
         # Disable all steps except the first
         for step in self.steps[1:]:
             step.setActionButtonsEnabled(False)
-
-            # Menu Bar
-            menubar = self.menuBar()
-            settings_menu = menubar.addMenu('Settings')
-
-            preferences_action = QAction('Preferences', self)
-            preferences_action.triggered.connect(self.openPreferences)
-            settings_menu.addAction(preferences_action)
-
-            exit_action = QAction('Exit', self)
-            exit_action.triggered.connect(qApp.quit)
-            settings_menu.addAction(exit_action)
 
     def enable_next_step(self, index):
         """Enables the action button for the next step, if available."""
@@ -67,28 +93,10 @@ class MainWindow(QMainWindow):
 
     def openPreferences(self):
         """Open the settings dialog."""
-        dialog = SettingsDialog(self)
-        if dialog.exec_():
+        if self.settingsDialog.exec_():
             logger.debug("Settings dialog closed and accepted")
         else:
             logger.debug("Settings dialog closed")
-
-    def select_file_or_folder(self, mode):
-        """Handles file or folder selection and stores it globally."""
-        selected_path = open_mat_file_or_folder(mode)
-        if not selected_path:
-            return  # User canceled selection
-
-        # Store globally
-        from state.global_state import mat_files
-        mat_files.clear()
-
-        # If folder, count .mat files
-        if os.path.isdir(selected_path):
-            mat_files.extend(count_mat_files(selected_path))
-
-        self.steps[0].complete_step()  # Mark Step 1 as completed
-        self.steps[1].setActionButtonsEnabled(True)  # Enable Step 2
 
     def start_processing_with_step(step):
         """Start processing files and update the given step dynamically."""
