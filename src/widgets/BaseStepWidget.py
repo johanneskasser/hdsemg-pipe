@@ -28,7 +28,7 @@ class BaseStepWidget(QWidget):
         font = QFont()
         font.setBold(True)
         self.name_label.setFont(font)
-        self.name_label.setFixedWidth(120)  # Fixed width to align icons
+        self.name_label.setFixedWidth(300)  # Fixed width to align icons
         self.layout.addWidget(self.name_label)
 
         # Info Icon with Tooltip

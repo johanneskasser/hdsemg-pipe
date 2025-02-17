@@ -8,6 +8,7 @@ from actions.file_manager import start_file_processing
 from state.global_state import global_state
 from widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
 from widgets.FolderContentWidget import FolderContentWidget
+from widgets.GridAssociationWidget import GridAssociationWidget
 from widgets.OpenFileStepWidget import OpenFileStepWidget
 
 
@@ -36,10 +37,7 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(qApp.quit)
         settings_menu.addAction(exit_action)
 
-
-
         # Central Widget
-
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         grid_layout = QGridLayout(central_widget)
@@ -64,16 +62,25 @@ class MainWindow(QMainWindow):
         step1.check()
         self.settingsDialog.settingsAccepted.connect(step1.check)
 
-        # Schritt 2: Kanal-Auswahl
-        step2 = ChannelSelectionStepWidget(1)
+        # Schritt 2: Grid-Assoziationen
+        step2 = GridAssociationWidget(1)
         global_state.register_widget("step2", step2)
         self.steps.append(step2)
         grid_layout.addWidget(step2, 3, 0)
         step2.check()
         self.settingsDialog.settingsAccepted.connect(step2.check)
 
-        # Connect the fileSelected signal to update the ChannelSelectionStepWidget
-        step1.fileSelected.connect(step2.update)
+        # Schritt 3: Kanal-Auswahl
+        step3 = ChannelSelectionStepWidget(2)
+        global_state.register_widget("step3", step3)
+        self.steps.append(step3)
+        grid_layout.addWidget(step3, 4, 0)
+        step3.check()
+        self.settingsDialog.settingsAccepted.connect(step3.check)
+
+        # Connect the Steps
+        step1.fileSelected.connect(step2.check)
+        step2.stepCompleted.connect(step3.update)
         step1.fileSelected.connect(self.folder_content_widget.update_folder_content)
 
 

@@ -1,4 +1,9 @@
 # state/global_state.py
+import os
+
+from openpyxl.styles.builtins import output
+
+
 class GlobalState:
     _instance = None  # Singleton instance
 
@@ -25,6 +30,30 @@ class GlobalState:
     def get_widget(self, name):
         """Retrieve a registered widget."""
         return self.widgets.get(name, None)
+
+    def get_associated_grids_path(self):
+        if not self.workfolder:
+            raise ValueError
+
+        path = os.path.join(self.workfolder, 'associated_grids')
+        path = os.path.normpath(path)
+        return path
+
+    def get_channel_selection_path(self):
+        if not self.workfolder:
+            raise ValueError
+
+        path = os.path.join(self.workfolder, 'channelselection')
+        path = os.path.normpath(path)
+        return path
+
+    def get_decomposition_path(self):
+        if not self.workfolder:
+            raise ValueError
+
+        path = os.path.join(self.workfolder, 'decomposition')
+        path = os.path.normpath(path)
+        return path
 
 # Access the singleton instance anywhere in the application
 global_state = GlobalState()
