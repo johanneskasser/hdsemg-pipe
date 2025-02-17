@@ -1,4 +1,7 @@
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QStyle
+from PyQt5.QtWidgets import (
+    QWidget, QHBoxLayout, QLabel, QPushButton, QStyle, QToolButton, QSpacerItem, QSizePolicy, QVBoxLayout
+)
+from PyQt5.QtGui import QFont
 from PyQt5.QtCore import pyqtSignal
 from log.log_config import logger
 
@@ -20,30 +23,62 @@ class BaseStepWidget(QWidget):
         self.layout = QHBoxLayout(self)
         self.setToolTip(tooltip)
 
-        # Step Label
+        # Step Label (Bold Font, Fixed Width)
         self.name_label = QLabel(self.step_name)
+        font = QFont()
+        font.setBold(True)
+        self.name_label.setFont(font)
+        self.name_label.setFixedWidth(120)  # Fixed width to align icons
         self.layout.addWidget(self.name_label)
 
-        # Status Indicator (Icon)
-        self.status_icon = QLabel()
-        self.status_icon.setFixedWidth(30)
-        self.layout.addWidget(self.status_icon)
+        # Info Icon with Tooltip
+        self.info_button = QToolButton()
+        self.info_button.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxInformation))
+        self.info_button.setToolTip(tooltip)
+        self.layout.addWidget(self.info_button)
 
-        # Buttons
+        # Progress Display Label (e.g., "0/0")
+        self.additional_information_label = QLabel("")
+        self.layout.addWidget(self.additional_information_label)
+
+        # Spacer to push buttons and status indicator to the right
+        #self.layout.addItem(QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
+
+
+        # Button Layout (to accommodate multiple buttons properly)
+        self.button_layout = QVBoxLayout()
+        self.layout.addLayout(self.button_layout)
+
+        # Placeholder for checkmark space
+        self.checkmark_label = QLabel()
+        self.checkmark_label.setFixedWidth(30)  # Reserve space for checkmark
+        self.layout.addWidget(self.checkmark_label)
+
+        # Buttons Placeholder (to be defined in subclasses)
         self.buttons = []
         self.create_buttons()
+        self.add_buttons_to_layout()
+
+        # Status Indicator (Icon for warn, error, success)
+        self.status_icon = QLabel()
+        self.status_icon.setFixedWidth(30)
+        self.status_icon.setVisible(False)
+        self.layout.addWidget(self.status_icon)
 
         self.setLayout(self.layout)
-
-        # Default to no status
         self.clear_status()
 
     def create_buttons(self):
         """Creates buttons. Must be overridden by subclasses."""
         pass
 
+    def add_buttons_to_layout(self):
+        """Adds buttons to the correct layout position automatically using a vertical layout."""
+        for button in self.buttons:
+            self.button_layout.addWidget(button)  # Add to vertical layout to prevent distortion
+
     def complete_step(self):
-        """Marks the step as completed."""
+        """Marks the step as completed and displays a checkmark."""
         self.success("Step completed successfully")
         self.stepCompleted.emit(self.step_index)
 
@@ -57,6 +92,7 @@ class BaseStepWidget(QWidget):
         success_icon = self.style().standardIcon(QStyle.SP_DialogApplyButton)
         self.status_icon.setPixmap(success_icon.pixmap(20, 20))
         self.setToolTip(message)
+        self.status_icon.setVisible(True)
         logger.info(f"Success: {message}")
 
     def warn(self, message):
@@ -64,6 +100,7 @@ class BaseStepWidget(QWidget):
         warn_icon = self.style().standardIcon(QStyle.SP_MessageBoxWarning)
         self.status_icon.setPixmap(warn_icon.pixmap(20, 20))
         self.setToolTip(message)
+        self.status_icon.setVisible(True)
         logger.warning(f"Warning: {message}")
 
     def error(self, message):
@@ -71,16 +108,11 @@ class BaseStepWidget(QWidget):
         error_icon = self.style().standardIcon(QStyle.SP_MessageBoxCritical)
         self.status_icon.setPixmap(error_icon.pixmap(20, 20))
         self.setToolTip(message)
+        self.status_icon.setVisible(True)
         logger.error(f"Error: {message}")
-
-    def info(self, message):
-        """Displays an info message"""
-        info_icon = self.style().standardIcon(QStyle.SP_InfoIcon)
-        self.status_icon.setPixmap(info_icon.pixmap(20, 20))
-        self.setToolTip(message)
-        logger.info(f"Info: {message}")
 
     def clear_status(self):
         """Clears the status and resets the tooltip."""
         self.status_icon.clear()
+        self.checkmark_label.clear()
         self.setToolTip("")

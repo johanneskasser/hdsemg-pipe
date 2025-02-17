@@ -14,10 +14,7 @@ class ChannelSelectionStepWidget(BaseStepWidget):
         super().__init__(step_index, "Channel Selection", "Select the channels to be processed.")
         self.processed_files = 0
         self.total_files = 0
-
-        # Progress label to show processed/total files
-        self.progress_label = QLabel("0/0")
-        self.layout.addWidget(self.progress_label)
+        self.additional_information_label.setText("0/0")
 
     def create_buttons(self):
         """Creates the button for channel selection."""
@@ -48,7 +45,7 @@ class ChannelSelectionStepWidget(BaseStepWidget):
     def update_progress(self, processed, total):
         """Updates the progress display dynamically."""
         # Update progress label
-        self.progress_label.setText(f"{processed}/{total}")
+        self.additional_information_label.setText(f"{processed}/{total}")
 
         # Mark step as complete when all files are processed
         if processed >= total > 0:

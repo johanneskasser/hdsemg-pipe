@@ -1,14 +1,10 @@
-import os
-
-from PyQt5.QtWidgets import QPushButton
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import QPushButton, QVBoxLayout
 
+from actions.openfile import open_mat_file_or_folder
 from config.config_enums import ChannelSelection
 from config.config_manager import config
 from widgets.BaseStepWidget import BaseStepWidget
-from actions.openfile import open_mat_file_or_folder, count_mat_files
-from state.global_state import global_state
-
 
 
 class OpenFileStepWidget(BaseStepWidget):
@@ -24,8 +20,6 @@ class OpenFileStepWidget(BaseStepWidget):
         btn_open_folder.clicked.connect(lambda: self.select_file_or_folder("folder"))
         self.buttons.append(btn_open_folder)
 
-        for button in self.buttons:
-            self.layout.addWidget(button)
 
     def select_file_or_folder(self, mode):
         """Datei oder Ordner auswählen und global speichern."""
