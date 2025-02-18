@@ -79,7 +79,7 @@ class BaseStepWidget(QWidget):
 
     def complete_step(self):
         """Marks the step as completed and displays a checkmark."""
-        self.success("Step completed successfully")
+        self.success(f"Step {self.step_index} completed successfully!")
         self.stepCompleted.emit(self.step_index)
 
     def setActionButtonsEnabled(self, enabled):

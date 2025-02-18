@@ -1,4 +1,6 @@
 import os
+
+from actions.openfile import count_mat_files
 from log.log_config import logger
 from state.global_state import global_state
 from actions.workers import ChannelSelectionWorker
@@ -6,12 +8,12 @@ from actions.workers import ChannelSelectionWorker
 
 def start_file_processing(step):
     """Starts processing .mat files and updates the StepWidget dynamically."""
-    if not global_state.mat_files:
+    if not global_state.associated_files:
         logger.warning("No .mat files found.")
         return
 
     step.processed_files = 0
-    step.total_files = len(global_state.mat_files)
+    step.total_files = len(global_state.associated_files)
     step.update_progress(step.processed_files, step.total_files)
     folder_content_widget = global_state.get_widget("folder_content")
 
@@ -21,7 +23,7 @@ def process_next_file(step, folder_content_widget):
     """Processes the next .mat file in the list."""
 
     if step.processed_files < step.total_files:
-        file_path = global_state.mat_files[step.processed_files]
+        file_path = global_state.associated_files[step.processed_files]
         logger.info(f"Processing file: {file_path}")
 
         step.worker = ChannelSelectionWorker(file_path)
@@ -35,8 +37,16 @@ def file_processed(step, folder_content_widget):
     step.processed_files += 1
     step.update_progress(step.processed_files, step.total_files)
     folder_content_widget.update_folder_content()
+    channel_selection_widget = global_state.get_widget("step3")
 
     if step.processed_files < step.total_files:
         process_next_file(step, folder_content_widget)
     else:
-        step.complete_step()
+        channelselection_dest_path = global_state.get_channel_selection_path()
+        mat_files = count_mat_files(channelselection_dest_path)
+        if mat_files == step.total_files:
+            step.complete_step()
+        else:
+            error_msg = f"Not all {step.total_files} have been processed and are located {channelselection_dest_path}."
+            logger.error(error_msg)
+            channel_selection_widget.warn(error_msg)

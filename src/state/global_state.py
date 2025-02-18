@@ -9,6 +9,7 @@ class GlobalState:
 
     def __init__(self):
         self.mat_files = []
+        self.associated_files = []
         self.workfolder = None
 
     def __new__(cls):
@@ -20,6 +21,7 @@ class GlobalState:
     def reset(self):
         """Reset state variables to initial values."""
         self.mat_files = []
+        self.associated_files = []
         self.workfolder = None
         self.widgets = {}
 

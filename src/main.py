@@ -55,7 +55,7 @@ class MainWindow(QMainWindow):
         grid_layout.addWidget(separator, 1, 0, 1, 1)  # Row after FolderContentWidget
 
         # Schritt 1: Datei öffnen
-        step1 = OpenFileStepWidget(0, "Open .mat File", "Select the .mat file containing your data.")
+        step1 = OpenFileStepWidget(0, "Open .mat File(s)", "Select the .mat file containing your data.")
         global_state.register_widget("step1", step1)
         self.steps.append(step1)
         grid_layout.addWidget(step1, 2, 0)
@@ -80,8 +80,9 @@ class MainWindow(QMainWindow):
 
         # Connect the Steps
         step1.fileSelected.connect(step2.check)
-        step2.stepCompleted.connect(step3.update)
         step1.fileSelected.connect(self.folder_content_widget.update_folder_content)
+        step2.stepCompleted.connect(step3.update)
+        step2.stepCompleted.connect(self.folder_content_widget.update_folder_content)
 
 
         # Disable all steps except the first
