@@ -26,8 +26,8 @@ class OpenFileStepWidget(BaseStepWidget):
         selected_path = open_mat_file_or_folder(mode)
         if not selected_path:
             return  # Nutzer hat Abbrechen gedrückt
-        self.fileSelected.emit(selected_path)
         self.complete_step()  # Schritt als abgeschlossen markieren
+        self.fileSelected.emit(selected_path)
 
     def check(self):
         if config.get(ChannelSelection.WORKFOLDER_PATH) is None:

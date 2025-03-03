@@ -4,6 +4,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import pyqtSignal
 from log.log_config import logger
+from state.global_state import global_state
+
 
 class BaseStepWidget(QWidget):
     stepCompleted = pyqtSignal(int)  # Signal to report completed steps
@@ -19,6 +21,7 @@ class BaseStepWidget(QWidget):
         super().__init__(parent)
         self.step_index = step_index
         self.step_name = step_name
+        self.step_completed = False
 
         self.layout = QHBoxLayout(self)
         self.setToolTip(tooltip)
@@ -80,12 +83,15 @@ class BaseStepWidget(QWidget):
     def complete_step(self):
         """Marks the step as completed and displays a checkmark."""
         self.success(f"Step {self.step_index} completed successfully!")
+        self.step_completed = True
+        global_state.complete_widget(f"step{self.step_index}")
         self.stepCompleted.emit(self.step_index)
 
     def setActionButtonsEnabled(self, enabled):
         """Enables or disables action buttons."""
-        for button in self.buttons:
-            button.setEnabled(enabled)
+        if enabled == True and global_state.is_widget_completed(f"step{self.step_index - 1}") or enabled == False:
+            for button in self.buttons:
+                button.setEnabled(enabled)
 
     def success(self, message):
         """Displays a success message with a checkmark icon."""

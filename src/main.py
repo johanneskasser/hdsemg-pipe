@@ -7,8 +7,9 @@ from actions.file_manager import start_file_processing
 from log.log_config import logger, setup_logging
 from state.global_state import global_state
 from widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
+from widgets.DecompositionStepWidget import DecompositionResultsStepWidget
 from widgets.FolderContentWidget import FolderContentWidget
-from widgets.GridAssociationWidget import GridAssociationWidget
+from widgets.GridAssociationStepWidget import GridAssociationWidget
 from widgets.OpenFileStepWidget import OpenFileStepWidget
 
 
@@ -55,7 +56,7 @@ class MainWindow(QMainWindow):
         grid_layout.addWidget(separator, 1, 0, 1, 1)  # Row after FolderContentWidget
 
         # Schritt 1: Datei öffnen
-        step1 = OpenFileStepWidget(0, "Open .mat File(s)", "Select the .mat file containing your data.")
+        step1 = OpenFileStepWidget(1, "Open .mat File(s)", "Select the .mat file containing your data.")
         global_state.register_widget("step1", step1)
         self.steps.append(step1)
         grid_layout.addWidget(step1, 2, 0)
@@ -63,7 +64,7 @@ class MainWindow(QMainWindow):
         self.settingsDialog.settingsAccepted.connect(step1.check)
 
         # Schritt 2: Grid-Assoziationen
-        step2 = GridAssociationWidget(1)
+        step2 = GridAssociationWidget(2)
         global_state.register_widget("step2", step2)
         self.steps.append(step2)
         grid_layout.addWidget(step2, 3, 0)
@@ -71,12 +72,20 @@ class MainWindow(QMainWindow):
         self.settingsDialog.settingsAccepted.connect(step2.check)
 
         # Schritt 3: Kanal-Auswahl
-        step3 = ChannelSelectionStepWidget(2)
+        step3 = ChannelSelectionStepWidget(3)
         global_state.register_widget("step3", step3)
         self.steps.append(step3)
         grid_layout.addWidget(step3, 4, 0)
         step3.check()
         self.settingsDialog.settingsAccepted.connect(step3.check)
+
+        # Schritt 4: Descomposition
+        step4 = DecompositionResultsStepWidget(4, "Decomposition Results", f"This widget watches the decomposition path for file changes. Please perform decomposition manually and this application will detect the changes and you will be able to proceed.")
+        global_state.register_widget("step4", step4)
+        self.steps.append(step4)
+        grid_layout.addWidget(step4, 5, 0)
+        step4.check()
+        self.settingsDialog.settingsAccepted.connect(step4.check)
 
         # Connect the Steps
         step1.fileSelected.connect(step2.check)
@@ -87,16 +96,6 @@ class MainWindow(QMainWindow):
         # Disable all steps except the first
         for step in self.steps[1:]:
             step.setActionButtonsEnabled(False)
-
-    def enable_next_step(self, index):
-        """Enables the action button for the next step, if available."""
-        if index + 1 < len(self.steps):
-            self.steps[index + 1].setActionButtonsEnabled(True)
-
-    def mark_step_completed(self, step_index):
-        """Marks a step as completed and enables the next step."""
-        if step_index < len(self.steps):
-            self.steps[step_index].complete_step()
 
     def openPreferences(self):
         """Open the settings dialog."""
