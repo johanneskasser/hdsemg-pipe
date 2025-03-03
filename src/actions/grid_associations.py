@@ -2,6 +2,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+import math
 
 import numpy as np
 import scipy.io as sio
@@ -176,80 +177,67 @@ class AssociationDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(self, "Error", "Please enter an association name!")
             return
 
-        # Validate grid dimensions consistency (based on original grid values)
-        base_rows = selected_grids[0]['rows']
-        base_cols = selected_grids[0]['cols']
+        # --- Überprüfe, dass Zeitvektoren und Samplingfrequenzen übereinstimmen ---
+        base_time = selected_grids[0]['time']
+        base_sf = selected_grids[0]['sf']
         for grid in selected_grids[1:]:
-            if grid['rows'] != base_rows or grid['cols'] != base_cols:
-                error_msg = ("Cannot associate grids with different dimensions!\n"
-                             f"First grid: {base_rows}x{base_cols}\n"
-                             f"Conflict grid: {grid['rows']}x{grid['cols']}")
-                logger.error(error_msg)
-                QtWidgets.QMessageBox.critical(self, "Dimension Error", error_msg)
+            if not np.array_equal(base_time, grid['time']):
+                logger.error("Time vector mismatch detected for file: %s", grid['file_name'])
+                QtWidgets.QMessageBox.critical(self, "Time Error", "Time vectors mismatch between selected grids!")
+                return
+            if base_sf != grid['sf']:
+                logger.error("Sampling frequency mismatch detected for file: %s", grid['file_name'])
+                QtWidgets.QMessageBox.critical(self, "Sampling Frequency Error",
+                                               "Sampling frequency mismatch between selected grids!")
                 return
 
-        # Calculate new EMG grid dimensions
-        new_rows = base_rows
-        new_cols_total = base_cols * len(selected_grids)
-        logger.info("New combined EMG grid dimensions will be: %dx%d", new_rows, new_cols_total)
+        # --- Berechne die neue Grid-Größe anhand der Gesamtzahl der EMG-Kanäle ---
+        total_emg_channels = sum(len(grid['emg_indices']) for grid in selected_grids)
+        new_rows, new_cols = compute_new_grid_size(total_emg_channels)
+        logger.info("New combined EMG grid dimensions will be: %dx%d", new_rows, new_cols)
 
-        logger.info("Processing association '%s'", assoc_name)
         try:
-            # Initialize containers for EMG and reference parts.
+            # --- Initialisiere Container für die kombinierten Daten ---
             combined_emg_data = None
             combined_ref_data = None
             combined_emg_desc = []
             combined_ref_desc = []
             combined_grid_info = {}
-            emg_current_index = 0  # For indexing EMG channels in the new grid info
-            ref_current_index = 0  # For indexing reference channels in the combined reference block
-            combined_time = None
-            combined_sf = None
+            emg_current_index = 0  # Für die fortlaufende Kanalindizierung im neuen Grid
+            ref_current_index = 0
+            combined_time = base_time
+            combined_sf = base_sf
 
-            # Precompile regex to update grid dimension string in the description.
-            # This matches something like "HD10MM0804" where "10" is the scale and "0804" are dimensions.
+            # Regex zum Aktualisieren der Grid-Dimension im Beschreibungsstring
             pattern = re.compile(r"(HD\d{2}MM)(\d{2})(\d{2})")
 
             for grid in selected_grids:
                 logger.debug("Processing grid from file: %s", grid['file_name'])
-                # Validate time and sampling frequency consistency.
-                if combined_time is None:
-                    combined_time = grid['time']
-                    combined_sf = grid['sf']
-                else:
-                    if not np.array_equal(combined_time, grid['time']):
-                        logger.error("Time vector mismatch detected for file: %s", grid['file_name'])
-                        raise ValueError("Time vectors mismatch between selected grids!")
-                    if combined_sf != grid['sf']:
-                        logger.error("Sampling frequency mismatch detected for file: %s", grid['file_name'])
-                        raise ValueError("Sampling frequency mismatch between selected grids!")
 
-                # --- Extract EMG and Reference Data Separately ---
+                # --- EMG- und Referenzdaten extrahieren ---
                 emg_data_slice = grid['data'][:, grid['emg_indices']]
                 ref_data_slice = grid['data'][:, grid['ref_indices']]
                 logger.debug("Extracted %d EMG channels and %d reference channels from %s",
                              len(grid['emg_indices']), len(grid['ref_indices']), grid['file_name'])
 
-                # --- Generate Descriptions with Updated Grid Dimensions and File Origin ---
+                # --- Erzeuge aktualisierte EMG-Beschreibungen unter Verwendung der neuen Grid-Dimension ---
                 emg_desc_list = []
                 for idx in grid['emg_indices']:
                     desc_str = extract_description(grid, idx)
-                    # Replace the grid dimension part with the new dimensions
-                    new_dims = f"{new_rows:02d}{new_cols_total:02d}"
-                    # e.g., transforms "HD10MM0804" into "HD10MM{new_rows}{new_cols_total}"
+                    new_dims = f"{new_rows:02d}{new_cols:02d}"  # z.B. "0504" für ein 5x4-Grid
                     updated_desc = pattern.sub(r"\g<1>" + new_dims, desc_str)
                     emg_desc = f"{updated_desc}-{Path(grid['file_path']).stem}"
                     emg_desc_list.append(emg_desc)
                 logger.debug("Updated EMG descriptions for %s: %s", grid['file_name'], emg_desc_list)
 
-                # For reference channels, we keep the old label with file origin.
+                # --- Referenzbeschreibungen erstellen ---
                 ref_desc_list = []
                 for idx in grid['ref_indices']:
                     ref_desc = f"refSig-{Path(grid['file_path']).stem}-{idx + 1}"
                     ref_desc_list.append(ref_desc)
                 logger.debug("Reference descriptions for %s: %s", grid['file_name'], ref_desc_list)
 
-                # --- Combine Data from Each Grid ---
+                # --- Daten kombinieren ---
                 if combined_emg_data is None:
                     combined_emg_data = emg_data_slice
                     combined_ref_data = ref_data_slice
@@ -262,15 +250,16 @@ class AssociationDialog(QtWidgets.QDialog):
                 combined_emg_desc.extend(emg_desc_list)
                 combined_ref_desc.extend(ref_desc_list)
 
-                # --- Update Grid Info for EMG Part Only ---
+                # --- Update der Grid-Info für das jeweilige Grid ---
                 grid_key = f"{grid['rows']}x{grid['cols']}"
                 suffix = 1
                 while grid_key in combined_grid_info:
                     grid_key = f"{grid['rows']}x{grid['cols']}_{suffix}"
                     suffix += 1
                 combined_grid_info[grid_key] = {
-                    "rows": grid['rows'],
-                    "cols": len(emg_desc_list),  # number of EMG channels for this grid
+                    "original_rows": grid['rows'],
+                    "original_cols": grid['cols'],
+                    "allocated_emg_channels": len(emg_desc_list),
                     "emg_indices": list(range(emg_current_index, emg_current_index + len(grid['emg_indices']))),
                     "ied_mm": grid['ied_mm'],
                     "electrodes": grid['electrodes']
@@ -278,7 +267,7 @@ class AssociationDialog(QtWidgets.QDialog):
                 logger.debug("Updated grid info for %s: %s", grid_key, combined_grid_info[grid_key])
                 emg_current_index += len(grid['emg_indices'])
 
-                # --- Update Reference Signals Info Separately ---
+                # --- Update der Referenz-Signale ---
                 if "reference_signals" not in combined_grid_info:
                     combined_grid_info["reference_signals"] = []
                 combined_grid_info["reference_signals"].append({
@@ -288,15 +277,17 @@ class AssociationDialog(QtWidgets.QDialog):
                 logger.debug("Added reference signal info for file %s", grid['file_name'])
                 ref_current_index += len(grid['ref_indices'])
 
-            # --- Final Combination ---
-            # Combine the EMG block with the appended reference block.
+            # --- Gesamtinformation zur neuen EMG-Grid-Dimension hinzufügen ---
+            combined_grid_info["combined_emg_grid"] = {"rows": new_rows, "cols": new_cols}
+
+            # --- Endgültige Kombination ---
             combined_data = np.hstack((combined_emg_data, combined_ref_data))
             combined_description = combined_emg_desc + combined_ref_desc
             combined_description = np.array([[d] for d in combined_description], dtype=object)
             logger.debug("Final combined data shape: %s", combined_data.shape)
             logger.debug("Final combined description length: %d", len(combined_description))
 
-            # --- Save Files ---
+            # --- Dateien speichern ---
             workfolder = global_state.get_associated_grids_path()
             filename = format_filename(assoc_name)
             save_path = os.path.join(workfolder, filename)
@@ -344,6 +335,20 @@ def save_selection_to_mat(save_file_path, data, time, description, sampling_freq
     }
     sio.savemat(save_file_path, mat_dict)
     logger.info("MAT file saved successfully: %s", save_file_path)
+
+
+def compute_new_grid_size(total_channels):
+   """
+   Berechnet neue Grid-Dimensionen (rows, cols), sodass rows * cols == total_channels.
+   Es wird der Divisor gewählt, der der Quadratwurzel von total_channels am nächsten kommt.
+   """
+   # Ermittele alle Divisoren von total_channels
+   divisors = [i for i in range(1, total_channels + 1) if total_channels % i == 0]
+   sqrt_val = math.sqrt(total_channels)
+   best_divisor = min(divisors, key=lambda x: abs(x - sqrt_val))
+   new_cols = best_divisor
+   new_rows = total_channels // new_cols
+   return new_rows, new_cols
 
 
 import json

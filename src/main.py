@@ -1,10 +1,10 @@
-import os
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QTextEdit, QFrame
+
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QFrame
+
 from HDsEMG.pipeline.masterwindow.src.settings.settings_dialog import SettingsDialog
-from log.log_config import logger, setup_logging
-from actions.openfile import open_mat_file_or_folder, count_mat_files
 from actions.file_manager import start_file_processing
+from log.log_config import logger, setup_logging
 from state.global_state import global_state
 from widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
 from widgets.FolderContentWidget import FolderContentWidget
@@ -84,7 +84,6 @@ class MainWindow(QMainWindow):
         step2.stepCompleted.connect(step3.update)
         step2.stepCompleted.connect(self.folder_content_widget.update_folder_content)
 
-
         # Disable all steps except the first
         for step in self.steps[1:]:
             step.setActionButtonsEnabled(False)
@@ -110,11 +109,6 @@ class MainWindow(QMainWindow):
         """Start processing files and update the given step dynamically."""
         start_file_processing(step)
 
-    def decompose(self):
-        logger.info("Performing decomposition...")
-
-    def visualize(self):
-        logger.info("Visualizing results...")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
