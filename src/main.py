@@ -90,6 +90,7 @@ class MainWindow(QMainWindow):
         # Connect the Steps
         step1.fileSelected.connect(step2.check)
         step1.fileSelected.connect(self.folder_content_widget.update_folder_content)
+        step1.fileSelected.connect(step4.init_file_checking)
         step2.stepCompleted.connect(step3.update)
         step2.stepCompleted.connect(self.folder_content_widget.update_folder_content)
 
