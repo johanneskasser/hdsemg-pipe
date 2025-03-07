@@ -3,6 +3,7 @@ import os
 from log.log_config import logger
 import pickle
 import pandas as pd
+from state.global_state import global_state
 
 
 
@@ -79,3 +80,49 @@ def update_extras_in_pickle_file(filepath, extras_df):
         pickle.dump(data, f)
 
     logger.info(f"File {filepath} updated and saved successfully.")
+
+
+def get_json_file_path(channelselection_filepath: str) -> dict:
+    """
+    Given the path to a channel selection file (e.g., '/home/ex/test1.mat'),
+    constructs the corresponding JSON file paths:
+      - The channel selection JSON file is mandatory.
+      - The associated grids JSON file is optional.
+
+    The channel selection JSON is expected to be at the same base path (with a .json extension),
+    while the associated grids JSON file is expected to be located in the folder defined by
+    global_state.get_associated_grids_path() with the same base filename.
+
+    Returns:
+        A dictionary with keys:
+            - "channelselection_json": path to the channel selection JSON file.
+            - "associated_grids_json": path to the associated grids JSON file (if exists).
+
+    Raises:
+        FileNotFoundError: if the channel selection JSON file does not exist.
+    """
+    # Build channel selection JSON file path.
+    base, _ = os.path.splitext(channelselection_filepath)
+    channelselection_json_file = base + '.json'
+
+    # Build associated grids JSON file path.
+    base_filename = os.path.splitext(os.path.basename(channelselection_filepath))[0]
+    associated_grids_folder = global_state.get_associated_grids_path()
+    # Assuming the associated grids JSON file is named like "<base_filename>.json" inside the folder.
+    associated_grids_json_file = os.path.join(associated_grids_folder, base_filename + '.json')
+
+    # Check mandatory channel selection JSON file.
+    if not os.path.exists(channelselection_json_file):
+        raise FileNotFoundError(f"Channel selection JSON file not found: {channelselection_json_file}")
+
+    # Check associated grids JSON file. It's optional.
+    if not os.path.exists(associated_grids_json_file):
+        logger.info(f"Associated grids JSON file not found: {associated_grids_json_file}. "
+                    "Only channel selection file will be used.")
+        return {"channelselection_json": channelselection_json_file}
+
+    # Both files exist.
+    return {
+        "channelselection_json": channelselection_json_file,
+        "associated_grids_json": associated_grids_json_file
+    }
