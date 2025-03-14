@@ -1,11 +1,18 @@
+import io
+import json
 import shutil
 import os
+import gzip
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from actions.json_file_utilities import concatenate_grid_and_channel_info
 from log.log_config import logger
 import pickle
 import pandas as pd
 from state.global_state import global_state
-
-
 
 def copy_files(file_paths, destination_folder):
     """
@@ -41,7 +48,7 @@ OPENHDEMG_PICKLE_EXPECTED_KEYS = [
     'NUMBER_OF_MUS', 'BINARY_MUS_FIRING', 'EXTRAS'
 ]
 
-def validate_pickle_openhdemg_structure(data):
+def validate_openhdemg_structure(data):
     """
         Checks if the loaded data has all the expected keys.
         Raises an error if any key is missing.
@@ -53,26 +60,26 @@ def validate_pickle_openhdemg_structure(data):
         return
 
 
-def update_extras_in_pickle_file(filepath, extras_df):
+def update_extras_in_pickle_file(filepath, channelselection_file):
     """
     Opens the pickle file, validates its structure, updates the 'EXTRAS'
     field with a given pandas DataFrame, and then saves the file back.
 
     Parameters:
         filepath (str): Path to the pickle file.
-        extras_df (pd.DataFrame): DataFrame to store in the 'EXTRAS' field.
+        channelselection_file (str): Path to the associated channelselection .mat file.
     """
-    # Load the pickle file
-    with open(filepath, 'rb') as f:
-        data = pickle.load(f)
+
+    data = load_pickle_dynamically(filepath)
 
     # Validate the structure
-    validate_pickle_openhdemg_structure(data)
+    validate_openhdemg_structure(data)
 
     if not isinstance(data.get('EXTRAS'), pd.DataFrame):
         logger.debug("Note: 'EXTRAS' field is not a DataFrame. It will be replaced with the new DataFrame.")
 
     # Update the 'EXTRAS' field
+    extras_df = build_extras(channelselection_file)
     data['EXTRAS'] = extras_df
 
     # Save the updated file under the same name and location
@@ -81,6 +88,87 @@ def update_extras_in_pickle_file(filepath, extras_df):
 
     logger.info(f"File {filepath} updated and saved successfully.")
 
+def update_extras_in_json_file(filepath, channelselection_file):
+    """
+    Opens the json file, validates its structure, updates the 'EXTRAS'
+    field with a given pandas DataFrame, and then saves the file back.
+
+    Parameters:
+        filepath (str): Path to the json file.
+        channelselection_file (str): Path to the associated channelselection .mat file.
+    """
+    data = load_openhdemg_json(filepath)
+    validate_openhdemg_structure(data)
+
+    extras_df = build_extras(channelselection_file)
+    data['EXTRAS'] = extras_df
+
+    with open(filepath, 'wb') as f:
+        json.dump(data, f)
+
+    logger.info(f"File {filepath} updated and saved successfully.")
+
+def build_extras(channelselectionpath):
+    """
+    Build the extras field from channelselection path. Searches for
+    the .json metadata file from associated grids and channelselection
+    step file.
+
+    Parameters:
+        channelselectionpath (str): Path to the associated channelselection .mat file.
+    """
+
+    files = get_json_file_path(channelselectionpath)
+
+    # Check if both files exist:
+    if "associated_grids_json" in files and os.path.exists(files["associated_grids_json"]):
+        extras_dict = concatenate_grid_and_channel_info(files["channelselection_json"], files["associated_grids_json"])
+        return pd.DataFrame(extras_dict)
+    else:
+        with open(files["channelselection_json"], 'rb') as f:
+            extras_dict = json.load(f)
+        return pd.DataFrame(extras_dict)
+
+
+def load_openhdemg_json(json_file):
+    """
+    Loads an OpenHD-EMG JSON file and converts necessary fields to their correct data formats.
+    And decompresses the file using gzip.
+    Args:
+        json_file (str or Path): Path to the OpenHD-EMG JSON file.
+
+    Returns:
+        dict: A dictionary containing the decomposed HD-EMG data.
+    """
+    json_file = Path(json_file)
+
+    if not json_file.exists():
+        raise FileNotFoundError(f"File {json_file} not found.")
+
+    # Load the JSON file
+    with gzip.open(json_file, 'rt', encoding='utf-8') as f:
+        data = json.load(f)
+
+    # Convert stored data back into correct formats
+    if 'RAW_SIGNAL' in data and isinstance(data['RAW_SIGNAL'], list):
+        data['RAW_SIGNAL'] = pd.DataFrame(data['RAW_SIGNAL'])
+
+    if 'REF_SIGNAL' in data and isinstance(data['REF_SIGNAL'], list):
+        data['REF_SIGNAL'] = pd.DataFrame(data['REF_SIGNAL'])
+
+    if 'ACCURACY' in data and isinstance(data['ACCURACY'], list):
+        data['ACCURACY'] = pd.DataFrame(data['ACCURACY'])
+
+    if 'IPTS' in data and isinstance(data['IPTS'], list):
+        data['IPTS'] = pd.DataFrame(data['IPTS'])
+
+    if 'BINARY_MUS_FIRING' in data and isinstance(data['BINARY_MUS_FIRING'], list):
+        data['BINARY_MUS_FIRING'] = pd.DataFrame(data['BINARY_MUS_FIRING'])
+
+    if 'MUPULSES' in data and isinstance(data['MUPULSES'], list):
+        data['MUPULSES'] = [np.array(mup, dtype=np.int32) for mup in data['MUPULSES']]
+
+    return data
 
 def get_json_file_path(channelselection_filepath: str) -> dict:
     """
@@ -126,3 +214,30 @@ def get_json_file_path(channelselection_filepath: str) -> dict:
         "channelselection_json": channelselection_json_file,
         "associated_grids_json": associated_grids_json_file
     }
+
+
+def load_pickle_dynamically(filepath):
+    """Loads a pickle file and maps it to CUDA if available, otherwise CPU."""
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    with open(filepath, 'rb') as f:
+        data = DynamicUnpickler(f).load()
+
+    # Ensure all tensors are moved to the appropriate device
+    if isinstance(data, dict):
+        for key in data:
+            if isinstance(data[key], torch.Tensor):
+                data[key] = data[key].to(device)
+    elif isinstance(data, torch.Tensor):
+        data = data.to(device)
+
+    logger.info(f"Loaded pickle file {filepath} on {device}.")
+    return data
+
+
+class DynamicUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == 'torch.storage' and name == '_load_from_bytes':
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            return lambda b: torch.load(io.BytesIO(b), map_location=device)
+        return super().find_class(module, name)

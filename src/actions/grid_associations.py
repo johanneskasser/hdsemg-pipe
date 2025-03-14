@@ -51,6 +51,7 @@ class AssociationDialog(QtWidgets.QDialog):
                     })
                     logger.debug("Added grid %s from %s", grid_key, fn)
             except Exception as e:
+                logger.error(f"Failed to load {fp}: {str(e)}")
                 QtWidgets.QMessageBox.warning(self, "Loading Error", f"Failed to load {fp}:\n{str(e)}")
 
             logger.info("Total grids loaded: %d", len(self.grids))

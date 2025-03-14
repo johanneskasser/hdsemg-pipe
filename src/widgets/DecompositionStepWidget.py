@@ -3,7 +3,7 @@ import os
 from PyQt5.QtCore import pyqtSignal, QFileSystemWatcher
 from PyQt5.QtWidgets import QPushButton, QDialog
 
-from actions.file_utils import update_extras_in_pickle_file
+from actions.file_utils import update_extras_in_pickle_file, update_extras_in_json_file
 from log.log_config import logger
 from state.global_state import global_state
 from widgets.BaseStepWidget import BaseStepWidget
@@ -65,7 +65,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             return None
 
         for file in os.listdir(self.expected_folder):
-            if file.endswith(".mat") or file.endswith(".pkl"):
+            if file.endswith(".json") or file.endswith(".pkl"):
                 file_path = os.path.join(self.expected_folder, file)
                 logger.info(f"Result file {file_path} found.")
                 self.resultfiles.append(file_path)
@@ -93,11 +93,14 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         Calls the update_extras_in_pickle_file method with the channel selection info.
         """
         _, file_extension = os.path.splitext(file_path)
-        if file_extension == ".pkl" and file_path not in self.processed_files:
-            logger.info(f"Processing pickle file: {file_path} with channel selection: {channel_selection}")
+        if file_extension == ".pkl" or file_extension == ".json" and file_path not in self.processed_files:
+            logger.info(f"Processing {file_extension} file: {file_path} with channel selection: {channel_selection}")
             self.processed_files.append(file_path)
             try:
-                update_extras_in_pickle_file(file_path, channel_selection)
+                if file_extension == ".pkl":
+                    update_extras_in_pickle_file(file_path, channel_selection)
+                elif file_extension == ".json":
+                    update_extras_in_json_file(file_path, channel_selection)
                 self.btn_show_results.setEnabled(True)
                 self.btn_apply_mapping.setEnabled(False)
             except ValueError as e:
