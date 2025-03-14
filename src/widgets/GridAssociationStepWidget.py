@@ -1,4 +1,6 @@
-from PyQt5.QtWidgets import QPushButton, QDialog
+import os
+
+from PyQt5.QtWidgets import QPushButton, QDialog, QLabel
 
 from actions.file_utils import copy_files
 from config.config_enums import ChannelSelection
@@ -9,12 +11,38 @@ from config.config_manager import config
 from log.log_config import logger
 
 
+def check_target_directory():
+    """
+    Check if the target directory for associated grids exists and is not empty.
+
+    Returns:
+        bool: True if the directory exists and contains files, False otherwise.
+    """
+    dest_folder = global_state.get_associated_grids_path()
+    return os.path.isdir(dest_folder) and any(os.listdir(dest_folder))
+
+
 class GridAssociationWidget(BaseStepWidget):
+    """
+    Widget for managing grid associations in the application.
+
+    Attributes:
+        info_label (QLabel): Label displaying information to the user.
+    """
+
     def __init__(self, step_index):
+        """
+        Initialize the GridAssociationWidget.
+
+        Args:
+            step_index (int): The index of the step in the workflow.
+        """
         super().__init__(step_index, "Grid Association", "Create Grid Associations from the current File Pool.")
 
     def create_buttons(self):
-        """Create the buttons for the grid association"""
+        """
+        Create the buttons for the grid association step.
+        """
         btn_skip = QPushButton("Skip")
         btn_skip.clicked.connect(self.skip_step)
         self.buttons.append(btn_skip)
@@ -24,6 +52,9 @@ class GridAssociationWidget(BaseStepWidget):
         self.buttons.append(btn_associate)
 
     def skip_step(self):
+        """
+        Skip the grid association step by copying files to the destination folder.
+        """
         dest_folder = global_state.get_associated_grids_path()
         files = global_state.mat_files
         try:
@@ -36,14 +67,26 @@ class GridAssociationWidget(BaseStepWidget):
             return
 
     def start_association(self):
+        """
+        Start the grid association process by opening the AssociationDialog.
+        """
         files = global_state.mat_files
         dialog = AssociationDialog(files)
         if dialog.exec_() == QDialog.Accepted:
-            self.complete_step()
+            if check_target_directory():
+                self.complete_step()
+            else:
+                self.warn(
+                    "No files have been generated in this step. Please make sure to either generate Grid Associations or press \"Skip\"")
         else:
             self.error("Failed to complete step. Please consult logs for further information.")
 
     def check(self):
+        """
+        Check if the workfolder basepath is set in the configuration.
+
+        If the basepath is not set, disable the action buttons and show a warning.
+        """
         if config.get(ChannelSelection.WORKFOLDER_PATH) is None:
             self.warn("Workfolder Basepath is not set. Please set it in the Settings first to enable this step.")
             self.setActionButtonsEnabled(False)

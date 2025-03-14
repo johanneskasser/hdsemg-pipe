@@ -50,8 +50,11 @@ OPENHDEMG_PICKLE_EXPECTED_KEYS = [
 
 def validate_openhdemg_structure(data):
     """
-        Checks if the loaded data has all the expected keys.
-        Raises an error if any key is missing.
+    Checks if the loaded data has all the expected keys.
+    Raises an error if any key is missing.
+
+    :param data: Dictionary containing the data to be validated
+    :raises ValueError: If any expected key is missing from the data
     """
     missing_keys = [key for key in OPENHDEMG_PICKLE_EXPECTED_KEYS if key not in data]
     if missing_keys:
@@ -59,17 +62,14 @@ def validate_openhdemg_structure(data):
     else:
         return
 
-
 def update_extras_in_pickle_file(filepath, channelselection_file):
     """
     Opens the pickle file, validates its structure, updates the 'EXTRAS'
     field with a given pandas DataFrame, and then saves the file back.
 
-    Parameters:
-        filepath (str): Path to the pickle file.
-        channelselection_file (str): Path to the associated channelselection .mat file.
+    :param filepath: Path to the pickle file
+    :param channelselection_file: Path to the associated channelselection .mat file
     """
-
     data = load_pickle_dynamically(filepath)
 
     # Validate the structure
@@ -93,17 +93,28 @@ def update_extras_in_json_file(filepath, channelselection_file):
     Opens the json file, validates its structure, updates the 'EXTRAS'
     field with a given pandas DataFrame, and then saves the file back.
 
-    Parameters:
-        filepath (str): Path to the json file.
-        channelselection_file (str): Path to the associated channelselection .mat file.
+    :param filepath: Path to the json file
+    :param channelselection_file: Path to the associated channelselection .mat file
     """
     data = load_openhdemg_json(filepath)
     validate_openhdemg_structure(data)
 
     extras_df = build_extras(channelselection_file)
-    data['EXTRAS'] = extras_df
+    if 'EXTRAS' in data:
+        if isinstance(data['EXTRAS'], dict):
+            data['EXTRAS'].update(extras_df)
+        elif isinstance(data['EXTRAS'], str):
+            try:
+                extras_dict = json.loads(data['EXTRAS'])
+                extras_dict.update(extras_df)
+                data['EXTRAS'] = extras_dict
+            except json.JSONDecodeError:
+                logger.error("Failed to decode 'EXTRAS' field from string to JSON.")
+                data['EXTRAS'] = extras_df
+    else:
+        data['EXTRAS'] = extras_df
 
-    with open(filepath, 'wb') as f:
+    with gzip.open(filepath, 'wt', encoding='utf-8') as f:
         json.dump(data, f)
 
     logger.info(f"File {filepath} updated and saved successfully.")
@@ -114,31 +125,28 @@ def build_extras(channelselectionpath):
     the .json metadata file from associated grids and channelselection
     step file.
 
-    Parameters:
-        channelselectionpath (str): Path to the associated channelselection .mat file.
+    :param channelselectionpath: Path to the associated channelselection .mat file
+    :return: Dictionary containing the concatenated grid and channel information
     """
-
     files = get_json_file_path(channelselectionpath)
 
     # Check if both files exist:
     if "associated_grids_json" in files and os.path.exists(files["associated_grids_json"]):
         extras_dict = concatenate_grid_and_channel_info(files["channelselection_json"], files["associated_grids_json"])
-        return pd.DataFrame(extras_dict)
+        return extras_dict
     else:
         with open(files["channelselection_json"], 'rb') as f:
             extras_dict = json.load(f)
-        return pd.DataFrame(extras_dict)
-
+        return extras_dict
 
 def load_openhdemg_json(json_file):
     """
     Loads an OpenHD-EMG JSON file and converts necessary fields to their correct data formats.
     And decompresses the file using gzip.
-    Args:
-        json_file (str or Path): Path to the OpenHD-EMG JSON file.
 
-    Returns:
-        dict: A dictionary containing the decomposed HD-EMG data.
+    :param json_file: Path to the OpenHD-EMG JSON file
+    :return: Dictionary containing the decomposed HD-EMG data
+    :raises FileNotFoundError: If the JSON file does not exist
     """
     json_file = Path(json_file)
 
@@ -181,13 +189,9 @@ def get_json_file_path(channelselection_filepath: str) -> dict:
     while the associated grids JSON file is expected to be located in the folder defined by
     global_state.get_associated_grids_path() with the same base filename.
 
-    Returns:
-        A dictionary with keys:
-            - "channelselection_json": path to the channel selection JSON file.
-            - "associated_grids_json": path to the associated grids JSON file (if exists).
-
-    Raises:
-        FileNotFoundError: if the channel selection JSON file does not exist.
+    :param channelselection_filepath: Path to the channel selection file
+    :return: Dictionary with keys "channelselection_json" and "associated_grids_json"
+    :raises FileNotFoundError: If the channel selection JSON file does not exist
     """
     # Build channel selection JSON file path.
     base, _ = os.path.splitext(channelselection_filepath)
@@ -215,9 +219,13 @@ def get_json_file_path(channelselection_filepath: str) -> dict:
         "associated_grids_json": associated_grids_json_file
     }
 
-
 def load_pickle_dynamically(filepath):
-    """Loads a pickle file and maps it to CUDA if available, otherwise CPU."""
+    """
+    Loads a pickle file and maps it to CUDA if available, otherwise CPU.
+
+    :param filepath: Path to the pickle file
+    :return: Loaded data from the pickle file
+    """
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     with open(filepath, 'rb') as f:
@@ -234,9 +242,18 @@ def load_pickle_dynamically(filepath):
     logger.info(f"Loaded pickle file {filepath} on {device}.")
     return data
 
-
 class DynamicUnpickler(pickle.Unpickler):
+    """
+    Custom unpickler that dynamically maps torch storage to the appropriate device.
+    """
     def find_class(self, module, name):
+        """
+        Overrides the find_class method to handle torch storage loading.
+
+        :param module: Module name
+        :param name: Class name
+        :return: Loaded class or function
+        """
         if module == 'torch.storage' and name == '_load_from_bytes':
             device = "cuda" if torch.cuda.is_available() else "cpu"
             return lambda b: torch.load(io.BytesIO(b), map_location=device)

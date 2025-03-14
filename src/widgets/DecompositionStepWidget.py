@@ -107,7 +107,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
                 error_msg = f"Error processing {file_path}: {str(e)}"
                 self.error_messages.append(error_msg)
                 logger.error(error_msg)
-                self.warn(*self.error_messages)
+                self.warn("\n".join(self.error_messages))
 
     def init_file_checking(self):
         self.expected_folder = global_state.get_decomposition_path()
@@ -143,5 +143,6 @@ class DecompositionResultsStepWidget(BaseStepWidget):
                 file_name = os.path.basename(file_path)
                 if file_name in self.decomp_mapping:
                     chan_file = self.decomp_mapping[file_name]
+                    chan_file = os.path.join(global_state.get_channel_selection_path(), chan_file)
                     logger.info(f"Processing file {file_path} with channel selection file {chan_file}.")
                     self.process_file_with_channel(file_path, chan_file)
