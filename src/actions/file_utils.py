@@ -72,9 +72,6 @@ def update_extras_in_pickle_file(filepath, channelselection_file):
     """
     data = load_pickle_dynamically(filepath)
 
-    # Validate the structure
-    validate_openhdemg_structure(data)
-
     if not isinstance(data.get('EXTRAS'), pd.DataFrame):
         logger.debug("Note: 'EXTRAS' field is not a DataFrame. It will be replaced with the new DataFrame.")
 

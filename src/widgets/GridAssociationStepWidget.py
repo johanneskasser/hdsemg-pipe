@@ -3,7 +3,7 @@ import os
 from PyQt5.QtWidgets import QPushButton, QDialog, QLabel
 
 from actions.file_utils import copy_files
-from config.config_enums import ChannelSelection
+from config.config_enums import Settings
 from state.global_state import global_state
 from widgets.BaseStepWidget import BaseStepWidget
 from actions.grid_associations import AssociationDialog
@@ -87,7 +87,7 @@ class GridAssociationWidget(BaseStepWidget):
 
         If the basepath is not set, disable the action buttons and show a warning.
         """
-        if config.get(ChannelSelection.WORKFOLDER_PATH) is None:
+        if config.get(Settings.WORKFOLDER_PATH) is None:
             self.warn("Workfolder Basepath is not set. Please set it in the Settings first to enable this step.")
             self.setActionButtonsEnabled(False)
         else:

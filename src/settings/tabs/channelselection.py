@@ -2,7 +2,7 @@ import os
 
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog
 
-from config.config_enums import ChannelSelection
+from config.config_enums import Settings
 from config.config_manager import config
 
 def init(parent):
@@ -34,7 +34,7 @@ def init(parent):
     def update_validity():
         file_path = file_line_edit.text().strip()
         if os.path.exists(file_path) and file_path.lower().endswith('.exe') or file_path.lower().endswith('.py'):
-            config.set(ChannelSelection.EXECUTABLE_PATH, file_path)
+            config.set(Settings.EXECUTABLE_PATH, file_path)
             validity_indicator.setText("✔")
             validity_indicator.setStyleSheet("color: green; font-size: 20px;")
         else:
@@ -43,8 +43,8 @@ def init(parent):
 
     # Update validity whenever the text changes
     file_line_edit.textChanged.connect(update_validity)
-    if config.get(ChannelSelection.EXECUTABLE_PATH) is not None:
-        file_line_edit.setText(config.get(ChannelSelection.EXECUTABLE_PATH))
+    if config.get(Settings.EXECUTABLE_PATH) is not None:
+        file_line_edit.setText(config.get(Settings.EXECUTABLE_PATH))
         update_validity()
 
     def open_file_dialog():

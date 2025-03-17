@@ -1,11 +1,17 @@
 import os
+import subprocess
+import threading
+import time
 
 from PyQt5.QtCore import pyqtSignal, QFileSystemWatcher
 from PyQt5.QtWidgets import QPushButton, QDialog
 
 from actions.file_utils import update_extras_in_pickle_file, update_extras_in_json_file
+from config.config_enums import Settings
+from config.config_manager import config
 from log.log_config import logger
 from state.global_state import global_state
+from ui_elements.loadingbutton import LoadingButton
 from widgets.BaseStepWidget import BaseStepWidget
 from widgets.MappingDialog import MappingDialog
 
@@ -38,17 +44,38 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.btn_apply_mapping.setEnabled(False)
         self.buttons.append(self.btn_apply_mapping)
 
-        self.btn_show_results = QPushButton("Show Decomposition Results")
+        self.btn_show_results = LoadingButton("Show Decomposition Results")
         self.btn_show_results.clicked.connect(self.display_results)
         self.buttons.append(self.btn_show_results)
 
     def display_results(self):
         """Displays the decomposition results in the UI."""
         results_path = self.get_decomposition_results()
+        self.btn_show_results.start_loading()
         if not results_path:
             return
+        self.start_openhdemg(self.btn_show_results.stop_loading)
         self.resultsDisplayed.emit(results_path)
         self.complete_step()  # Mark step as complete
+
+    def start_openhdemg(self, on_started_callback=None):
+        """Starts the OpenHD-EMG application and optionally calls a callback when it appears to be running."""
+        venv_python = os.path.join(config.get(Settings.VENV_PATH), "Scripts", "python.exe")
+        logger.info(f"Starting openhdemg with {venv_python}")
+        command = [venv_python, "-m", "openhdemg.gui.openhdemg_gui"]
+        proc = subprocess.Popen(command)
+
+        # Starten eines Threads, der nach einer kurzen Zeit prüft, ob der Prozess noch läuft.
+        def poll_process():
+            time.sleep(2)
+            if proc.poll() is None:
+                logger.debug("OpenHD-EMG has started.")
+                if on_started_callback:
+                    on_started_callback()
+            else:
+                logger.error("OpenHD-EMG terminated unexpectedly.")
+
+        threading.Thread(target=poll_process, daemon=True).start()
 
     def get_decomposition_results(self):
         """
@@ -115,6 +142,15 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         logger.info(f"File checking initialized for folder: {self.expected_folder}")
 
     def check(self):
+        venv_openhdemg = config.get(Settings.VENV_PATH)
+        if venv_openhdemg is None or "":
+            self.warn("OpenHD-EMG virtual environment path is not set. Please set it in Settings first.")
+        elif not os.path.exists(venv_openhdemg):
+            self.warn("OpenHD-EMG virtual environment path does not exist.")
+        else:
+            self.clear_status()
+            self.setActionButtonsEnabled(True)
+
         try:
             self.expected_folder = global_state.get_decomposition_path()
             self.clear_status()

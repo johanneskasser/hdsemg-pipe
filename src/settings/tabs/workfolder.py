@@ -2,7 +2,7 @@ import os
 
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog
 
-from config.config_enums import ChannelSelection
+from config.config_enums import Settings
 from config.config_manager import config
 
 
@@ -41,7 +41,7 @@ def init_workfolder_widget(parent):
     def update_validity():
         folder_path = workfolder_line_edit.text().strip()
         if os.path.isdir(folder_path):
-            config.set(ChannelSelection.WORKFOLDER_PATH, folder_path)
+            config.set(Settings.WORKFOLDER_PATH, folder_path)
             validity_indicator.setText("✔")
             validity_indicator.setStyleSheet("color: green; font-size: 20px;")
         else:
@@ -50,8 +50,8 @@ def init_workfolder_widget(parent):
 
     # Update validity whenever the text changes
     workfolder_line_edit.textChanged.connect(update_validity)
-    if config.get(ChannelSelection.WORKFOLDER_PATH) is not None:
-        workfolder_line_edit.setText(config.get(ChannelSelection.WORKFOLDER_PATH))
+    if config.get(Settings.WORKFOLDER_PATH) is not None:
+        workfolder_line_edit.setText(config.get(Settings.WORKFOLDER_PATH))
         update_validity()
 
     def open_folder_dialog():

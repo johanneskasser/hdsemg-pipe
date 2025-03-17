@@ -2,7 +2,7 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QPushButton, QVBoxLayout
 
 from actions.openfile import open_mat_file_or_folder
-from config.config_enums import ChannelSelection
+from config.config_enums import Settings
 from config.config_manager import config
 from widgets.BaseStepWidget import BaseStepWidget
 
@@ -30,7 +30,7 @@ class OpenFileStepWidget(BaseStepWidget):
         self.fileSelected.emit(selected_path)
 
     def check(self):
-        if config.get(ChannelSelection.WORKFOLDER_PATH) is None:
+        if config.get(Settings.WORKFOLDER_PATH) is None:
             self.warn("Workfolder path is not set. Please set it in settings first.")
             self.setActionButtonsEnabled(False)
         else:

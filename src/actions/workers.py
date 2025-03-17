@@ -2,7 +2,7 @@ import os
 import subprocess
 from PyQt5.QtCore import QThread, pyqtSignal
 from config.config_manager import config
-from config.config_enums import ChannelSelection
+from config.config_enums import Settings
 from log.log_config import logger
 from state.global_state import global_state
 
@@ -18,7 +18,7 @@ class ChannelSelectionWorker(QThread):
         logger.info(f"Processing: {self.file_path}")
 
         # Get the executable path from the config
-        channelselection_exe_path = config.get(key=ChannelSelection.EXECUTABLE_PATH)
+        channelselection_exe_path = config.get(key=Settings.EXECUTABLE_PATH)
 
         # Check if the executable path is set
         if not channelselection_exe_path:

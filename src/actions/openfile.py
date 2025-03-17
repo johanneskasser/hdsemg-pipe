@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from PyQt5.QtWidgets import QFileDialog
 
-from config.config_enums import ChannelSelection
+from config.config_enums import Settings
 from config.config_manager import config
 from log.log_config import logger
 from state.global_state import global_state
@@ -18,7 +18,7 @@ def open_mat_file_or_folder(mode='file'):
     Returns:
         str or None: The selected file path or folder path, or None if the user cancels.
     """
-    workfolder_path = config.get(ChannelSelection.WORKFOLDER_PATH)
+    workfolder_path = config.get(Settings.WORKFOLDER_PATH)
 
     if mode == 'file':
         options = QFileDialog.Options()
