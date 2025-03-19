@@ -1,18 +1,19 @@
+import gzip
 import io
 import json
-import shutil
 import os
-import gzip
+import pickle
+import shutil
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 
 from actions.json_file_utilities import concatenate_grid_and_channel_info
 from log.log_config import logger
-import pickle
-import pandas as pd
 from state.global_state import global_state
+
 
 def copy_files(file_paths, destination_folder):
     """
@@ -41,12 +42,14 @@ def copy_files(file_paths, destination_folder):
 
     return copied_files
 
+
 # Expected Keys in a openhdemg ready file after decomp
 OPENHDEMG_PICKLE_EXPECTED_KEYS = [
     'SOURCE', 'FILENAME', 'RAW_SIGNAL', 'REF_SIGNAL', 'ACCURACY',
     'IPTS', 'MUPULSES', 'FSAMP', 'IED', 'EMG_LENGTH',
     'NUMBER_OF_MUS', 'BINARY_MUS_FIRING', 'EXTRAS'
 ]
+
 
 def validate_openhdemg_structure(data):
     """
@@ -62,6 +65,7 @@ def validate_openhdemg_structure(data):
     else:
         return
 
+
 def update_extras_in_pickle_file(filepath, channelselection_file):
     """
     Opens the pickle file, validates its structure, updates the 'EXTRAS'
@@ -76,14 +80,16 @@ def update_extras_in_pickle_file(filepath, channelselection_file):
         logger.debug("Note: 'EXTRAS' field is not a DataFrame. It will be replaced with the new DataFrame.")
 
     # Update the 'EXTRAS' field
-    extras_df = build_extras(channelselection_file)
-    data['EXTRAS'] = extras_df
+    extras_str = build_extras(channelselection_file)
+
+    data = update_extras(data, extras_str)
 
     # Save the updated file under the same name and location
     with open(filepath, 'wb') as f:
         pickle.dump(data, f)
 
     logger.info(f"File {filepath} updated and saved successfully.")
+
 
 def update_extras_in_json_file(filepath, channelselection_file):
     """
@@ -96,25 +102,43 @@ def update_extras_in_json_file(filepath, channelselection_file):
     data = load_openhdemg_json(filepath)
     validate_openhdemg_structure(data)
 
-    extras_df = build_extras(channelselection_file)
-    if 'EXTRAS' in data:
-        if isinstance(data['EXTRAS'], dict):
-            data['EXTRAS'].update(extras_df)
-        elif isinstance(data['EXTRAS'], str):
-            try:
-                extras_dict = json.loads(data['EXTRAS'])
-                extras_dict.update(extras_df)
-                data['EXTRAS'] = extras_dict
-            except json.JSONDecodeError:
-                logger.error("Failed to decode 'EXTRAS' field from string to JSON.")
-                data['EXTRAS'] = extras_df
-    else:
-        data['EXTRAS'] = extras_df
+    extras_str = build_extras(channelselection_file)
+
+    data = update_extras(data, extras_str)
 
     with gzip.open(filepath, 'wt', encoding='utf-8') as f:
         json.dump(data, f)
 
     logger.info(f"File {filepath} updated and saved successfully.")
+
+
+def update_extras(data, extras_str):
+    # Step 1: Parse the extras string into a dictionary
+    try:
+        new_extras = json.loads(extras_str)
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse extras from build_extras: %s", e)
+        new_extras = {}  # Fallback to empty dict or handle error appropriately
+    # Step 2: Update data['EXTRAS']
+    if 'EXTRAS' in data:
+        if isinstance(data['EXTRAS'], dict):
+            # Merge dictionaries if existing EXTRAS is a dict
+            data['EXTRAS'].update(new_extras)
+        elif isinstance(data['EXTRAS'], str):
+            # Parse existing string, merge, then keep as dict
+            try:
+                existing_extras = json.loads(data['EXTRAS'])
+                existing_extras.update(new_extras)
+                data['EXTRAS'] = existing_extras  # Store merged dict
+            except json.JSONDecodeError:
+                logger.error("Failed to decode existing 'EXTRAS' string")
+                data['EXTRAS'] = new_extras  # Override with new dict
+    else:
+        # No existing EXTRAS - store the parsed dict directly
+        data['EXTRAS'] = new_extras
+
+    return data
+
 
 def build_extras(channelselectionpath):
     """
@@ -123,18 +147,19 @@ def build_extras(channelselectionpath):
     step file.
 
     :param channelselectionpath: Path to the associated channelselection .mat file
-    :return: Dictionary containing the concatenated grid and channel information
+    :return: JSON string containing the concatenated grid and channel information
     """
     files = get_json_file_path(channelselectionpath)
 
     # Check if both files exist:
     if "associated_grids_json" in files and os.path.exists(files["associated_grids_json"]):
         extras_dict = concatenate_grid_and_channel_info(files["channelselection_json"], files["associated_grids_json"])
-        return extras_dict
     else:
         with open(files["channelselection_json"], 'rb') as f:
             extras_dict = json.load(f)
-        return extras_dict
+
+    return json.dumps(extras_dict)
+
 
 def load_openhdemg_json(json_file):
     """
@@ -174,6 +199,7 @@ def load_openhdemg_json(json_file):
         data['MUPULSES'] = [np.array(mup, dtype=np.int32) for mup in data['MUPULSES']]
 
     return data
+
 
 def get_json_file_path(channelselection_filepath: str) -> dict:
     """
@@ -216,6 +242,7 @@ def get_json_file_path(channelselection_filepath: str) -> dict:
         "associated_grids_json": associated_grids_json_file
     }
 
+
 def load_pickle_dynamically(filepath):
     """
     Loads a pickle file and maps it to CUDA if available, otherwise CPU.
@@ -239,10 +266,12 @@ def load_pickle_dynamically(filepath):
     logger.info(f"Loaded pickle file {filepath} on {device}.")
     return data
 
+
 class DynamicUnpickler(pickle.Unpickler):
     """
     Custom unpickler that dynamically maps torch storage to the appropriate device.
     """
+
     def find_class(self, module, name):
         """
         Overrides the find_class method to handle torch storage loading.
