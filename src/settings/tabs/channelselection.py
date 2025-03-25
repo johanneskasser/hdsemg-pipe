@@ -10,6 +10,15 @@ def init(parent):
     # Create a horizontal layout for the file specification row
     file_layout = QHBoxLayout()
 
+    # Information label
+    info_label = QLabel(
+        "Please provide the path to the executable file of the Channel Selection App.<br>"
+        "This file is used to launch the Channel Selection App from the HDsEMG pipeline.<br>"
+        "The channelselection App can be installed <a href=\"https://github.com/haripen/Neuromechanics_FHCW\">here.</a>"
+    )
+    info_label.setOpenExternalLinks(True)
+    layout.addWidget(info_label)
+
     # Label prompting for file path
     file_label = QLabel("File Path:")
     file_layout.addWidget(file_label)

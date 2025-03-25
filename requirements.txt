@@ -1,0 +1,5 @@
+PyQt5>=5.15.0
+matplotlib>=3.4.0
+numpy>=1.21.0
+scipy>=1.7.0
+pyinstaller>=6.11.0

@@ -1,0 +1,8 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource prefix="/">
+    <file>resources/extend.png</file>
+    <file>resources/frequency.png</file>
+    <file>resources/icon.png</file>
+    <file>resources/loading.gif</file>
+</qresource>
+</RCC>

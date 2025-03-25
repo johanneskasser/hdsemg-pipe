@@ -1,6 +1,8 @@
 from PyQt5.QtGui import QMovie, QIcon
 from PyQt5.QtWidgets import QPushButton
 
+import resources_rc
+
 class LoadingButton(QPushButton):
     """
     A QPushButton subclass that displays a loading animation when an action is in progress.
@@ -21,7 +23,7 @@ class LoadingButton(QPushButton):
         """
         super().__init__(text, parent)
         self.default_text = text
-        self.loading_movie = QMovie("resources/loading.gif")
+        self.loading_movie = QMovie(":/resources/loading.gif")
         self.loading_movie.frameChanged.connect(self.update_icon)
         self._is_loading = False
 

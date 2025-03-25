@@ -1,5 +1,6 @@
 import sys
 
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QFrame
 
 from HDsEMG.pipeline.masterwindow.src.settings.settings_dialog import SettingsDialog
@@ -12,6 +13,8 @@ from widgets.FolderContentWidget import FolderContentWidget
 from widgets.GridAssociationStepWidget import GridAssociationWidget
 from widgets.OpenFileStepWidget import OpenFileStepWidget
 
+import resources_rc
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -23,7 +26,7 @@ class MainWindow(QMainWindow):
 
     def initUI(self):
         self.setWindowTitle("HDsEMG Pipeline")
-        self.setWindowIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        self.setWindowIcon(QIcon(":/resources/icon.png"))
         self.setGeometry(100, 100, 600, 400)
 
         # Menu Bar
