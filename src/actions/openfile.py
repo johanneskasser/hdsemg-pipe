@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import QFileDialog
 
 from config.config_enums import Settings
 from config.config_manager import config
-from log.log_config import logger
+from _log.log_config import logger
 from state.global_state import global_state
 
 def open_mat_file_or_folder(mode='file'):

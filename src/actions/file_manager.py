@@ -1,7 +1,7 @@
 import os
 
 from actions.openfile import count_mat_files
-from log.log_config import logger
+from _log.log_config import logger
 from state.global_state import global_state
 from actions.workers import ChannelSelectionWorker
 

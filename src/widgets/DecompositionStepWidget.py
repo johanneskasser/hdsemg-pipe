@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import QPushButton, QDialog
 from actions.file_utils import update_extras_in_pickle_file, update_extras_in_json_file
 from config.config_enums import Settings
 from config.config_manager import config
-from log.log_config import logger
+from _log.log_config import logger
 from state.global_state import global_state
 from ui_elements.loadingbutton import LoadingButton
 from widgets.BaseStepWidget import BaseStepWidget

@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import QPushButton, QLabel
 from actions.file_manager import start_file_processing
 from config.config_enums import Settings
 from config.config_manager import config
-from log.log_config import logger
+from _log.log_config import logger
 from state.global_state import global_state
 from ui_elements.loadingbutton import LoadingButton
 from widgets.BaseStepWidget import BaseStepWidget

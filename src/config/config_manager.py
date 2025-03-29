@@ -2,7 +2,7 @@ import json
 import os
 import enum
 from threading import Lock
-from log.log_config import logger
+from _log.log_config import logger
 
 CONFIG_FILE = "config/config.json"
 

@@ -1,6 +1,6 @@
 # state/global_state.py
 import os
-from log.log_config import logger
+from _log.log_config import logger
 
 
 

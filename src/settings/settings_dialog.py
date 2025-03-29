@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
 from .tabs.channelselection import init as channelselectiontab_init
 from .tabs.workfolder import init_workfolder_widget
 from .tabs.openhdemg import init as init_openhdemg_widget
-from log.log_config import logger
+from _log.log_config import logger
 from PyQt5.QtCore import pyqtSignal
 
 class SettingsDialog(QDialog):

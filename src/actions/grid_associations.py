@@ -8,7 +8,7 @@ import numpy as np
 import scipy.io as sio
 from PyQt5 import QtWidgets, QtCore
 
-from log.log_config import logger
+from _log.log_config import logger
 from logic.file_io import load_mat_file
 from logic.grid import extract_grid_info
 from state.global_state import global_state

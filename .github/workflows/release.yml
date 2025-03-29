@@ -1,0 +1,54 @@
+name: Build and Release hdsemg-pipe
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.10.13
+
+      - name: Install dependencies
+        working-directory: ./src
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ../requirements.txt
+          pip install pyinstaller PyQt5
+
+      - name: Compile resources file
+        working-directory: ./src
+        run: |
+          if [ ! -f resources_rc.py ]; then
+            echo "Compiling resources.qrc to resources_rc.py"
+            pyrcc5 resources.qrc -o resources_rc.py
+          else
+            echo "resources_rc.py exists, skipping compilation"
+          fi
+
+      - name: Build executable
+        working-directory: ./src
+        run: |
+          pyinstaller --onefile --windowed --name hdsemg-pipe.exe main.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hdsemg-pipe
+          path: ./src/dist/hdsemg-pipe.exe
+
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: ./src/dist/hdsemg-pipe.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}

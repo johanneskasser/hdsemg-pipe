@@ -11,7 +11,7 @@ import pandas as pd
 import torch
 
 from actions.json_file_utilities import concatenate_grid_and_channel_info
-from log.log_config import logger
+from _log.log_config import logger
 from state.global_state import global_state
 
 

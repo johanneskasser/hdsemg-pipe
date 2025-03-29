@@ -3,9 +3,9 @@ import sys
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QFrame
 
-from HDsEMG.pipeline.masterwindow.src.settings.settings_dialog import SettingsDialog
+from settings.settings_dialog import SettingsDialog
 from actions.file_manager import start_file_processing
-from log.log_config import logger, setup_logging
+from _log.log_config import logger, setup_logging
 from state.global_state import global_state
 from widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
 from widgets.DecompositionStepWidget import DecompositionResultsStepWidget

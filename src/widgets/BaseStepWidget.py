@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import pyqtSignal
-from log.log_config import logger
+from _log.log_config import logger
 from state.global_state import global_state
 
 

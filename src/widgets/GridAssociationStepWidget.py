@@ -8,7 +8,7 @@ from state.global_state import global_state
 from widgets.BaseStepWidget import BaseStepWidget
 from actions.grid_associations import AssociationDialog
 from config.config_manager import config
-from log.log_config import logger
+from _log.log_config import logger
 
 
 def check_target_directory():
