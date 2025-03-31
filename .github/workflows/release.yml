@@ -47,3 +47,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
+          body: |
+              This is a release for version ${{ github.ref_name }}.
+              It contains the compiled executable for the hdsemg-pipe application.

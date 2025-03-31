@@ -25,7 +25,7 @@ class MainWindow(QMainWindow):
         self.initUI()
 
     def initUI(self):
-        self.setWindowTitle("HDsEMG Pipeline")
+        self.setWindowTitle("hdsemg-pipe")
         self.setWindowIcon(QIcon(":/resources/icon.png"))
         self.setGeometry(100, 100, 600, 400)
 

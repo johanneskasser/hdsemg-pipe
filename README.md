@@ -1,7 +1,8 @@
 <div align="center">
 <br>
   <img src="src/resources/icon.png" alt="App Icon" width="100" height="100"><br>
-    <h2 align="center">🧠 Masterwindow – HDsEMG Workflow Manager</h2>
+    <h2 align="center">🧠 hdsemg-pipe</h2>
+    <h3 align="center">HDsEMG Workflow Manager</h3>
 </div>
 
 A modular GUI application to guide users through high-density surface EMG (HDsEMG) processing, from raw signal acquisition to motor unit decomposition.
@@ -31,7 +32,7 @@ A modular GUI application to guide users through high-density surface EMG (HDsEM
 
 ## 🔍 Overview
 
-The Masterwindow is a central application within the [HDsEMG pipeline](https://github.com/haripen/Neuromechanics_FHCW), designed to streamline and partially automate the following stages:
+The hdsemg-pipe is a central application within the hdsemg-toolbox, designed to streamline and partially automate the following stages:
 
 - HDsEMG data loading and management  
 - Grid association and virtual grid construction  
@@ -46,7 +47,7 @@ All metadata are stored alongside standard formats such as `.json`, `.pkl`, and 
 
 - 📂 Load and manage multiple `.mat` HDsEMG files
 - 🔗 Associate files to form virtual grids
-- 🧼 Interface with the [Channelselection App](https://github.com/haripen/Neuromechanics_FHCW/HDsEMG/pipeline/channelselection) for channel cleaning
+- 🧼 Interface with the [hdsemg-select App](https://github.com/johanneskasser/hdsemg-pipe.git) for channel cleaning
 - 🧬 Record decomposed motor unit data with linked metadata
 - 💾 Save all results in a structured working directory
 
@@ -55,7 +56,7 @@ All metadata are stored alongside standard formats such as `.json`, `.pkl`, and 
 ## 🛠️ Installation
 
 ```bash
-git clone https://github.com/haripen/Neuromechanics_FHCW.git
+git clone https://github.com/johanneskasser/hdsemg-pipe.git
 cd Neuromechanics_FHCW/pipeline/masterwindow
 ```
 
@@ -112,12 +113,12 @@ Combine grids across multiple files to form a **virtual electrode grid**.
 
 ### 🧼 Step 3: Channel Cleaning
 
-Integrates the [Channelselection App](https://github.com/haripen/Neuromechanics_FHCW/HDsEMG/pipeline/channelselection) for semi-automated channel selection:
+Integrates the [hdsemg-select App](https://github.com/johanneskasser/hdsemg-select.git) for semi-automated channel selection:
 
 - Launches selection GUI with the correct file
 - Automatically stores cleaned result
 - Iterates through all virtual grids
-- Requires path to the external Channelselection executable to be set in **Settings**
+- Requires path to the external hdsemg-select executable to be set in **Settings**
 
 ---
 
@@ -137,7 +138,7 @@ After cleaning, the user can:
 The app is configurable through the Settings Dialog accessible from the top menu:
 
 - 📁 Working directory path
-- 📍 Path to external Channelselection executable
+- 📍 Path to external hdsemg-select executable
 - 🚀 Path to the openhdemg executable
 
 <div align="center">
@@ -162,13 +163,13 @@ working_directory/
 
 ## 🔗 Related Tools
 
-- [Channelselection App 🧼](https://github.com/haripen/Neuromechanics_FHCW/HDsEMG/pipeline/channelselection)
+- [hdsemg-select App 🧼](https://github.com/johanneskasser/hdsemg-select.git)
 - [openhdemg 🧬](https://github.com/GiacomoValliPhD/openhdemg)
 
 ---
 
 ## 📣 Contributions
 
-Pull requests, suggestions and ideas are welcome. If you encounter bugs or want to propose new features, please open an [issue](https://github.com/haripen/Neuromechanics_FHCW/issues).
+Pull requests, suggestions and ideas are welcome. If you encounter bugs or want to propose new features, please open an [issue](https://github.com/johanneskasser/hdsemg-pipe.git/issues).
 
 ---
