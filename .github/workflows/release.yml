@@ -19,31 +19,39 @@ jobs:
           python-version: 3.10
 
       - name: Install dependencies
+        working-directory: ./src
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r ../requirements.txt
           pip install pyinstaller PyQt5
-
-      - name: Compile Qt Resources
+        shell: cmd
+      - name: Compile resources file
+        working-directory: ./src
         run: |
-          if (!(Test-Path "src/resources_rc.py")) {
-            pyrcc5 src/resources.qrc -o src/resources_rc.py
-          }
+          if not exist resources_rc.py (
+            echo Compiling resources.qrc to resources_rc.py
+            pyrcc5 resources.qrc -o resources_rc.py
+          ) else (
+            echo resources_rc.py exists, skipping compilation
+          )
+        shell: cmd
 
       - name: Build executable
+        working-directory: ./src
         run: |
-          pyinstaller --onefile --windowed --name hdsemg-pipe.exe src/main.py
+          pyinstaller hdsemg-pipe.spec
+        shell: cmd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: hdsemg-pipe
-          path: dist/hdsemg-pipe.exe
+          path: ./src/dist/hdsemg-pipe.exe
 
       - name: Create release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: dist/hdsemg-pipe.exe
+          artifacts: ./src/dist/hdsemg-pipe.exe
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
