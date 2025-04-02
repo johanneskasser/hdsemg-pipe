@@ -24,7 +24,7 @@ def setup_logging():
                 'class': 'logging.FileHandler',
                 'formatter': 'standard',
                 'level': 'DEBUG',
-                'filename': '_log/masterwindow._log',
+                'filename': 'hdsemg-pipe.log',
                 'mode': 'a'
             }
         },
@@ -34,7 +34,7 @@ def setup_logging():
                 'level': 'DEBUG',
                 'propagate': True
             },
-            'masterw': {
+            'hdsemg-pipe': {
                 'handlers': ['console', 'file'],
                 'level': 'DEBUG',
                 'propagate': False
@@ -50,4 +50,4 @@ def setup_logging():
     logging.config.dictConfig(logging_config)
 
 # Create a global logger instance for the application.
-logger = logging.getLogger("masterw")
+logger = logging.getLogger("hdsemg-pipe")

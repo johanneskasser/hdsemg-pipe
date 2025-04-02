@@ -57,7 +57,6 @@ All metadata are stored alongside standard formats such as `.json`, `.pkl`, and 
 
 ```bash
 git clone https://github.com/johanneskasser/hdsemg-pipe.git
-cd Neuromechanics_FHCW/pipeline/masterwindow
 ```
 
 ### (Optional) Create a virtual environment:

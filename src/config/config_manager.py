@@ -34,6 +34,8 @@ class ConfigManager:
 
     def save_config(self):
         """Save configuration to JSON file."""
+        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+
         with open(CONFIG_FILE, "w") as f:
             json.dump(self.settings, f, indent=4)
 
