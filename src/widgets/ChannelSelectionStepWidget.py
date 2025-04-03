@@ -26,20 +26,20 @@ class ChannelSelectionStepWidget(BaseStepWidget):
 
     def start_processing(self):
         """Starts file processing and updates progress dynamically."""
-        if not global_state.associated_files:
+        if not global_state.cropped_files:
             logger.warning("No .mat files found.")
             return
         self.btn_select_channels.setEnabled(False)
         self.btn_select_channels.start_loading()
         self.processed_files = 0
-        self.total_files = len(global_state.associated_files)
+        self.total_files = len(global_state.cropped_files)
         self.update_progress(self.processed_files, self.total_files)
 
         start_file_processing(self)
 
     def update(self, path):
         """Updates the label when a file or folder is selected."""
-        self.total_files = len(global_state.associated_files)
+        self.total_files = len(global_state.cropped_files)
         self.update_progress(self.processed_files, self.total_files)
         if self.total_files != 0:
             self.setActionButtonsEnabled(True)

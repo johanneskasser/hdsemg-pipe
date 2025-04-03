@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import scipy.io as sio
 import numpy as np
+from _log.log_config import logger
 
 def load_mat_file(file_path):
     mat_data = sio.loadmat(file_path)
@@ -67,34 +68,14 @@ def save_selection_to_json(file_path, file_name, grid_info, channel_status, desc
     with open(file_path, "w") as f:
         json.dump(result, f, indent=4)
 
-def save_selection_to_mat(save_file_path, data, time, description, sampling_frequency, channel_status, file_name, grid_info):
-    """
-    Saves only the selected channels of the data array to a MATLAB file.
-
-    :param save_file_path: Path where the MAT file will be saved.
-    :param data: NumPy array containing the data.
-    :param time: NumPy array containing the time vector.
-    :param description: Any description data (as loaded from the original MAT file).
-    :param sampling_frequency: Sampling frequency (a number).
-    :param channel_status: List or array of booleans indicating the selection state of each channel.
-    :param file_name: The name of the original file.
-    :param grid_info: Dictionary containing info about all extracted grids.
-    """
-    # Filter the data array to include only the selected channels.
-    selected_data = data[:, channel_status]
-    selected_description = description[channel_status, :]
-
-    # Prepare a dictionary with the data you want to save.
+def save_selection_to_mat(save_file_path, data, time, description, sampling_frequency, file_name,
+                          grid_info):
+    logger.debug("Saving MAT file to %s", save_file_path)
     mat_dict = {
-        "Data": selected_data,
+        "Data": data,
         "Time": time,
-        "Description": selected_description,
+        "Description": description,
         "SamplingFrequency": sampling_frequency
     }
-
-    # Save the dictionary to a .mat file.
     sio.savemat(save_file_path, mat_dict)
-
-    # save json in same directory
-    json_file_path = Path(save_file_path).with_suffix('.json')
-    save_selection_to_json(json_file_path, file_name, grid_info, channel_status, description)
+    logger.info("MAT file saved successfully: %s", save_file_path)

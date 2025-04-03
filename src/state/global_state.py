@@ -8,8 +8,10 @@ class GlobalState:
     _instance = None  # Singleton instance
 
     def __init__(self):
+        self._widget_counter = 0
         self.mat_files = []
         self.associated_files = []
+        self.cropped_files = []
         self.workfolder = None
 
     def __new__(cls):
@@ -23,12 +25,18 @@ class GlobalState:
         self.mat_files = []
         self.associated_files = []
         self.workfolder = None
+        self._widget_counter = 0
+        self.cropped_files = []
         # Store widgets as a dictionary where each value is a dictionary
         # with two keys: "widget" and "completed_step".
         self.widgets = {}
 
-    def register_widget(self, name, widget):
-        """Register a widget globally along with its completion flag (False by default)."""
+    def register_widget(self, widget, name=None):
+        """Register a widget globally with an auto-generated name and a completion flag."""
+        if name is None:
+            name = f"step{self._widget_counter}"
+            self._widget_counter += 1
+
         self.widgets[name] = {"widget": widget, "completed_step": False}
 
     def update_widget(self, name, widget):
@@ -101,6 +109,12 @@ class GlobalState:
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
         path = os.path.join(self.workfolder, 'decomposition')
+        return os.path.normpath(path)
+
+    def get_cropped_signal_path(self):
+        if not self.workfolder:
+            raise ValueError("Workfolder is not set.")
+        path = os.path.join(self.workfolder, 'cropped_signal')
         return os.path.normpath(path)
 
 
