@@ -55,25 +55,31 @@ All metadata are stored alongside standard formats such as `.json`, `.pkl`, and 
 
 ## 🛠️ Installation
 
-```bash
-git clone https://github.com/johanneskasser/hdsemg-pipe.git
-```
+  ```bash
+  git clone https://github.com/johanneskasser/hdsemg-pipe.git
+  ```
 
 ### (Optional) Create a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows use: venv\Scripts\activate
-```
+  ```bash
+  python -m venv venv
+  source venv/bin/activate  # On Windows use: venv\Scripts\activate
+  ```
 
 ### Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+### Compile the resource file:
+  ```bash
+  cd ./src
+  pyrcc5 resources.qrc -o resources_rc.py
+  ```
 
 ### Run the application:
-```bash
-python src/main.py
-```
+  ```bash
+  python src/main.py
+  ```
 
 ---
 

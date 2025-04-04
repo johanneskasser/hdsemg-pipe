@@ -1,8 +1,8 @@
 import os
 
 import numpy as np
+from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QPushButton
-from PyQt5.uic.Compiler.qtproxies import QtWidgets
 
 from actions.crop_roi import CropRoiDialog
 from actions.file_utils import copy_files
@@ -72,18 +72,31 @@ class DefineRoiStepWidget(BaseStepWidget):
         # Save grid data with the selected thresholds using the save_selection_to_mat function.
         dest_folder = global_state.get_cropped_signal_path()
         for grid in self.roi_dialog.grids:
+            file_name = grid.get("file_name", f"{grid['grid_key']}.mat")
+            save_file_path = os.path.join(dest_folder, file_name)
+            if save_file_path in global_state.cropped_files:
+                logger.info("File %s already processed. Skipping.", file_name)
+                continue
             data = grid['data']
-            description = f"ROI selection with thresholds lower: {lower_val}, upper: {upper_val}"
+            description = grid.get("description", "")
             # Use the grid's sampling frequency if available; otherwise, assume 1.
             sampling_frequency = grid.get("sf", 1)
-            # Create a time vector based on the data length and sampling frequency.
-            time = np.arange(data.shape[0]) / sampling_frequency
-            file_name = grid.get("file_name", f"{grid['grid_key']}.mat")
-            save_file_path = os.path.join(dest_folder, f"{grid['grid_key']}_roi.mat")
-            save_selection_to_mat(save_file_path, data, time, description, sampling_frequency, file_name, grid)
+            # Create a full time vector based on the data length and sampling frequency.
+            full_time = np.arange(data.shape[0]) / sampling_frequency
+
+            # Retrieve the selected thresholds from the ROI dialog (assumed to be sample indices).
+            lower_val, upper_val = self.roi_dialog.selected_thresholds
+            lower_index = int(lower_val)
+            upper_index = int(upper_val)
+
+            # Slice the data and time vectors based on the thresholds.
+            roi_data = data[lower_index:upper_index, :]
+            roi_time = full_time[lower_index:upper_index]
+
+            save_selection_to_mat(save_file_path, roi_data, roi_time, description, sampling_frequency, file_name, grid)
             logger.info("Saved ROI data to %s", save_file_path)
             global_state.cropped_files.append(save_file_path)
-            QtWidgets.QMessageBox.information(self, "Success: Saved ROI data", description)
+        QtWidgets.QMessageBox.information(self, "Success: Saved ROI data", f"Saved {len(global_state.cropped_files)} files to {dest_folder}.")
         # Mark the step as complete.
         self.complete_step()
 

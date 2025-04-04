@@ -1,16 +1,15 @@
+import math
 import os
 import re
 from datetime import datetime
 from pathlib import Path
-import math
 
 import numpy as np
-import scipy.io as sio
 from PyQt5 import QtWidgets, QtCore
 
 from _log.log_config import logger
-from logic.file_io import load_mat_file, save_selection_to_mat
-from logic.grid import extract_grid_info, load_single_grid_file
+from logic.file_io import save_selection_to_mat
+from logic.grid import load_single_grid_file
 from state.global_state import global_state
 
 
@@ -218,7 +217,7 @@ class AssociationDialog(QtWidgets.QDialog):
                 # --- Referenzbeschreibungen erstellen ---
                 ref_desc_list = []
                 for idx in grid['ref_indices']:
-                    ref_desc = f"refSig-{Path(grid['file_path']).stem}-{idx + 1}"
+                    ref_desc = f"refSig-{Path(grid['file_path']).stem}-{grid['description'][idx]}"
                     ref_desc_list.append(ref_desc)
                 logger.debug("Reference descriptions for %s: %s", grid['file_name'], ref_desc_list)
 
@@ -310,17 +309,17 @@ class AssociationDialog(QtWidgets.QDialog):
 
 
 def compute_new_grid_size(total_channels):
-   """
-   Berechnet neue Grid-Dimensionen (rows, cols), sodass rows * cols == total_channels.
-   Es wird der Divisor gewählt, der der Quadratwurzel von total_channels am nächsten kommt.
-   """
-   # Ermittele alle Divisoren von total_channels
-   divisors = [i for i in range(1, total_channels + 1) if total_channels % i == 0]
-   sqrt_val = math.sqrt(total_channels)
-   best_divisor = min(divisors, key=lambda x: abs(x - sqrt_val))
-   new_cols = best_divisor
-   new_rows = total_channels // new_cols
-   return new_rows, new_cols
+    """
+    Berechnet neue Grid-Dimensionen (rows, cols), sodass rows * cols == total_channels.
+    Es wird der Divisor gewählt, der der Quadratwurzel von total_channels am nächsten kommt.
+    """
+    # Ermittele alle Divisoren von total_channels
+    divisors = [i for i in range(1, total_channels + 1) if total_channels % i == 0]
+    sqrt_val = math.sqrt(total_channels)
+    best_divisor = min(divisors, key=lambda x: abs(x - sqrt_val))
+    new_cols = best_divisor
+    new_rows = total_channels // new_cols
+    return new_rows, new_cols
 
 
 import json
@@ -379,6 +378,7 @@ def sanitize_filename(filename, replace_with="_"):
 
     return filename
 
+
 def extract_description(grid, idx):
     # Try to extract the description string robustly.
     try:
@@ -399,6 +399,7 @@ def extract_description(grid, idx):
         desc_str = ""
 
     return desc_str
+
 
 def format_filename(filename):
     # Replace spaces with underscores and make it lowercase
