@@ -2,7 +2,9 @@ import json
 from _log.log_config import logger
 import re
 import requests
+import uuid
 
+from logic.file_io import load_mat_file
 
 grid_data = None
 
@@ -108,3 +110,41 @@ def extract_grid_info(description):
                 grid_info[current_grid_key]["reference_signals"].append({"index": idx, "name": entry[0][0]})
 
     return grid_info
+
+
+def load_single_grid_file(file_path):
+    """
+    Load and process a single .mat file to extract grid information.
+
+    Args:
+        file_path (str): Path to the .mat file.
+
+    Returns:
+        list: A list of dictionaries, each representing a grid from the file.
+
+    Raises:
+        Exception: If any error occurs during loading or processing.
+    """
+    data, time, description, sf, fn, fs = load_mat_file(file_path)
+    grid_info = extract_grid_info(description)
+
+    grids = []
+    for grid_key, gi in grid_info.items():
+        grid_data = {
+            'file_path': file_path,
+            'file_name': fn,
+            'data': data,
+            'time': time,
+            'description': description,
+            'sf': sf,
+            'emg_indices': gi['indices'],
+            'ref_indices': [ref['index'] for ref in gi['reference_signals']],
+            'rows': gi['rows'],
+            'cols': gi['cols'],
+            'ied_mm': gi['ied_mm'],
+            'electrodes': gi['electrodes'],
+            'grid_key': grid_key,
+            'grid_uid': str(uuid.uuid4())
+        }
+        grids.append(grid_data)
+    return grids

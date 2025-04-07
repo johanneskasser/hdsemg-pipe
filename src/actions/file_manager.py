@@ -8,12 +8,12 @@ from actions.workers import ChannelSelectionWorker
 
 def start_file_processing(step):
     """Starts processing .mat files and updates the StepWidget dynamically."""
-    if not global_state.associated_files:
+    if not global_state.cropped_files:
         logger.warning("No .mat files found.")
         return
 
     step.processed_files = 0
-    step.total_files = len(global_state.associated_files)
+    step.total_files = len(global_state.cropped_files)
     step.update_progress(step.processed_files, step.total_files)
     folder_content_widget = global_state.get_widget("folder_content")
 
@@ -23,7 +23,7 @@ def process_next_file(step, folder_content_widget):
     """Processes the next .mat file in the list."""
 
     if step.processed_files < step.total_files:
-        file_path = global_state.associated_files[step.processed_files]
+        file_path = global_state.cropped_files[step.processed_files]
         logger.info(f"Processing file: {file_path}")
 
         step.worker = ChannelSelectionWorker(file_path)

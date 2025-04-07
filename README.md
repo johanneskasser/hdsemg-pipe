@@ -55,25 +55,31 @@ All metadata are stored alongside standard formats such as `.json`, `.pkl`, and 
 
 ## 🛠️ Installation
 
-```bash
-git clone https://github.com/johanneskasser/hdsemg-pipe.git
-```
+  ```bash
+  git clone https://github.com/johanneskasser/hdsemg-pipe.git
+  ```
 
 ### (Optional) Create a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows use: venv\Scripts\activate
-```
+  ```bash
+  python -m venv venv
+  source venv/bin/activate  # On Windows use: venv\Scripts\activate
+  ```
 
 ### Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+### Compile the resource file:
+  ```bash
+  cd ./src
+  pyrcc5 resources.qrc -o resources_rc.py
+  ```
 
 ### Run the application:
-```bash
-python src/main.py
-```
+  ```bash
+  python src/main.py
+  ```
 
 ---
 
@@ -86,6 +92,7 @@ python src/main.py
   - `associated_grids/`
   - `channelselection/`
   - `decomposition/`
+  - `cropped_signal/`
 
 📸 Example:  
 
@@ -110,7 +117,24 @@ Combine grids across multiple files to form a **virtual electrode grid**.
 
 ---
 
-### 🧼 Step 3: Channel Cleaning
+### 👓 Step 3: Define Region of Interest
+
+This step allows Users to select a Region of Interest for the data. Therefore, a Dialog is opened which will show the reference signals
+of the grids and select the region of interest. The selected region will be saved in the `cropped_signal/` folder.
+
+- **Interactive ROI Definition 🎚️:**  
+  - Use a RangeSlider on the x-axis to set ROI boundaries.
+  - Vertical lines update in real time to show thresholds.
+
+- **Data Saving 💾:**  
+  - Save the sliced ROI data (signal, time vector, metadata) to .mat files.
+
+📸 Example:
+<div align="center">
+  <img src="doc/resources/define_roi.png" alt="Define ROI" width="500">
+</div>
+
+### 🧼 Step 4: Channel Cleaning
 
 Integrates the [hdsemg-select App](https://github.com/johanneskasser/hdsemg-select.git) for semi-automated channel selection:
 
@@ -121,7 +145,7 @@ Integrates the [hdsemg-select App](https://github.com/johanneskasser/hdsemg-sele
 
 ---
 
-### 🧬 Step 4: Decomposition
+### 🧬 Step 5: Decomposition
 
 After cleaning, the user can:
 

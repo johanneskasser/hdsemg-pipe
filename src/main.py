@@ -9,6 +9,7 @@ from _log.log_config import logger, setup_logging
 from state.global_state import global_state
 from widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
 from widgets.DecompositionStepWidget import DecompositionResultsStepWidget
+from widgets.DefineRoiStepWidget import DefineRoiStepWidget
 from widgets.FolderContentWidget import FolderContentWidget
 from widgets.GridAssociationStepWidget import GridAssociationWidget
 from widgets.OpenFileStepWidget import OpenFileStepWidget
@@ -49,7 +50,7 @@ class MainWindow(QMainWindow):
 
         # Folder Content Widget
         self.folder_content_widget = FolderContentWidget()
-        global_state.register_widget("folder_content", self.folder_content_widget)
+        global_state.register_widget(name="folder_content", widget=self.folder_content_widget)
         grid_layout.addWidget(self.folder_content_widget, 0, 0, 1, 1)
 
         # Horizontal Line Separator
@@ -60,7 +61,7 @@ class MainWindow(QMainWindow):
 
         # Schritt 1: Datei öffnen
         step1 = OpenFileStepWidget(1, "Open .mat File(s)", "Select the .mat file containing your data.")
-        global_state.register_widget("step1", step1)
+        global_state.register_widget(step1)
         self.steps.append(step1)
         grid_layout.addWidget(step1, 2, 0)
         step1.check()
@@ -68,34 +69,43 @@ class MainWindow(QMainWindow):
 
         # Schritt 2: Grid-Assoziationen
         step2 = GridAssociationWidget(2)
-        global_state.register_widget("step2", step2)
+        global_state.register_widget(step2)
         self.steps.append(step2)
         grid_layout.addWidget(step2, 3, 0)
         step2.check()
         self.settingsDialog.settingsAccepted.connect(step2.check)
 
-        # Schritt 3: Kanal-Auswahl
-        step3 = ChannelSelectionStepWidget(3)
-        global_state.register_widget("step3", step3)
+        step3 = DefineRoiStepWidget(3)
+        global_state.register_widget(step3)
         self.steps.append(step3)
         grid_layout.addWidget(step3, 4, 0)
         step3.check()
         self.settingsDialog.settingsAccepted.connect(step3.check)
 
-        # Schritt 4: Descomposition
-        step4 = DecompositionResultsStepWidget(4, "Decomposition Results", f"This widget watches the decomposition path for file changes. Please perform decomposition manually and this application will detect the changes and you will be able to proceed.")
-        global_state.register_widget("step4", step4)
+        # Schritt 4: Kanal-Auswahl
+        step4 = ChannelSelectionStepWidget(4)
+        global_state.register_widget(step4)
         self.steps.append(step4)
         grid_layout.addWidget(step4, 5, 0)
         step4.check()
         self.settingsDialog.settingsAccepted.connect(step4.check)
 
+        # Schritt 4: Descomposition
+        step5 = DecompositionResultsStepWidget(4, "Decomposition Results", f"This widget watches the decomposition path for file changes. Please perform decomposition manually and this application will detect the changes and you will be able to proceed.")
+        global_state.register_widget(step5)
+        self.steps.append(step5)
+        grid_layout.addWidget(step5, 6, 0)
+        step5.check()
+        self.settingsDialog.settingsAccepted.connect(step5.check)
+
         # Connect the Steps
         step1.fileSelected.connect(step2.check)
         step1.fileSelected.connect(self.folder_content_widget.update_folder_content)
-        step1.fileSelected.connect(step4.init_file_checking)
-        step2.stepCompleted.connect(step3.update)
+        step1.fileSelected.connect(step5.init_file_checking)
+        step2.stepCompleted.connect(step3.check)
         step2.stepCompleted.connect(self.folder_content_widget.update_folder_content)
+        step3.stepCompleted.connect(step4.update)
+        step3.stepCompleted.connect(self.folder_content_widget.update_folder_content)
 
         # Disable all steps except the first
         for step in self.steps[1:]:

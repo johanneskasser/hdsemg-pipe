@@ -1,16 +1,15 @@
+import math
 import os
 import re
 from datetime import datetime
 from pathlib import Path
-import math
 
 import numpy as np
-import scipy.io as sio
 from PyQt5 import QtWidgets, QtCore
 
 from _log.log_config import logger
-from logic.file_io import load_mat_file
-from logic.grid import extract_grid_info
+from logic.file_io import save_selection_to_mat
+from logic.grid import load_single_grid_file
 from state.global_state import global_state
 
 
@@ -30,30 +29,14 @@ class AssociationDialog(QtWidgets.QDialog):
         for fp in self.file_paths:
             try:
                 logger.info("Loading file: %s", fp)
-                data, time, description, sf, fn, fs = load_mat_file(fp)
-                grid_info = extract_grid_info(description)
-
-                logger.debug("Extracted %d grids from %s", len(grid_info), fn)
-                for grid_key, gi in grid_info.items():
-                    self.grids.append({
-                        'file_path': fp,
-                        'file_name': fn,
-                        'data': data,
-                        'time': time,
-                        'description': description,
-                        'sf': sf,
-                        'emg_indices': gi['indices'],
-                        'ref_indices': [ref['index'] for ref in gi['reference_signals']],
-                        'rows': gi['rows'],
-                        'cols': gi['cols'],
-                        'ied_mm': gi['ied_mm'],
-                        'electrodes': gi['electrodes']
-                    })
-                    logger.debug("Added grid %s from %s", grid_key, fn)
+                grids = load_single_grid_file(fp)
+                self.grids.extend(grids)
+                logger.debug("Extracted %d grids from %s", len(grids), Path(fp).name)
+                for grid in grids:
+                    logger.debug("Added grid %s from %s", grid['grid_key'], grid['file_name'])
             except Exception as e:
-                logger.error(f"Failed to load {fp}: {str(e)}")
+                logger.error(f"Failed to load {fp}: {str(e)}", exc_info=True)
                 QtWidgets.QMessageBox.warning(self, "Loading Error", f"Failed to load {fp}:\n{str(e)}")
-
             logger.info("Total grids loaded: %d", len(self.grids))
 
     def init_ui(self):
@@ -234,7 +217,7 @@ class AssociationDialog(QtWidgets.QDialog):
                 # --- Referenzbeschreibungen erstellen ---
                 ref_desc_list = []
                 for idx in grid['ref_indices']:
-                    ref_desc = f"refSig-{Path(grid['file_path']).stem}-{idx + 1}"
+                    ref_desc = f"refSig-{Path(grid['file_path']).stem}-{grid['description'][idx]}"
                     ref_desc_list.append(ref_desc)
                 logger.debug("Reference descriptions for %s: %s", grid['file_name'], ref_desc_list)
 
@@ -325,31 +308,18 @@ class AssociationDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(self, "Error", f"Failed to save association:\n{str(e)}")
 
 
-def save_selection_to_mat(save_file_path, data, time, description, sampling_frequency, file_name,
-                          grid_info):
-    logger.debug("Saving MAT file to %s", save_file_path)
-    mat_dict = {
-        "Data": data,
-        "Time": time,
-        "Description": description,
-        "SamplingFrequency": sampling_frequency
-    }
-    sio.savemat(save_file_path, mat_dict)
-    logger.info("MAT file saved successfully: %s", save_file_path)
-
-
 def compute_new_grid_size(total_channels):
-   """
-   Berechnet neue Grid-Dimensionen (rows, cols), sodass rows * cols == total_channels.
-   Es wird der Divisor gewählt, der der Quadratwurzel von total_channels am nächsten kommt.
-   """
-   # Ermittele alle Divisoren von total_channels
-   divisors = [i for i in range(1, total_channels + 1) if total_channels % i == 0]
-   sqrt_val = math.sqrt(total_channels)
-   best_divisor = min(divisors, key=lambda x: abs(x - sqrt_val))
-   new_cols = best_divisor
-   new_rows = total_channels // new_cols
-   return new_rows, new_cols
+    """
+    Berechnet neue Grid-Dimensionen (rows, cols), sodass rows * cols == total_channels.
+    Es wird der Divisor gewählt, der der Quadratwurzel von total_channels am nächsten kommt.
+    """
+    # Ermittele alle Divisoren von total_channels
+    divisors = [i for i in range(1, total_channels + 1) if total_channels % i == 0]
+    sqrt_val = math.sqrt(total_channels)
+    best_divisor = min(divisors, key=lambda x: abs(x - sqrt_val))
+    new_cols = best_divisor
+    new_rows = total_channels // new_cols
+    return new_rows, new_cols
 
 
 import json
@@ -408,6 +378,7 @@ def sanitize_filename(filename, replace_with="_"):
 
     return filename
 
+
 def extract_description(grid, idx):
     # Try to extract the description string robustly.
     try:
@@ -428,6 +399,7 @@ def extract_description(grid, idx):
         desc_str = ""
 
     return desc_str
+
 
 def format_filename(filename):
     # Replace spaces with underscores and make it lowercase
