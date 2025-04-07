@@ -84,11 +84,6 @@ class DefineRoiStepWidget(BaseStepWidget):
             # Create a full time vector based on the data length and sampling frequency.
             full_time = np.arange(data.shape[0]) / sampling_frequency
 
-            # Retrieve the selected thresholds from the ROI dialog (assumed to be sample indices).
-            lower_val, upper_val = self.roi_dialog.selected_thresholds
-            lower_index = int(lower_val)
-            upper_index = int(upper_val)
-
             # Slice the data and time vectors based on the thresholds.
             roi_data = data[lower_index:upper_index, :]
             roi_time = full_time[lower_index:upper_index]
