@@ -2,6 +2,7 @@ import json
 from _log.log_config import logger
 import re
 import requests
+import uuid
 
 from logic.file_io import load_mat_file
 
@@ -142,7 +143,8 @@ def load_single_grid_file(file_path):
             'cols': gi['cols'],
             'ied_mm': gi['ied_mm'],
             'electrodes': gi['electrodes'],
-            'grid_key': grid_key
+            'grid_key': grid_key,
+            'grid_uid': str(uuid.uuid4())
         }
         grids.append(grid_data)
     return grids
