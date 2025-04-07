@@ -85,13 +85,13 @@ class DefineRoiStepWidget(BaseStepWidget):
             full_time = np.arange(data.shape[0]) / sampling_frequency
 
             # Slice the data and time vectors based on the thresholds.
-            roi_data = data[lower_index:upper_index, :]
-            roi_time = full_time[lower_index:upper_index]
+            roi_data = data[lower_val:upper_val, :]
+            roi_time = full_time[lower_val:upper_val]
 
             save_selection_to_mat(save_file_path, roi_data, roi_time, description, sampling_frequency, file_name, grid)
             logger.info("Saved ROI data to %s", save_file_path)
             global_state.cropped_files.append(save_file_path)
-        QtWidgets.QMessageBox.information(self, "Success: Saved ROI data", f"Saved {len(global_state.cropped_files)} files to {dest_folder}.")
+        QtWidgets.QMessageBox.information(self, "Success: Saved ROI data", f"Saved {len(global_state.cropped_files)} files to destination folder.")
         # Mark the step as complete.
         self.complete_step()
 
