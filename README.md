@@ -22,8 +22,9 @@ A modular GUI application to guide users through high-density surface EMG (HDsEM
 - [Usage Workflow](#-usage-workflow)
   - [📁 Step 1: Load Files](#-step-1-load-files)
   - [🔗 Step 2: Grid Association](#-step-2-grid-association)
-  - [🧼 Step 3: Channel Cleaning](#-step-3-channel-cleaning)
-  - [🧬 Step 4: Decomposition](#-step-4-decomposition)
+  - [👓 Step 3: Define Region of Interest](#-step-3-define-region-of-interest)
+  - [🧼 Step 4: Channel Cleaning](#-step-4-channel-cleaning)
+  - [🧬 Step 5: Decomposition](#-step-5-decomposition)
 - [🔧 Settings](#-settings)
 - [📂 Folder Structure](#-folder-structure)
 - [🔗 Related Tools](#-related-tools)
@@ -68,6 +69,15 @@ All metadata are stored alongside standard formats such as `.json`, `.pkl`, and 
 ### Install dependencies:
   ```bash
   pip install -r requirements.txt
+  ```
+
+### (Alternative) Set up with Conda:
+
+If you prefer using Conda for environment management, run the following:
+
+  ```bash
+  conda env create -f environment.yml
+  conda activate hdsemg-pipe
   ```
 
 ### Compile the resource file:
