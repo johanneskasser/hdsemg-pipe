@@ -70,6 +70,15 @@ All metadata are stored alongside standard formats such as `.json`, `.pkl`, and 
   pip install -r requirements.txt
   ```
 
+### (Alternative) Set up with Conda:
+
+If you prefer using Conda for environment management, run the following:
+
+  ```bash
+  conda env create -f environment.yml
+  conda activate hdsemg-pipe
+  ```
+
 ### Compile the resource file:
   ```bash
   cd ./src
