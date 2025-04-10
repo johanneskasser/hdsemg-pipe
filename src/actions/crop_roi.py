@@ -138,7 +138,7 @@ class CropRoiDialog(QtWidgets.QDialog):
         x_min, x_max = self.compute_data_xrange()
         self.x_slider = RangeSlider(
             slider_ax,
-            "Time Range",
+            label="",
             valmin=x_min,
             valmax=x_max,
             valinit=(x_min, x_max),
