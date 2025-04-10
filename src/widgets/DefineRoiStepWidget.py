@@ -84,9 +84,9 @@ class DefineRoiStepWidget(BaseStepWidget):
             # Create a full time vector based on the data length and sampling frequency.
             full_time = np.arange(data.shape[0]) / sampling_frequency
 
-            # Slice the data and time vectors based on the thresholds.
-            roi_data = data[lower_val:upper_val, :]
-            roi_time = full_time[lower_val:upper_val]
+            # Slice the data and time vectors based on the thresholds. Lower and upper bounds are inclusive.
+            roi_data = data[int(np.floor(lower_val)):int(np.ceil(upper_val)), :]
+            roi_time = full_time[int(np.floor(lower_val)):int(np.ceil(upper_val))]
 
             save_selection_to_mat(save_file_path, roi_data, roi_time, description, sampling_frequency, file_name, grid)
             logger.info("Saved ROI data to %s", save_file_path)
