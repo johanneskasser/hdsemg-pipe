@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
 from .tabs.channelselection import init as channelselectiontab_init
 from .tabs.workfolder import init_workfolder_widget
 from .tabs.openhdemg import init as init_openhdemg_widget
+from .tabs.log_setting import init as init_logging_widget
 from _log.log_config import logger
 from PyQt5.QtCore import pyqtSignal
 
@@ -27,16 +28,20 @@ class SettingsDialog(QDialog):
         self.channel_selection_tab = QWidget()
         self.workfolder_tab = QWidget()
         self.openhdemg_tab = QWidget()
+        self.logging_tab = QWidget()
 
         # Add tabs to the tab widget
         self.tab_widget.addTab(self.channel_selection_tab, "Channel Selection App")
         self.tab_widget.addTab(self.workfolder_tab, "Work Folder")
         self.tab_widget.addTab(self.openhdemg_tab, "openhdemg")
+        self.tab_widget.addTab(self.logging_tab, "Logging")
+
 
         # Initialize content for each tab
         self.initChannelSelectionTab()
         self.initWorkfolderTab()
         self.initOpenHDsEMGTab()
+        self.initLoggingTab()
 
         # Add standard dialog buttons (OK and Cancel)
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -58,6 +63,11 @@ class SettingsDialog(QDialog):
         """Initialize the 'openhdemg' settings tab."""
         openhdemg_tab = init_openhdemg_widget(self)
         self.openhdemg_tab.setLayout(openhdemg_tab)
+
+    def initLoggingTab(self):
+        """Initialize the 'Logging' settings tab."""
+        log_tab = init_logging_widget(self)
+        self.logging_tab.setLayout(log_tab)
 
     def accept(self):
         """Emit signal and close dialog when OK is pressed."""

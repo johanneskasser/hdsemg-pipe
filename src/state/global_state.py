@@ -117,6 +117,12 @@ class GlobalState:
         path = os.path.join(self.workfolder, 'cropped_signal')
         return os.path.normpath(path)
 
+    def get_original_files_path(self):
+        if not self.workfolder:
+            raise ValueError("Workfolder is not set.")
+        path = os.path.join(self.workfolder, 'original_files')
+        return os.path.normpath(path)
+
 
 # Access the singleton instance anywhere in the application
 global_state = GlobalState()

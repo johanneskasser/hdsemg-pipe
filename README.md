@@ -99,11 +99,14 @@ If you prefer using Conda for environment management, run the following:
 
 - Open one or multiple `.mat` files or folders containing HDsEMG recordings.
 - The app will create a working directory based on your **Settings** path and prepare subfolders for processing stages:
+  - `original_files/`
   - `associated_grids/`
   - `channelselection/`
   - `decomposition/`
   - `cropped_signal/`
-
+- When a folder or file is selected, it performs a preprocessing step which
+  - Performs a offset correction of the emg signals in the file (Removes the mean value of the signal so the signal oscillates around 0)
+  - These corrected signals are saved in the `original_files/` folder
 📸 Example:  
 
 <div align="center">
@@ -184,8 +187,12 @@ The app is configurable through the Settings Dialog accessible from the top menu
 
 ```
 working_directory/
+├── original_files/
+│   └── original_file_1..n.mat
 ├── associated_grids/
 │   └── [virtual_grid_files].mat + [virtual_grid_files].json
+├── cropped_signal/
+│   └── cropped_signals.mat
 ├── channelselection/
 │   └── [cleaned_channels].mat + [cleaned_channels].json
 ├── decomposition/
