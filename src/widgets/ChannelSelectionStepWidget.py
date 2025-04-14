@@ -22,7 +22,7 @@ class ChannelSelectionStepWidget(BaseStepWidget):
         self.btn_select_channels = LoadingButton("Select Channels")
         self.btn_select_channels.clicked.connect(self.start_processing)
         self.buttons.append(self.btn_select_channels)
-        self.layout.addWidget(self.btn_select_channels)
+        self.main_layout.addWidget(self.btn_select_channels)
 
     def start_processing(self):
         """Starts file processing and updates progress dynamically."""
