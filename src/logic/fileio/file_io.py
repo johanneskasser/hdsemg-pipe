@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from logic.fileio.matlab_file_io import load_mat_file
+from logic.fileio.otb_4_file_io import load_otb4_file
 from logic.fileio.otb_plus_file_io import load_otb_file
 
 
@@ -12,7 +13,8 @@ def load_file(filepath):
 
     Supported file types:
     - `.mat`: MATLAB files
-    - `.otb`, `.otb+`, `.zip`, `.tar`: OTB+ and related files
+    - `.otb+`: OTB+ and related files
+    - `.otb4`: OTB4 and related files
 
     Args:
         filepath (str): The path to the file to be loaded.
@@ -32,8 +34,10 @@ def load_file(filepath):
     file_suffix = Path(filepath).suffix
     if file_suffix == ".mat":
         data, time, description, sampling_frequency, file_name, file_size = load_mat_file(filepath)
-    elif file_suffix == ".otb+":
+    elif file_suffix in [".otb+", ".otb"]:
         data, time, description, sampling_frequency, file_name, file_size = load_otb_file(filepath)
+    elif file_suffix == ".otb4":
+        data, time, description, sampling_frequency, file_name, file_size = load_otb4_file(filepath)
     else:
         raise ValueError(f"Unsupported file type: {file_suffix}")
 

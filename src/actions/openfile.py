@@ -33,7 +33,7 @@ def open_file_or_folder(mode='file'):
             None,
             "Select a File",
             os.getcwd(),  # Set a valid initial directory
-            "MAT Files (*.mat);;OTB Files (*.otb+);;All Files (*)",  # Corrected filter string
+            "MAT Files (*.mat);;OTB Files (*.otb+);;OTB4 Files (*.otb4);;All Files (*)",  # Corrected filter string
             options=options
         )
         logger.debug(f"File selected: {file_path}")
