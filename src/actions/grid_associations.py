@@ -8,7 +8,7 @@ import numpy as np
 from PyQt5 import QtWidgets, QtCore
 
 from _log.log_config import logger
-from logic.file_io import save_selection_to_mat
+from logic.fileio.matlab_file_io import save_selection_to_mat
 from logic.grid import load_single_grid_file
 from state.global_state import global_state
 

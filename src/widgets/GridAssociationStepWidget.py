@@ -56,7 +56,7 @@ class GridAssociationWidget(BaseStepWidget):
         Skip the grid association step by copying files to the destination folder.
         """
         dest_folder = global_state.get_associated_grids_path()
-        files = global_state.mat_files
+        files = global_state.original_files
         try:
             global_state.associated_files = copy_files(files, dest_folder)
             self.complete_step()
@@ -70,7 +70,7 @@ class GridAssociationWidget(BaseStepWidget):
         """
         Start the grid association process by opening the AssociationDialog.
         """
-        files = global_state.mat_files
+        files = global_state.original_files
         dialog = AssociationDialog(files)
         if dialog.exec_() == QDialog.Accepted:
             if check_target_directory():

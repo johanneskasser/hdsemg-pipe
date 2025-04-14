@@ -1,10 +1,9 @@
-import json
 from _log.log_config import logger
 import re
 import requests
 import uuid
 
-from logic.file_io import load_mat_file
+from logic.fileio.file_io import load_file
 
 grid_data = None
 
@@ -125,7 +124,7 @@ def load_single_grid_file(file_path):
     Raises:
         Exception: If any error occurs during loading or processing.
     """
-    data, time, description, sf, fn, fs = load_mat_file(file_path)
+    data, time, description, sf, fn, fs = load_file(file_path)
     grid_info = extract_grid_info(description)
 
     grids = []
