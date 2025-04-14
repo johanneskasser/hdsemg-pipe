@@ -1,13 +1,15 @@
 import os
 from datetime import datetime
+
 from PyQt5.QtWidgets import QFileDialog
 
+from _log.log_config import logger
 from config.config_enums import Settings
 from config.config_manager import config
-from _log.log_config import logger
 from logic.file_io import load_mat_file, save_selection_to_mat
-from logic.grid import load_single_grid_file, extract_grid_info
+from logic.grid import extract_grid_info
 from state.global_state import global_state
+
 
 def open_mat_file_or_folder(mode='file'):
     """
@@ -36,7 +38,8 @@ def open_mat_file_or_folder(mode='file'):
         if file_path:
             create_work_folder(workfolder_path, file_path)
             pre_process_files([file_path])
-            new_file = global_state.mat_files[0] # here we can safely assume that the first file is the one we want and it exists
+            new_file = global_state.mat_files[
+                0]  # here we can safely assume that the first file is the one we want and it exists
         return file_path if file_path else None
 
     elif mode == 'folder':
@@ -57,13 +60,15 @@ def open_mat_file_or_folder(mode='file'):
     else:
         raise ValueError("Mode must be either 'file' or 'folder'")
 
+
 def count_mat_files(folder_path):
     """Returns the number of .mat files in a folder"""
     if not folder_path or not os.path.isdir(folder_path):
         return 0
     return len([f for f in os.listdir(folder_path) if f.endswith('.mat')])
 
-def create_work_folder(workfolder_path, file_path = None):
+
+def create_work_folder(workfolder_path, file_path=None):
     """Creates a new folder in the workfolder based on the file name."""
     if not workfolder_path:
         logger.error("Workfolder path is not set.")
@@ -81,7 +86,6 @@ def create_work_folder(workfolder_path, file_path = None):
         new_folder_path = os.path.join(workfolder_path, foldername)
         new_folder_path = os.path.normpath(new_folder_path)  # Normalize path
 
-
     try:
         os.makedirs(new_folder_path, exist_ok=True)
         logger.info(f"Created folder: {new_folder_path}")
@@ -89,6 +93,7 @@ def create_work_folder(workfolder_path, file_path = None):
         create_sub_work_folders(new_folder_path)
     except Exception as e:
         logger.error(f"Failed to create folder {new_folder_path}: {e}")
+
 
 def create_sub_work_folders(workfolder_path):
     if not workfolder_path or not os.path.isdir(workfolder_path):
@@ -126,20 +131,26 @@ def create_sub_work_folders(workfolder_path):
     except Exception as e:
         logger.error(f"Failed to create sub-folder: {e}")
 
+
 def pre_process_files(filepaths):
     for file in filepaths:
         logger.info(f"Pre-processing file: {file}")
         data, time, description, sf, fn, fs = load_mat_file(file)
         grid_info = extract_grid_info(description)
-        # Substract Mean from data to remove DC offset and oscillate around 0
-        for grid in grid_info:
-            for ch_index in grid_info[grid]['indices']:
+
+        # Subtract Mean from data to remove DC offset so that signals oscillate around zero
+        for grid_key, grid_data in grid_info.items():
+            for ch_index in grid_data['indices']:
                 channel_mean = data[:, ch_index].mean()
+                logger.debug(f"Grid: {grid_key}, Channel Index: {ch_index}, Mean Before Subtraction: {channel_mean}")
                 data[:, ch_index] -= channel_mean
+                logger.debug(f"Grid: {grid_key}, Channel Index: {ch_index}, Mean After Subtraction: {data[:, ch_index].mean()}")
+
         # Save the pre-processed data to the original files folder
         logger.info(f"Finished pre-processing file: {file}")
         original_files_foldername = global_state.get_original_files_path()
         new_file_path = os.path.join(original_files_foldername, os.path.basename(file))
-        save_selection_to_mat(new_file_path, data, time, description, sf, fn ,grid_info)
+        save_selection_to_mat(new_file_path, data, time, description, sf, fn, grid_info)
         logger.info(f"Saved pre-processed file to: {new_file_path}")
         global_state.mat_files.append(new_file_path)
+
