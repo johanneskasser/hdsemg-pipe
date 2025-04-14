@@ -8,7 +8,7 @@ import numpy as np
 from PyQt5 import QtWidgets, QtCore
 
 from _log.log_config import logger
-from logic.file_io import save_selection_to_mat
+from logic.fileio.matlab_file_io import save_selection_to_mat
 from logic.grid import load_single_grid_file
 from state.global_state import global_state
 
@@ -277,7 +277,7 @@ class AssociationDialog(QtWidgets.QDialog):
             save_path = os.path.join(workfolder, filename)
             logger.info("Saving association '%s' to MAT file: %s", assoc_name, save_path)
 
-            save_selection_to_mat(
+            save_path = save_selection_to_mat(
                 save_path,
                 combined_data,
                 combined_time,

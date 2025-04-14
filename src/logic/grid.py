@@ -1,10 +1,11 @@
-import json
+import numpy as np
+
 from _log.log_config import logger
 import re
 import requests
 import uuid
 
-from logic.file_io import load_mat_file
+from logic.fileio.file_io import load_file
 
 grid_data = None
 
@@ -78,7 +79,7 @@ def extract_grid_info(description):
     pattern = re.compile(r"HD(\d{2})MM(\d{2})(\d{2})")
 
     for idx, entry in enumerate(description):
-        match = pattern.search(entry[0][0])
+        match = pattern.search(handle_entry(entry))
         if match:
             # Extract grid details
             scale_mm = int(match.group(1))
@@ -125,7 +126,7 @@ def load_single_grid_file(file_path):
     Raises:
         Exception: If any error occurs during loading or processing.
     """
-    data, time, description, sf, fn, fs = load_mat_file(file_path)
+    data, time, description, sf, fn, fs = load_file(file_path)
     grid_info = extract_grid_info(description)
 
     grids = []
@@ -148,3 +149,19 @@ def load_single_grid_file(file_path):
         }
         grids.append(grid_data)
     return grids
+
+def handle_entry(entry):
+    """
+    Since entry can either be a array or a string, this function handles both cases and returns the entry as a string.
+    Args:
+        entry: input data from desc array
+
+    Returns: str of the entry
+
+    """
+    if isinstance(entry, str):
+        return entry
+    elif isinstance(entry, np.ndarray):
+        return entry[0][0]
+    else:
+        raise ValueError(f"Unsupported entry type: {type(entry)}. Expected str or np.ndarray.")

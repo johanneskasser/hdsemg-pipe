@@ -1,7 +1,7 @@
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QPushButton, QVBoxLayout
 
-from actions.openfile import open_mat_file_or_folder
+from actions.openfile import open_file_or_folder
 from config.config_enums import Settings
 from config.config_manager import config
 from widgets.BaseStepWidget import BaseStepWidget
@@ -23,7 +23,7 @@ class OpenFileStepWidget(BaseStepWidget):
 
     def select_file_or_folder(self, mode):
         """Datei oder Ordner auswählen und global speichern."""
-        selected_path = open_mat_file_or_folder(mode)
+        selected_path = open_file_or_folder(mode)
         if not selected_path:
             return  # Nutzer hat Abbrechen gedrückt
         self.complete_step()  # Schritt als abgeschlossen markieren

@@ -8,7 +8,7 @@ from actions.crop_roi import CropRoiDialog
 from actions.file_utils import copy_files
 from config.config_enums import Settings
 from config.config_manager import config
-from logic.file_io import save_selection_to_mat
+from logic.fileio.matlab_file_io import save_selection_to_mat
 from state.global_state import global_state
 from widgets.BaseStepWidget import BaseStepWidget
 from _log.log_config import logger
@@ -88,7 +88,7 @@ class DefineRoiStepWidget(BaseStepWidget):
             roi_data = data[int(np.floor(lower_val)):int(np.ceil(upper_val)), :]
             roi_time = full_time[int(np.floor(lower_val)):int(np.ceil(upper_val))]
 
-            save_selection_to_mat(save_file_path, roi_data, roi_time, description, sampling_frequency, file_name, grid)
+            save_file_path = save_selection_to_mat(save_file_path, roi_data, roi_time, description, sampling_frequency, file_name, grid)
             logger.info("Saved ROI data to %s", save_file_path)
             global_state.cropped_files.append(save_file_path)
         QtWidgets.QMessageBox.information(self, "Success: Saved ROI data", f"Saved {len(global_state.cropped_files)} files to destination folder.")

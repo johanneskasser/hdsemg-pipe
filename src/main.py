@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         grid_layout.addWidget(separator, 1, 0, 1, 1)  # Row after FolderContentWidget
 
         # Schritt 1: Datei öffnen
-        step1 = OpenFileStepWidget(1, "Open .mat File(s)", "Select the .mat file containing your data.")
+        step1 = OpenFileStepWidget(1, "Open File(s)", "Select the file containing your data.")
         global_state.register_widget(step1)
         self.steps.append(step1)
         grid_layout.addWidget(step1, 2, 0)

@@ -1,22 +1,24 @@
 import os
 from datetime import datetime
+from pathlib import Path
 
 from PyQt5.QtWidgets import QFileDialog
 
 from _log.log_config import logger
 from config.config_enums import Settings
 from config.config_manager import config
-from logic.file_io import load_mat_file, save_selection_to_mat
+from logic.fileio.file_io import load_file
+from logic.fileio.matlab_file_io import save_selection_to_mat
 from logic.grid import extract_grid_info
 from state.global_state import global_state
 
 
-def open_mat_file_or_folder(mode='file'):
+def open_file_or_folder(mode='file'):
     """
-    Opens a dialog to either select a .mat file or choose a folder.
+    Opens a dialog to either select a file or choose a folder.
 
     Parameters:
-        mode (str): Either 'file' (to open a .mat file) or 'folder' (to select a folder).
+        mode (str): Either 'file' (to open a file) or 'folder' (to select a folder).
         on_complete (function): A function called when the user presses the close button.
 
     Returns:
@@ -26,19 +28,19 @@ def open_mat_file_or_folder(mode='file'):
 
     if mode == 'file':
         options = QFileDialog.Options()
-        # Optionally set options, for example: options |= QFileDialog.DontUseNativeDialog
+        options |= QFileDialog.DontUseNativeDialog  # Use Qt's file dialog for consistent behavior
         file_path, _ = QFileDialog.getOpenFileName(
             None,
-            "Select a MATLAB File",
-            "",
-            "MAT Files (*.mat);;All Files (*)",
+            "Select a File",
+            os.getcwd(),  # Set a valid initial directory
+            "MAT Files (*.mat);;OTB Files (*.otb+);;OTB4 Files (*.otb4);;All Files (*)",  # Corrected filter string
             options=options
         )
         logger.debug(f"File selected: {file_path}")
         if file_path:
             create_work_folder(workfolder_path, file_path)
             pre_process_files([file_path])
-            new_file = global_state.mat_files[
+            new_file = global_state.original_files[
                 0]  # here we can safely assume that the first file is the one we want and it exists
         return file_path if file_path else None
 
@@ -135,7 +137,7 @@ def create_sub_work_folders(workfolder_path):
 def pre_process_files(filepaths):
     for file in filepaths:
         logger.info(f"Pre-processing file: {file}")
-        data, time, description, sf, fn, fs = load_mat_file(file)
+        data, time, description, sf, fn, fs = load_file(file)
         grid_info = extract_grid_info(description)
 
         # Subtract Mean from data to remove DC offset so that signals oscillate around zero
@@ -150,7 +152,7 @@ def pre_process_files(filepaths):
         logger.info(f"Finished pre-processing file: {file}")
         original_files_foldername = global_state.get_original_files_path()
         new_file_path = os.path.join(original_files_foldername, os.path.basename(file))
-        save_selection_to_mat(new_file_path, data, time, description, sf, fn, grid_info)
+        new_file_path = save_selection_to_mat(new_file_path, data, time, description, sf, fn, grid_info)
         logger.info(f"Saved pre-processed file to: {new_file_path}")
-        global_state.mat_files.append(new_file_path)
+        global_state.original_files.append(new_file_path)
 
