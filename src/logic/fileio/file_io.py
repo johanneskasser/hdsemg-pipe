@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import numpy as np
+
 from logic.fileio.matlab_file_io import load_mat_file
 from logic.fileio.otb_plus_file_io import load_otb_file
 
@@ -34,5 +36,9 @@ def load_file(filepath):
         data, time, description, sampling_frequency, file_name, file_size = load_otb_file(filepath)
     else:
         raise ValueError(f"Unsupported file type: {file_suffix}")
+
+    # Handle case if data is int16 since we will run into issues with further processing
+    if data.dtype == 'int16':
+        data = data.astype(np.float32)
 
     return data, time, description, sampling_frequency, file_name, file_size

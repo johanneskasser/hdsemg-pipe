@@ -80,10 +80,7 @@ def load_otb_file(file_path):
     time = np.arange(n_samples) / sampling_frequency
 
     # descriptions
-    description = np.empty((n_channels, 1), dtype=object)
-    for i in range(n_channels):
-        desc_text = f"OTB_Chan_{i + 1}_Gain_{info_dict['Gains'][i]}"
-        description[i, 0] = desc_text
+    description = info_dict['ChannelDescriptions']
 
     logger.debug(f"Cleaning up temp directory {tmpdir}")
     shutil.rmtree(tmpdir, ignore_errors=True)

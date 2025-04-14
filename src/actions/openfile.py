@@ -152,7 +152,7 @@ def pre_process_files(filepaths):
         logger.info(f"Finished pre-processing file: {file}")
         original_files_foldername = global_state.get_original_files_path()
         new_file_path = os.path.join(original_files_foldername, os.path.basename(file))
-        save_selection_to_mat(new_file_path, data, time, description, sf, fn, grid_info)
+        new_file_path = save_selection_to_mat(new_file_path, data, time, description, sf, fn, grid_info)
         logger.info(f"Saved pre-processed file to: {new_file_path}")
         global_state.original_files.append(new_file_path)
 

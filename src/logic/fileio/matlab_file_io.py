@@ -104,3 +104,5 @@ def save_selection_to_mat(save_file_path, data, time, description, sampling_freq
     sio.savemat(save_file_path, mat_dict)
     logger.info(f"MAT file saved successfully: {save_file_path}")
 
+    return save_file_path
+
