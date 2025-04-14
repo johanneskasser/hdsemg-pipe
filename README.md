@@ -46,7 +46,7 @@ All metadata are stored alongside standard formats such as `.json`, `.pkl`, and 
 
 ## ✨ Features
 
-- 📂 Load and manage multiple `.mat` HDsEMG files
+- 📂 Load and manage multiple `.mat`, `.otb+` or `.otb4` HDsEMG files
 - 🔗 Associate files to form virtual grids
 - 🧼 Interface with the [hdsemg-select App](https://github.com/johanneskasser/hdsemg-pipe.git) for channel cleaning
 - 🧬 Record decomposed motor unit data with linked metadata
@@ -97,7 +97,7 @@ If you prefer using Conda for environment management, run the following:
 
 ### 📁 Step 1: Load Files
 
-- Open one or multiple `.mat` files or folders containing HDsEMG recordings.
+- Open one or multiple `.mat`, `.otb+` or `.otb4` files or folders containing HDsEMG recordings.
 - The app will create a working directory based on your **Settings** path and prepare subfolders for processing stages:
   - `original_files/`
   - `associated_grids/`
@@ -176,6 +176,7 @@ The app is configurable through the Settings Dialog accessible from the top menu
 - 📁 Working directory path
 - 📍 Path to external hdsemg-select executable
 - 🚀 Path to the openhdemg executable
+- 🪵 Logging level of the application
 
 <div align="center">
   <img src="doc/resources/settings.png" alt="Settings" width="500">
