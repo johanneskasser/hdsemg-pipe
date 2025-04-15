@@ -1,15 +1,14 @@
 import os
 from datetime import datetime
-from pathlib import Path
 
 from PyQt5.QtWidgets import QFileDialog
 
 from _log.log_config import logger
 from config.config_enums import Settings
 from config.config_manager import config
-from logic.fileio.file_io import load_file
-from logic.fileio.matlab_file_io import save_selection_to_mat
-from logic.grid import extract_grid_info
+from shared_logic.logic.fileio.file_io import load_file
+from shared_logic.logic.fileio.matlab_file_io import save_selection_to_mat
+from shared_logic.logic.grid import extract_grid_info
 from state.global_state import global_state
 
 
