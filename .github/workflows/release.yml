@@ -48,6 +48,17 @@ jobs:
           name: hdsemg-pipe
           path: ./src/dist/hdsemg-pipe.exe
 
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: ./src/dist/hdsemg-pipe.exe
+          token: '${{ secrets.GITHUB_TOKEN }}'
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            This is a release for version ${{ github.ref_name }} of hdsemg-pipe.
+            It contains the compiled executable and the source code.
+
   publish:
     needs: build
     runs-on: ubuntu-latest
