@@ -8,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -25,6 +24,7 @@ jobs:
           pip install -r ../requirements.txt
           pip install pyinstaller PyQt5
         shell: cmd
+
       - name: Compile resources file
         working-directory: ./src
         run: |
@@ -48,13 +48,38 @@ jobs:
           name: hdsemg-pipe
           path: ./src/dist/hdsemg-pipe.exe
 
-      - name: Create release
-        uses: ncipollo/release-action@v1
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/hdsemg-shared/
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          artifacts: ./src/dist/hdsemg-pipe.exe
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          body: |
-              This is a release for version ${{ github.ref_name }}.
-              It contains the compiled executable for the hdsemg-pipe application.
+          python-version: 3.
+
+      - name: Set package Version
+        run: echo "PACKAGE_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build package
+        working-directory: ./src/shared_logic
+        run: python -m build
+
+      - name: Publish package to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        working-directory: ./src/shared_logic
+        run: twine upload dist/*
