@@ -1,10 +1,12 @@
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QPushButton, QVBoxLayout
+from PyQt5.QtWidgets import QPushButton, QVBoxLayout, QMessageBox
 
 from actions.openfile import open_file_or_folder
 from config.config_enums import Settings
 from config.config_manager import config
 from widgets.BaseStepWidget import BaseStepWidget
+
+from _log.log_config import logger
 
 
 class OpenFileStepWidget(BaseStepWidget):
@@ -30,7 +32,10 @@ class OpenFileStepWidget(BaseStepWidget):
             self.complete_step()  # Schritt als abgeschlossen markieren
             self.fileSelected.emit(selected_path)
         except Exception as e:
-            self.warn(f"Error selecting file or folder: {str(e)}")
+            logger.error(f"Error selecting file or folder: {str(e)}", exc_info=True)
+            error_message = f"Error selecting file or folder:\n{str(e)}"
+            QMessageBox.warning(self, "Error", error_message)
+
 
     def check(self):
         if config.get(Settings.WORKFOLDER_PATH) is None:

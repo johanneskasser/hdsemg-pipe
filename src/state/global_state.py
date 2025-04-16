@@ -9,7 +9,7 @@ class GlobalState:
 
     def __init__(self):
         self._widget_counter = 0
-        self.original_files = []
+        self._original_files = []
         self.associated_files = []
         self.cropped_files = []
         self.workfolder = None
@@ -22,7 +22,7 @@ class GlobalState:
 
     def reset(self):
         """Reset state variables to initial values."""
-        self.original_files = []
+        self._original_files = []
         self.associated_files = []
         self.workfolder = None
         self._widget_counter = 0
@@ -122,6 +122,20 @@ class GlobalState:
             raise ValueError("Workfolder is not set.")
         path = os.path.join(self.workfolder, 'original_files')
         return os.path.normpath(path)
+
+    def get_original_files(self):
+        """Get a copy of the original files list"""
+        return self._original_files.copy()
+
+    def add_original_file(self, file_path):
+        """Add a file to the original files list"""
+        if not isinstance(file_path, str):
+            raise ValueError("File path must be a string")
+        self._original_files.append(file_path)
+
+    def clear_original_files(self):
+        """Clear the original files list"""
+        self._original_files.clear()
 
 
 # Access the singleton instance anywhere in the application
