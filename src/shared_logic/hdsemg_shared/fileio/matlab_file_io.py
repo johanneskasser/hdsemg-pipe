@@ -1,10 +1,9 @@
 import json
-import os
-from pathlib import Path
 
-import scipy.io as sio
+import logging
 
-from _log.log_config import logger
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 def load_mat_file(file_path):
@@ -77,6 +76,7 @@ import scipy.io as sio
 from pathlib import Path
 from _log.log_config import logger
 
+
 def save_selection_to_mat(save_file_path, data, time, description, sampling_frequency, file_name,
                           grid_info):
     # Convert to Path object
@@ -105,4 +105,3 @@ def save_selection_to_mat(save_file_path, data, time, description, sampling_freq
     logger.info(f"MAT file saved successfully: {save_file_path}")
 
     return save_file_path
-

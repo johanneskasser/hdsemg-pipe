@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import tarfile
@@ -7,7 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
-from _log.log_config import logger
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 def load_otb_file(file_path):
@@ -92,10 +94,6 @@ def load_otb_file(file_path):
 import xml.etree.ElementTree as ET
 
 
-import xml.etree.ElementTree as ET
-
-import xml.etree.ElementTree as ET
-
 def parse_otb_xml(xml_file):
     """
     Parse .otb XML and create a Gains array plus a ChannelDescriptions list,
@@ -116,8 +114,8 @@ def parse_otb_xml(xml_file):
     root = tree.getroot()
 
     device_name = root.attrib.get("Name", "UnknownDevice")
-    fs_str       = root.attrib.get("SampleFrequency", "2000")
-    adbits_str   = root.attrib.get("ad_bits", "16")
+    fs_str = root.attrib.get("SampleFrequency", "2000")
+    adbits_str = root.attrib.get("ad_bits", "16")
     total_ch_str = root.attrib.get("DeviceTotalChannels", "0")
 
     try:
@@ -137,29 +135,29 @@ def parse_otb_xml(xml_file):
         for adapterEl in adapters_list:
             # read adapter-level gain
             adapter_gain_str = adapterEl.attrib.get("Gain", "1")
-            adapter_gain     = float(adapter_gain_str)
+            adapter_gain = float(adapter_gain_str)
 
             # read adapter-level start index
-            start_index_str  = adapterEl.attrib.get("ChannelStartIndex", "0")
-            start_index      = int(start_index_str)
+            start_index_str = adapterEl.attrib.get("ChannelStartIndex", "0")
+            start_index = int(start_index_str)
 
             # Also fetch additional attributes at the adapter level
-            adapter_id        = adapterEl.attrib.get("ID", "")
-            adapter_desc      = adapterEl.attrib.get("Description", "")
+            adapter_id = adapterEl.attrib.get("ID", "")
+            adapter_desc = adapterEl.attrib.get("Description", "")
 
             # find <Channel> children
             channel_els = adapterEl.findall("Channel")
             for ch_el in channel_els:
                 ch_gain_str = ch_el.attrib.get("Gain", "1")
-                ch_gain     = float(ch_gain_str)
-                ch_index    = int(ch_el.attrib.get("Index", "0"))
+                ch_gain = float(ch_gain_str)
+                ch_index = int(ch_el.attrib.get("Index", "0"))
 
                 # Additional channel-level attributes
-                cid     = ch_el.attrib.get("ID", "")
-                prefix  = ch_el.attrib.get("Prefix", "")
-                descr   = ch_el.attrib.get("Description", "")
-                muscle  = ch_el.attrib.get("Muscle", "")
-                side    = ch_el.attrib.get("Side", "")
+                cid = ch_el.attrib.get("ID", "")
+                prefix = ch_el.attrib.get("Prefix", "")
+                descr = ch_el.attrib.get("Description", "")
+                muscle = ch_el.attrib.get("Muscle", "")
+                side = ch_el.attrib.get("Side", "")
 
                 # Now combine adapter info + channel info
                 # e.g. "Adapter(Muovi-32 channels device) :Ch(HD10MM0804-MUOVI 1 - -32 Adhesive Array 10 mm i.e.d.-Vastus Medialis-Left)"
@@ -182,6 +180,7 @@ def parse_otb_xml(xml_file):
     }
     return info
 
+
 def build_channel_description(adapter_id, adapter_desc, cid, prefix, descr, muscle, side):
     """
     Combine attributes for a channel description, skipping empty or placeholders like 'Not defined'.
@@ -197,6 +196,7 @@ def build_channel_description(adapter_id, adapter_desc, cid, prefix, descr, musc
                 filtered_fields.append(v)
     # Join using dashes
     return "-".join(filtered_fields)
+
 
 def load_sig_data(sig_file, n_channels, nADbits=16):
     logger.debug(f"load_sig_data: file={sig_file}, n_channels={n_channels}, nADbits={nADbits}")

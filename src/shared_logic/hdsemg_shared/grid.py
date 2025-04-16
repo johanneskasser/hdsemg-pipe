@@ -1,11 +1,15 @@
+import logging
+
 import numpy as np
 
-from _log.log_config import logger
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
 import re
 import requests
 import uuid
 
-from shared_logic.hdsemg_shared.fileio.file_io import load_file
+from fileio.file_io import load_file
 
 grid_data = None
 
@@ -17,6 +21,7 @@ def grid_json_setup():
     global grid_data
     url = "https://drive.google.com/uc?export=download&id=1FqR6-ZlT1U74PluFEjCSeIS7NXJQUT-v"
     grid_data = load_grid_data(url)
+
 
 def load_grid_data(url):
     """
@@ -149,6 +154,7 @@ def load_single_grid_file(file_path):
         }
         grids.append(grid_data)
     return grids
+
 
 def handle_entry(entry):
     """
