@@ -2,9 +2,9 @@ from pathlib import Path
 
 import numpy as np
 
-from matlab_file_io import load_mat_file
-from otb_4_file_io import load_otb4_file
-from otb_plus_file_io import load_otb_file
+from .matlab_file_io import load_mat_file
+from .otb_4_file_io import load_otb4_file
+from .otb_plus_file_io import load_otb_file
 
 
 def load_file(filepath):

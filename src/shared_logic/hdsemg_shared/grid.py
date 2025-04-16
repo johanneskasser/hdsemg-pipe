@@ -9,7 +9,7 @@ import re
 import requests
 import uuid
 
-from fileio.file_io import load_file
+from .fileio.file_io import load_file
 
 grid_data = None
 
