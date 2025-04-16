@@ -9,7 +9,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name='hdsemg-shared',
+    name='hdsemg_shared',
     version=version,
     packages=find_packages(),
     install_requires=[

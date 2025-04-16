@@ -2,9 +2,9 @@ from pathlib import Path
 
 import numpy as np
 
-from shared_logic.logic.fileio.matlab_file_io import load_mat_file
-from shared_logic.logic.fileio.otb_4_file_io import load_otb4_file
-from shared_logic.logic.fileio.otb_plus_file_io import load_otb_file
+from shared_logic.hdsemg_shared.fileio.matlab_file_io import load_mat_file
+from shared_logic.hdsemg_shared.fileio.otb_4_file_io import load_otb4_file
+from shared_logic.hdsemg_shared.fileio.otb_plus_file_io import load_otb_file
 
 
 def load_file(filepath):

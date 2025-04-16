@@ -7,7 +7,7 @@ from matplotlib.figure import Figure
 from matplotlib.widgets import RangeSlider
 
 from _log.log_config import logger
-from shared_logic.logic.grid import load_single_grid_file
+from shared_logic.hdsemg_shared.grid import load_single_grid_file
 
 
 def _normalize_single(x):
