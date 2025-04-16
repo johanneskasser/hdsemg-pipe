@@ -125,55 +125,59 @@ def load_otb4_file(file_path):
     shutil.rmtree(tmpdir, ignore_errors=True)
     logger.info(f"OTB4 file loaded successfully: {file_name}")
 
+    # make sure that the data array is in the shape (time, shape)
+    if data.shape[0] != len(time) and data.shape[1] == len(time):
+        logger.debug("Transposing data array since it is in the wrong shape")
+        data = data.T
+
+
     return data, time, description_array, sampling_frequency, file_name, file_size
 
 
 def parse_otb4_tracks_xml(xml_file):
     """
     Parse 'Tracks_000.xml' to gather arrayOfTrackInfo.
-    We'll return a list of dict, e.g.:
-      [ {
+    Returns a list of dictionaries, z. B.:
+      [{
           "Device": "Novecento+",
           "Gain": ...,
           "ADC_Nbits": ...,
           "ADC_Range": ...,
           "SamplingFrequency": ...,
-          "SignalStreamPath": "..."
-          "NumberOfChannels": ...
-          "AcquisitionChannel": ...
+          "SignalStreamPath": "...",
+          "NumberOfChannels": ...,
+          "AcquisitionChannel": ...,
+          "SubTitle": ...   # <-- neu: Grid identifier
         }, ... ]
     """
     tree = ET.parse(xml_file)
-    root = tree.getroot()
+    track_info_parent = tree.getroot()
 
-    track_info_parent = root.find("ArrayOfTrackInfo")
     if track_info_parent is None:
         return []
 
-    # The .m code references "abs.ArrayOfTrackInfo.TrackInfo"
-    # so we find <TrackInfo> children
+    # Finde die <TrackInfo>-Elemente
     track_info_elems = track_info_parent.findall("TrackInfo")
     results = []
     for tr_el in track_info_elems:
-        # read out the sub-elements Gains, nADBit, etc. from your .m snippet
-        device_str = getattr(tr_el.find("Device"), "text", "Unknown")
+        device_str = getattr(tr_el.find("Device"), "text", "Unknown").strip()
         gain_str = getattr(tr_el.find("Gain"), "text", "1")
         bits_str = getattr(tr_el.find("ADC_Nbits"), "text", "16")
         rng_str = getattr(tr_el.find("ADC_Range"), "text", "5")
         fs_str = getattr(tr_el.find("SamplingFrequency"), "text", "2000")
-        path_str = getattr(tr_el.find("SignalStreamPath"), "text", "")
+        path_str = getattr(tr_el.find("SignalStreamPath"), "text", "").strip()
         nchan_str = getattr(tr_el.find("NumberOfChannels"), "text", "0")
         acq_str = getattr(tr_el.find("AcquisitionChannel"), "text", "0")
+        # Neu: SubTitle auslesen
+        subtitle_str = getattr(tr_el.find("SubTitle"), "text", "Unknown").strip()
 
-        # convert
-        device_str = device_str.strip()
-        gain_val = float(gain_str.strip())
-        bits_val = int(bits_str.strip())
-        rng_val = float(rng_str.strip())
-        fs_val = float(fs_str.strip())
-        path_str = path_str.strip()
-        nchan_val = int(nchan_str.strip())
-        acq_val = int(acq_str.strip())
+        # Konvertierungen
+        gain_val = float(gain_str)
+        bits_val = int(bits_str)
+        rng_val = float(rng_str)
+        fs_val = float(fs_str)
+        nchan_val = int(nchan_str)
+        acq_val = int(acq_str)
 
         results.append({
             "Device": device_str,
@@ -183,10 +187,12 @@ def parse_otb4_tracks_xml(xml_file):
             "SamplingFrequency": fs_val,
             "SignalStreamPath": path_str,
             "NumberOfChannels": nchan_val,
-            "AcquisitionChannel": acq_val
+            "AcquisitionChannel": acq_val,
+            "SubTitle": subtitle_str  # Grid identifier
         })
 
     return results
+
 
 
 def read_novecento_plus(signals, track_info_list):
@@ -239,9 +245,11 @@ def read_novecento_plus(signals, track_info_list):
 
         # build placeholder descriptions:
         # e.g. "Novecento+ <SignalStreamPath> channel x"
-        # TODO: We have to adjust channels once XML Structure is cleared!
         for c in range(n_ch):
-            desc = f"{matched_track['Device']}-{matched_track['SignalStreamPath']}-ch{c}"
+            dev = matched_track['Device']
+            sig = matched_track['SignalStreamPath']
+            grid_id = matched_track.get("SubTitle", "Unknown")
+            desc = f"{dev}-{sig}-{grid_id}-ch{c}"
             descriptions.append(desc)
 
     # now we might stack these blocks vertically so shape= totalCh x samples
@@ -307,17 +315,17 @@ def read_standard_otb4(signals, track_info_list):
 
     # build description strings
     descriptions = []
-    start_idx = 0
     for tr in track_info_list:
         dev = tr["Device"]
         path = tr["SignalStreamPath"]
+        grid_id = tr.get("SubTitle", "Unknown")
         nchan = tr["NumberOfChannels"]
         for c in range(nchan):
-            desc = f"{dev}-{path}-ch{c}"
+            desc = f"{dev}-{path}-{grid_id}-ch{c}"
             descriptions.append(desc)
-        start_idx += nchan
 
     # the .m code picks the sample freq from e.g. Fsample{nSig}, presumably from the first track
     fs_main = track_info_list[0]["SamplingFrequency"] if track_info_list else 2000.0
+
 
     return data_2d, descriptions, fs_main
