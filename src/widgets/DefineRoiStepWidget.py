@@ -8,7 +8,7 @@ from actions.crop_roi import CropRoiDialog
 from actions.file_utils import copy_files
 from config.config_enums import Settings
 from config.config_manager import config
-from shared_logic.logic.fileio.matlab_file_io import save_selection_to_mat
+from shared_logic.hdsemg_shared.fileio.matlab_file_io import save_selection_to_mat
 from state.global_state import global_state
 from widgets.BaseStepWidget import BaseStepWidget
 from _log.log_config import logger

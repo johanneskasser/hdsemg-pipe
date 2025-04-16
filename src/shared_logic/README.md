@@ -10,27 +10,10 @@ This module contains shared logic used across multiple related projects, such as
 
 This package lives inside a subdirectory (`src/shared_logic`) of a larger monorepo. It includes its own `setup.py` and can be installed directly via `pip`.
 
-### 🔒 Private Installation via SSH
-
-Ensure your SSH access to GitHub is properly configured:
-
 ```bash
-ssh -T git@github.com
+    python.exe -m pip install --upgrade pip 
+    pip install hdsemg-shared
 ```
-
-Then install using pip:
-
-```bash
-pip install "git+ssh://git@github.com/johanneskasser/hdsemg-pipe.git@BRANCH_NAME#egg=hdsemg-shared&subdirectory=src/shared_logic"
-```
-
-Replace `BRANCH_NAME` with the appropriate branch name, for example:
-
-```bash
-pip install "git+ssh://git@github.com/johanneskasser/hdsemg-pipe.git@17-implement-subdirectory-for-fileloading-logic-to-share-between-projects-hdsemg-pipe-and-hdsemg-select#egg=hdsemg-shared&subdirectory=src/shared_logic"
-```
-
-> You must have access to the repository via SSH. This typically requires that your public SSH key is added to your GitHub account.
 
 ---
 

@@ -1,13 +1,18 @@
+import logging
 import os
-import tempfile
 import shutil
 import tarfile
+import tempfile
 import zipfile
-import numpy as np
 from pathlib import Path
 
-from _log.log_config import logger
+import numpy as np
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
 import xml.etree.ElementTree as ET
+
 
 def load_otb4_file(file_path):
     """
@@ -74,7 +79,7 @@ def load_otb4_file(file_path):
     for root, dirs, files in os.walk(tmpdir):
         for f in files:
             if f.lower().endswith(".sig"):
-                signals.append( os.path.join(root,f) )
+                signals.append(os.path.join(root, f))
 
     logger.debug(f"Found .sig files for OTB4: {signals}")
 
@@ -106,9 +111,9 @@ def load_otb4_file(file_path):
 
     # We'll produce the final Nx1 description array
     # "descriptions" might be a list of strings, length= total_channels
-    description_array = np.empty((total_channels,1), dtype=object)
-    for i,desc_str in enumerate(descriptions):
-        description_array[i,0] = desc_str
+    description_array = np.empty((total_channels, 1), dtype=object)
+    for i, desc_str in enumerate(descriptions):
+        description_array[i, 0] = desc_str
 
     # We guess sampling_frequency is the same for all track_info, or from the first
     sampling_frequency = fs_main
@@ -121,6 +126,7 @@ def load_otb4_file(file_path):
     logger.info(f"OTB4 file loaded successfully: {file_name}")
 
     return data, time, description_array, sampling_frequency, file_name, file_size
+
 
 def parse_otb4_tracks_xml(xml_file):
     """
@@ -151,23 +157,23 @@ def parse_otb4_tracks_xml(xml_file):
     for tr_el in track_info_elems:
         # read out the sub-elements Gains, nADBit, etc. from your .m snippet
         device_str = getattr(tr_el.find("Device"), "text", "Unknown")
-        gain_str   = getattr(tr_el.find("Gain"), "text", "1")
-        bits_str   = getattr(tr_el.find("ADC_Nbits"), "text", "16")
-        rng_str    = getattr(tr_el.find("ADC_Range"), "text", "5")
-        fs_str     = getattr(tr_el.find("SamplingFrequency"), "text", "2000")
-        path_str   = getattr(tr_el.find("SignalStreamPath"), "text", "")
-        nchan_str  = getattr(tr_el.find("NumberOfChannels"), "text", "0")
-        acq_str    = getattr(tr_el.find("AcquisitionChannel"), "text", "0")
+        gain_str = getattr(tr_el.find("Gain"), "text", "1")
+        bits_str = getattr(tr_el.find("ADC_Nbits"), "text", "16")
+        rng_str = getattr(tr_el.find("ADC_Range"), "text", "5")
+        fs_str = getattr(tr_el.find("SamplingFrequency"), "text", "2000")
+        path_str = getattr(tr_el.find("SignalStreamPath"), "text", "")
+        nchan_str = getattr(tr_el.find("NumberOfChannels"), "text", "0")
+        acq_str = getattr(tr_el.find("AcquisitionChannel"), "text", "0")
 
         # convert
         device_str = device_str.strip()
-        gain_val   = float(gain_str.strip())
-        bits_val   = int(bits_str.strip())
-        rng_val    = float(rng_str.strip())
-        fs_val     = float(fs_str.strip())
-        path_str   = path_str.strip()
-        nchan_val  = int(nchan_str.strip())
-        acq_val    = int(acq_str.strip())
+        gain_val = float(gain_str.strip())
+        bits_val = int(bits_str.strip())
+        rng_val = float(rng_str.strip())
+        fs_val = float(fs_str.strip())
+        path_str = path_str.strip()
+        nchan_val = int(nchan_str.strip())
+        acq_val = int(acq_str.strip())
 
         results.append({
             "Device": device_str,
@@ -181,6 +187,7 @@ def parse_otb4_tracks_xml(xml_file):
         })
 
     return results
+
 
 def read_novecento_plus(signals, track_info_list):
     """
@@ -212,12 +219,12 @@ def read_novecento_plus(signals, track_info_list):
         # read raw as int32
         raw = np.fromfile(sig_path, dtype=np.int32)
         samples = raw.size // n_ch
-        raw = raw[:samples*n_ch]
+        raw = raw[:samples * n_ch]
         block = raw.reshape((n_ch, samples), order='F')
 
         # scale
         # data(Ch,:)=data(Ch,:)*Psup/(2^ADbit)*1000/Gain
-        conv = matched_track["ADC_Range"] / (2**matched_track["ADC_Nbits"]) * 1000 / matched_track["Gain"]
+        conv = matched_track["ADC_Range"] / (2 ** matched_track["ADC_Nbits"]) * 1000 / matched_track["Gain"]
         block = block.astype(np.float64) * conv
 
         data_blocks.append(block)
@@ -227,7 +234,7 @@ def read_novecento_plus(signals, track_info_list):
             fs_main = matched_track["SamplingFrequency"]
         else:
             # if you want to check consistency:
-            if abs(fs_main - matched_track["SamplingFrequency"])>1e-9:
+            if abs(fs_main - matched_track["SamplingFrequency"]) > 1e-9:
                 logger.warning("Inconsistent sampling freq among tracks?")
 
         # build placeholder descriptions:
@@ -246,11 +253,12 @@ def read_novecento_plus(signals, track_info_list):
         logger.warning("Different sample lengths among signals. We'll pick min length.")
         min_len = min(lens)
         for i in range(len(data_blocks)):
-            data_blocks[i] = data_blocks[i][:,:min_len]
+            data_blocks[i] = data_blocks[i][:, :min_len]
 
     # vstack them
-    final_data = np.vstack(data_blocks) if data_blocks else np.zeros((0,0))
+    final_data = np.vstack(data_blocks) if data_blocks else np.zeros((0, 0))
     return final_data, descriptions, fs_main or 2000
+
 
 def read_standard_otb4(signals, track_info_list):
     """
@@ -261,7 +269,7 @@ def read_standard_otb4(signals, track_info_list):
     logger.debug("read_standard_otb4 routine")
 
     if not signals:
-        return np.zeros((0,0)), [], 2000.0
+        return np.zeros((0, 0)), [], 2000.0
 
     sig_path = signals[0]  # the .m code uses the first .sig
     # sum up totalCh
@@ -269,7 +277,7 @@ def read_standard_otb4(signals, track_info_list):
     # read 'short' => int16
     raw = np.fromfile(sig_path, dtype=np.int16)
     samples = raw.size // totalCh
-    raw = raw[:samples*totalCh]
+    raw = raw[:samples * totalCh]
     data_2d = raw.reshape((totalCh, samples), order='F').astype(np.float64)
 
     # parse track_info: we do the "for i=2:... in matlab, but basically we do the Gains scaling
@@ -286,23 +294,23 @@ def read_standard_otb4(signals, track_info_list):
     # now apply Gains scaling for each block
     # in .m: data(nCh,:) = data(nCh,:) * PowerSupply{ntype} / (2^nADBit{ntype}) * 1000 / Gains{ntype}
     # We'll store partial indexing in ascending order
-    start_idx=0
+    start_idx = 0
     for i, trackinfo in enumerate(track_info_list):
         end_idx = indexes[i]
-        psup  = trackinfo["ADC_Range"]
+        psup = trackinfo["ADC_Range"]
         nbits = trackinfo["ADC_Nbits"]
         gainv = trackinfo["Gain"]
-        conv  = psup / (2**nbits) * 1000.0 / gainv
+        conv = psup / (2 ** nbits) * 1000.0 / gainv
         for ch in range(start_idx, end_idx):
-            data_2d[ch,:] *= conv
+            data_2d[ch, :] *= conv
         start_idx = end_idx
 
     # build description strings
     descriptions = []
-    start_idx=0
+    start_idx = 0
     for tr in track_info_list:
-        dev   = tr["Device"]
-        path  = tr["SignalStreamPath"]
+        dev = tr["Device"]
+        path = tr["SignalStreamPath"]
         nchan = tr["NumberOfChannels"]
         for c in range(nchan):
             desc = f"{dev}-{path}-ch{c}"
