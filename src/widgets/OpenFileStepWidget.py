@@ -23,11 +23,14 @@ class OpenFileStepWidget(BaseStepWidget):
 
     def select_file_or_folder(self, mode):
         """Datei oder Ordner auswählen und global speichern."""
-        selected_path = open_file_or_folder(mode)
-        if not selected_path:
-            return  # Nutzer hat Abbrechen gedrückt
-        self.complete_step()  # Schritt als abgeschlossen markieren
-        self.fileSelected.emit(selected_path)
+        try:
+            selected_path = open_file_or_folder(mode)
+            if not selected_path:
+                return  # Nutzer hat Abbrechen gedrückt
+            self.complete_step()  # Schritt als abgeschlossen markieren
+            self.fileSelected.emit(selected_path)
+        except Exception as e:
+            self.warn(f"Error selecting file or folder: {str(e)}")
 
     def check(self):
         if config.get(Settings.WORKFOLDER_PATH) is None:

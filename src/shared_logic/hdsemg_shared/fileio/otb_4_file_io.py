@@ -125,6 +125,12 @@ def load_otb4_file(file_path):
     shutil.rmtree(tmpdir, ignore_errors=True)
     logger.info(f"OTB4 file loaded successfully: {file_name}")
 
+    # make sure that the data array is in the shape (time, shape)
+    if data.shape[0] != len(time) and data.shape[1] == len(time):
+        logger.debug("Transposing data array since it is in the wrong shape")
+        data = data.T
+
+
     return data, time, description_array, sampling_frequency, file_name, file_size
 
 
@@ -239,9 +245,11 @@ def read_novecento_plus(signals, track_info_list):
 
         # build placeholder descriptions:
         # e.g. "Novecento+ <SignalStreamPath> channel x"
-        # TODO: We have to adjust channels once XML Structure is cleared!
         for c in range(n_ch):
-            desc = f"{matched_track['Device']}-{matched_track['SignalStreamPath']}-ch{c}"
+            dev = matched_track['Device']
+            sig = matched_track['SignalStreamPath']
+            grid_id = matched_track.get("SubTitle", "Unknown")
+            desc = f"{dev}-{sig}-{grid_id}-ch{c}"
             descriptions.append(desc)
 
     # now we might stack these blocks vertically so shape= totalCh x samples
@@ -318,5 +326,6 @@ def read_standard_otb4(signals, track_info_list):
 
     # the .m code picks the sample freq from e.g. Fsample{nSig}, presumably from the first track
     fs_main = track_info_list[0]["SamplingFrequency"] if track_info_list else 2000.0
+
 
     return data_2d, descriptions, fs_main
