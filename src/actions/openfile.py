@@ -1,6 +1,8 @@
+import json
 import os
 from datetime import datetime
 
+import numpy as np
 from PyQt5.QtWidgets import QFileDialog
 
 from _log.log_config import logger
@@ -27,7 +29,6 @@ def open_file_or_folder(mode='file'):
 
     if mode == 'file':
         options = QFileDialog.Options()
-        options |= QFileDialog.DontUseNativeDialog  # Use Qt's file dialog for consistent behavior
         file_path, _ = QFileDialog.getOpenFileName(
             None,
             "Select a File",
@@ -39,8 +40,7 @@ def open_file_or_folder(mode='file'):
         if file_path:
             create_work_folder(workfolder_path, file_path)
             pre_process_files([file_path])
-            new_file = global_state.original_files[
-                0]  # here we can safely assume that the first file is the one we want and it exists
+
         return file_path if file_path else None
 
     elif mode == 'folder':
@@ -53,7 +53,8 @@ def open_file_or_folder(mode='file'):
         )
         logger.debug(f"Folder selected: {folder_path}")
         if folder_path:
-            files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.mat')]
+            files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if
+                     f.endswith(('.mat', '.otb', '.otb+', '.otb4'))]
             create_work_folder(workfolder_path)
             pre_process_files(files)
         return folder_path if folder_path else None
@@ -63,10 +64,10 @@ def open_file_or_folder(mode='file'):
 
 
 def count_mat_files(folder_path):
-    """Returns the number of .mat files in a folder"""
+    """Returns the number of wanted files in a folder"""
     if not folder_path or not os.path.isdir(folder_path):
         return 0
-    return len([f for f in os.listdir(folder_path) if f.endswith('.mat')])
+    return len([f for f in os.listdir(folder_path) if f.endswith('.mat', '.otb', '.otb+', '.otb4')])
 
 
 def create_work_folder(workfolder_path, file_path=None):
@@ -139,19 +140,44 @@ def pre_process_files(filepaths):
         data, time, description, sf, fn, fs = load_file(file)
         grid_info = extract_grid_info(description)
 
+        json_means = {}
+
         # Subtract Mean from data to remove DC offset so that signals oscillate around zero
         for grid_key, grid_data in grid_info.items():
+            json_means[grid_key] = []  # Liste für jeden Channel dieses Grids
             for ch_index in grid_data['indices']:
-                channel_mean = data[:, ch_index].mean()
-                logger.debug(f"Grid: {grid_key}, Channel Index: {ch_index}, Mean Before Subtraction: {channel_mean}")
-                data[:, ch_index] -= channel_mean
-                logger.debug(f"Grid: {grid_key}, Channel Index: {ch_index}, Mean After Subtraction: {data[:, ch_index].mean()}")
-
+                mean_before = data[:, ch_index].mean()
+                logger.debug(f"Grid: {grid_key}, Channel Index: {ch_index}, Mean Before Subtraction: {mean_before}")
+                data[:, ch_index] -= mean_before
+                mean_after = data[:, ch_index].mean()
+                logger.debug(f"Grid: {grid_key}, Channel Index: {ch_index}, Mean After Subtraction: {mean_after}")
+                # Speichern der Mittelwertdaten in json_means
+                json_means[grid_key].append({
+                    "channel_index": ch_index,
+                    "mean_before": mean_before,
+                    "mean_after": mean_after
+                })
         # Save the pre-processed data to the original files folder
         logger.info(f"Finished pre-processing file: {file}")
         original_files_foldername = global_state.get_original_files_path()
         new_file_path = os.path.join(original_files_foldername, os.path.basename(file))
         new_file_path = save_selection_to_mat(new_file_path, data, time, description, sf, fn, grid_info)
         logger.info(f"Saved pre-processed file to: {new_file_path}")
-        global_state.original_files.append(new_file_path)
+        save_json_means(json_means, new_file_path)
+        logger.debug(f"global_state (repr): {repr(global_state)}")
+        logger.debug(f"global_state is of type: {type(global_state)}")
+        global_state.add_original_file(new_file_path)
 
+
+def save_json_means(json_means, new_file_path):
+    def np_converter(obj):
+        # Wenn es sich um ein numpy-Scalar handelt, geben wir dessen Python-Standardwert zurück
+        if isinstance(obj, np.generic):
+            return obj.item()
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+    # Erzeugen des Pfades der JSON-Datei: gleicher Ordner, gleicher Basisname, andere Extension
+    json_file_path = os.path.splitext(new_file_path)[0] + ".json"
+    with open(json_file_path, "w") as jf:
+        json.dump(json_means, jf, indent=2, default=np_converter)
+    logger.info(f"Saved mean values to JSON file: {json_file_path}")
