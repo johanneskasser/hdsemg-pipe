@@ -1,7 +1,7 @@
 import sys
 
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QFrame
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QFrame, QLabel
 
 from settings.settings_dialog import SettingsDialog
 from actions.file_manager import start_file_processing
@@ -13,6 +13,7 @@ from widgets.DefineRoiStepWidget import DefineRoiStepWidget
 from widgets.FolderContentWidget import FolderContentWidget
 from widgets.GridAssociationStepWidget import GridAssociationWidget
 from widgets.OpenFileStepWidget import OpenFileStepWidget
+from version import __version__
 
 import resources_rc
 
@@ -110,6 +111,10 @@ class MainWindow(QMainWindow):
         # Disable all steps except the first
         for step in self.steps[1:]:
             step.setActionButtonsEnabled(False)
+
+        version_label = QLabel(f"hdsemg-pipe | University of Applied Sciences - Department Physiotherapy | Version: {__version__}")
+        version_label.setStyleSheet("padding-right: 10px;")
+        self.statusBar().addPermanentWidget(version_label)
 
     def openPreferences(self):
         """Open the settings dialog."""
