@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+            fetch-depth: 0  # Fetch all history for all tags
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -24,6 +26,18 @@ jobs:
           pip install -r ../requirements.txt
           pip install pyinstaller PyQt5
         shell: cmd
+
+      - name: Generate version.py from Git tag
+        working-directory: ./src
+        run: |
+          APP_VERSION=${RAW_TAG#v}
+          echo "__version__ = '${APP_VERSION}'" > version.py
+        shell: bash
+
+      - name: Make version resource (version.txt)
+        working-directory: ./src
+        run: python make_version.py
+        shell: bash
 
       - name: Compile resources file
         working-directory: ./src
@@ -48,6 +62,33 @@ jobs:
           name: hdsemg-pipe
           path: ./src/dist/hdsemg-pipe.exe
 
+      - name: Gather Release Notes
+        shell: 'bash'
+        id: notes
+        run: |
+          # 1) Find the previous tag (sorted by tag date)
+          PREV_TAG=$(git tag --sort=-creatordate | sed -n "2p")
+          echo "Previous tag: $PREV_TAG"
+          echo "This tag:    $RAW_TAG"
+
+          # 2) Dump the README into the top of release-notes.md
+          echo "<!-- Auto-generated. Do not edit. -->" > release-notes.md
+          echo "" >> release-notes.md
+          cat README.md >> release-notes.md
+
+          # 3) Append a Changelog header
+          echo "" >> release-notes.md
+          echo "## Changelog" >> release-notes.md
+          echo "" >> release-notes.md
+
+          # 4) For each commit between PREV_TAG and RAW_TAG, print hash + message
+          git log $PREV_TAG..$RAW_TAG --pretty=format:'- [`%h`](https://github.com/${{ github.repository }}/commit/%H) %s' \
+            >> release-notes.md
+
+          # 5) Expose the path as an output
+          echo "notes_file=release-notes.md" >> $GITHUB_OUTPUT
+
+
       - name: Create release
         uses: ncipollo/release-action@v1
         with:
@@ -55,10 +96,7 @@ jobs:
           token: '${{ secrets.GITHUB_TOKEN }}'
           tag: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          body: |
-            This is a release for version ${{ github.ref_name }} of hdsemg-pipe.
-            It contains the compiled executable and the source code.
-
+          bodyFile: ${{ steps.notes.outputs.notes_file }}
   publish:
     needs: build
     runs-on: ubuntu-latest
