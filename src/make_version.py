@@ -31,7 +31,7 @@ string_table = StringTable(
         StringStruct('FileDescription', 'hdsemg-pipe'),
         StringStruct('FileVersion', __version__),
         StringStruct('InternalName', 'hdsemg-pipe.exe'),
-        StringStruct('OriginalFilename', f'hdsemg-pipe.exe'),
+        StringStruct('OriginalFilename', 'hdsemg-pipe.exe'),
         StringStruct('ProductName', 'hdsemg-pipe'),
         StringStruct('ProductVersion', __version__),
         StringStruct('CompanyName', 'University of Applied Sciences Vienna - Department Physiotherapy'),
