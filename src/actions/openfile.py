@@ -141,6 +141,7 @@ def pre_process_files(filepaths):
         grid_info = extract_grid_info(description)
 
         json_means = {}
+        json_means["filename"] = os.path.basename(file)
 
         # Subtract Mean from data to remove DC offset so that signals oscillate around zero
         for grid_key, grid_data in grid_info.items():
