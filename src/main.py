@@ -3,6 +3,7 @@ import sys
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QFrame, QLabel
 
+from _log.exception_hook import exception_hook
 from settings.settings_dialog import SettingsDialog
 from actions.file_manager import start_file_processing
 from _log.log_config import logger, setup_logging
@@ -112,7 +113,7 @@ class MainWindow(QMainWindow):
         for step in self.steps[1:]:
             step.setActionButtonsEnabled(False)
 
-        version_label = QLabel(f"hdsemg-pipe | University of Applied Sciences - Department Physiotherapy | Version: {__version__}")
+        version_label = QLabel(f"hdsemg-pipe | University of Applied Sciences Vienna - Department Physiotherapy | Version: {__version__}")
         version_label.setStyleSheet("padding-right: 10px;")
         self.statusBar().addPermanentWidget(version_label)
 
@@ -131,6 +132,7 @@ class MainWindow(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     setup_logging()
+    sys.excepthook = exception_hook
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
