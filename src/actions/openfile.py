@@ -155,8 +155,22 @@ def pre_process_files(filepaths):
                 # Speichern der Mittelwertdaten in json_means
                 json_means[grid_key].append({
                     "channel_index": ch_index,
+                    "method": "mean",
                     "mean_before": mean_before,
                     "mean_after": mean_after
+                })
+            for ref in grid_data['reference_signals']:
+                ref_idx = ref['index']
+                baseline_before = data[:, ref_idx].min()
+                logger.debug(f"Grid: {grid_key}, Channel Index: {ref_idx}, Mean Before Subtraction: {baseline_before}")
+                data[:, ref_idx] -= baseline_before # shift reference signals to zero
+                baseline_after = data[:, ref_idx].min()
+                logger.debug(f"Grid: {grid_key}, Channel Index: {ref_idx}, Mean After Subtraction: {baseline_after}")
+                json_means[grid_key].append({
+                    "reference_index": ref_idx,
+                    "method": "min",
+                    "value_before": float(baseline_before),
+                    "value_after": float(baseline_after)
                 })
         # Save the pre-processed data to the original files folder
         logger.info(f"Finished pre-processing file: {file}")
