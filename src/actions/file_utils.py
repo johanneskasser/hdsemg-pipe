@@ -82,6 +82,7 @@ def update_extras_in_pickle_file(filepath, channelselection_file):
     # Update the 'EXTRAS' field
     extras_str = build_extras(channelselection_file)
 
+    save_json(extras_str, os.path.basename(filepath))
     data = update_extras(data, extras_str)
 
     # Save the updated file under the same name and location
@@ -241,6 +242,22 @@ def get_json_file_path(channelselection_filepath: str) -> dict:
         "channelselection_json": channelselection_json_file,
         "associated_grids_json": associated_grids_json_file
     }
+
+def save_json(json_content, file_name):
+    """
+    Saves the given JSON content to a file.
+
+    :param json_content: JSON content to be saved
+    :param file_path: Path where the JSON file will be saved
+    """
+    decomposition_folder = global_state.get_decomposition_path()
+    json_name = os.path.splitext(os.path.basename(file_name))[0] + ".json"
+    file_path = os.path.join(decomposition_folder, json_name)
+
+    with open(file_path, 'w') as f:
+        json.dump(json_content, f, indent=4)
+    logger.info(f"JSON file saved at {file_path}")
+
 
 
 def load_pickle_dynamically(filepath):
