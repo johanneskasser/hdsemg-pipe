@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QTextEdit, QLabel, QHBoxLayout, QPushButton, QStyle, QFileDialog, QDialog, QMessageBox
 )
 from state.global_state import global_state
-from controller.automatic_state_reconstruction import reconstruct_folder_state
+from controller.automatic_state_reconstruction import start_reconstruction_workflow
 from _log.log_config import logger
 
 
@@ -87,11 +87,4 @@ class FolderContentWidget(QWidget):
             else:
                 subprocess.Popen(["xdg-open", folder_path])
         else:
-            selected_folder = QFileDialog.getExistingDirectory(self, "Select existing pipeline folder")
-            if selected_folder:
-                try:
-                    reconstruct_folder_state(selected_folder)
-                except Exception as e:
-                    global_state.reset()
-                    logger.warning(f"Failed to reconstruct folder state: {e}")
-                    QMessageBox.warning(self, "Error", f"Failed to reconstruct folder state: \n{str(e)}")
+            start_reconstruction_workflow(self)

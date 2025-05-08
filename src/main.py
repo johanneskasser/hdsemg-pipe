@@ -4,6 +4,7 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QFrame, QLabel
 
 from _log.exception_hook import exception_hook
+from controller.automatic_state_reconstruction import start_reconstruction_workflow
 from settings.settings_dialog import SettingsDialog
 from actions.file_manager import start_file_processing
 from _log.log_config import logger, setup_logging
@@ -39,6 +40,13 @@ class MainWindow(QMainWindow):
         preferences_action = QAction('Preferences', self)
         preferences_action.triggered.connect(self.openPreferences)
         settings_menu.addAction(preferences_action)
+
+        open_existing_workfolder_action = QAction('Open Existing Workfolder', self)
+        open_existing_workfolder_action.triggered.connect(lambda: start_reconstruction_workflow(self))
+        settings_menu.addAction(open_existing_workfolder_action)
+
+        # Add a separator
+        settings_menu.addSeparator()
 
         exit_action = QAction('Exit', self)
         exit_action.triggered.connect(qApp.quit)

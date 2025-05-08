@@ -3,8 +3,21 @@ import os
 from _log.log_config import logger
 from actions.enum.FolderNames import FolderNames
 from state.global_state import global_state
-from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtWidgets import QMessageBox, QFileDialog
 
+
+def start_reconstruction_workflow(parent):
+    if global_state.workfolder is None:
+        selected_folder = QFileDialog.getExistingDirectory(parent, "Select existing pipeline folder")
+        if selected_folder:
+            try:
+                reconstruct_folder_state(folderpath=selected_folder)
+            except Exception as e:
+                global_state.reset()
+                logger.warning(f"Failed to reconstruct folder state: {e}")
+                QMessageBox.warning(parent, "Error", f"Failed to reconstruct folder state: \n{str(e)}")
+    else:
+        QMessageBox.warning(parent, "Error", "A pipeline folder is already selected.")
 
 def reconstruct_folder_state(folderpath):
     logger.info(f"Reconstructing folder state for: {folderpath}")
@@ -23,17 +36,24 @@ def reconstruct_folder_state(folderpath):
         _associated_grid_files(folderpath)
         _roi_files(folderpath)
         _channel_selection_files(folderpath)
+        msg_box = _show_restore_success(folderpath)
+        msg_box.exec_()
+        folder_content_widget.update_folder_content()
+        return
     except FileNotFoundError as e:
         _decomposition_results_init()
-        msg_box = QMessageBox()
-        msg_box.setIcon(QMessageBox.Information)
-        msg_box.setWindowTitle("State restored")
-        msg_box.setText(f"The state of folder {folderpath} has been restored.")
+        msg_box = _show_restore_success(folderpath)
         msg_box.exec_()
         folder_content_widget.update_folder_content()
         return
 
 
+def _show_restore_success(folderpath):
+    msg_box = QMessageBox()
+    msg_box.setIcon(QMessageBox.Information)
+    msg_box.setWindowTitle("State restored")
+    msg_box.setText(f"The state of folder {folderpath} has been restored.")
+    return msg_box
 
 
 def _check_folder_existence(folderpath):
@@ -166,7 +186,7 @@ def _channel_selection_files(folderpath):
     channel_selection_file_widget = global_state.get_widget("step3")
     if channel_selection_file_widget:
         channel_selection_file_widget.check()
-        channel_selection_file_widget.complete_step()
+        channel_selection_file_widget.complete_step(processed_files=len(channel_selection_files))
     else:
         logger.warning("channelselection widget not found in global state.")
         raise ValueError("channelselection widget not found in global state.")
