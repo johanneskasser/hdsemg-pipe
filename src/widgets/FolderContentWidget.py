@@ -48,6 +48,7 @@ class FolderContentWidget(QWidget):
     def update_folder_content(self):
         """Updates the folder structure display when a new folder is set."""
         folder_path = global_state.workfolder
+        raise Exception(folder_path)
         if folder_path:
             self.folder_label.setText(f"{folder_path}")
             if os.path.isdir(folder_path):
