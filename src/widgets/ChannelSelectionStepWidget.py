@@ -61,3 +61,17 @@ class ChannelSelectionStepWidget(BaseStepWidget):
         else:
             self.clear_status()
             self.setActionButtonsEnabled(True)
+
+    def complete_step(self, processed_files: int | None = None):
+        # refresh counts
+        self.total_files = len(global_state.channel_selection_files)
+        self.processed_files = processed_files if processed_files is not None else self.total_files
+
+        # update the label *inline*
+        self.additional_information_label.setText(f"{self.processed_files}/{self.total_files}")
+
+        # make sure the loading spinner is off
+        self.btn_select_channels.stop_loading()
+
+        # mark the step as complete (signals, styling, etc.)
+        super().complete_step()

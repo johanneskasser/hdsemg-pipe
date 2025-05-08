@@ -18,7 +18,7 @@ def setup_logging():
                 'class': 'logging.StreamHandler',
                 'formatter': 'standard',
                 'level': 'DEBUG',
-                'stream': 'ext://sys.stdout'
+                'stream': 'ext://sys.stdout',
             },
             'file': {
                 'class': 'logging.handlers.RotatingFileHandler',
@@ -27,7 +27,8 @@ def setup_logging():
                 'filename': 'hdsemg-pipe.log',
                 'mode': 'a',
                 'maxBytes': 1_000_000,  # 1 MB
-                'backupCount': 3  # Keep 3 backup files
+                'backupCount': 3,  # Keep 3 backup files
+                'encoding': 'utf-8'
             }
         },
         'loggers': {

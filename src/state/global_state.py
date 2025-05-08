@@ -1,7 +1,7 @@
 # state/global_state.py
 import os
 from _log.log_config import logger
-
+from actions.enum.FolderNames import FolderNames
 
 
 class GlobalState:
@@ -12,7 +12,9 @@ class GlobalState:
         self._original_files = []
         self.associated_files = []
         self.cropped_files = []
+        self.channel_selection_files = []
         self.workfolder = None
+        self.widgets = {}
 
     def __new__(cls):
         if cls._instance is None:
@@ -27,9 +29,13 @@ class GlobalState:
         self.workfolder = None
         self._widget_counter = 0
         self.cropped_files = []
+        self.channel_selection_files = []
         # Store widgets as a dictionary where each value is a dictionary
         # with two keys: "widget" and "completed_step".
-        self.widgets = {}
+        if not hasattr(self, "widgets"):
+            self.widgets = {}
+        for widget_data in self.widgets.values():
+            widget_data["completed_step"] = False
 
     def register_widget(self, widget, name=None):
         """Register a widget globally with an auto-generated name and a completion flag."""
@@ -96,31 +102,31 @@ class GlobalState:
     def get_associated_grids_path(self):
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
-        path = os.path.join(self.workfolder, 'associated_grids')
+        path = os.path.join(self.workfolder, FolderNames.ASSOCIATED_GRIDS.value)
         return os.path.normpath(path)
 
     def get_channel_selection_path(self):
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
-        path = os.path.join(self.workfolder, 'channelselection')
+        path = os.path.join(self.workfolder, FolderNames.CHANNELSELECTION.value)
         return os.path.normpath(path)
 
     def get_decomposition_path(self):
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
-        path = os.path.join(self.workfolder, 'decomposition')
+        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION.value)
         return os.path.normpath(path)
 
     def get_cropped_signal_path(self):
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
-        path = os.path.join(self.workfolder, 'cropped_signal')
+        path = os.path.join(self.workfolder, FolderNames.CROPPED_SIGNAL.value)
         return os.path.normpath(path)
 
     def get_original_files_path(self):
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
-        path = os.path.join(self.workfolder, 'original_files')
+        path = os.path.join(self.workfolder, FolderNames.ORIGINAL_FILES.value)
         return os.path.normpath(path)
 
     def get_original_files(self):

@@ -3,9 +3,11 @@ import subprocess
 import platform
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QTextEdit, QLabel, QHBoxLayout, QPushButton, QStyle
+    QWidget, QVBoxLayout, QTextEdit, QLabel, QHBoxLayout, QPushButton, QStyle, QFileDialog, QDialog, QMessageBox
 )
 from state.global_state import global_state
+from controller.automatic_state_reconstruction import start_reconstruction_workflow
+from _log.log_config import logger
 
 
 class FolderContentWidget(QWidget):
@@ -30,9 +32,7 @@ class FolderContentWidget(QWidget):
         folder_icon = self.style().standardIcon(QStyle.SP_DirIcon)
         self.folder_button.setIcon(folder_icon)
         self.folder_button.setToolTip("Open Folder")
-        # Initially disable the button if no folder is set
-        self.folder_button.setEnabled(False)
-        self.folder_button.clicked.connect(self.open_folder_explorer)
+        self.folder_button.clicked.connect(self.button_behaviour)
         top_layout.addWidget(self.folder_button)
 
         layout.addLayout(top_layout)
@@ -53,14 +53,11 @@ class FolderContentWidget(QWidget):
             if os.path.isdir(folder_path):
                 folder_structure = self.get_folder_structure(folder_path)
                 # Enable the button only if the folder path is valid
-                self.folder_button.setEnabled(True)
             else:
                 folder_structure = "Invalid folder."
-                self.folder_button.setEnabled(False)
         else:
             self.folder_label.setText("")
             folder_structure = ""
-            self.folder_button.setEnabled(False)
 
         self.folder_display.setText(folder_structure)
 
@@ -79,7 +76,7 @@ class FolderContentWidget(QWidget):
             folder_content += f"{indent}❌ Access Denied\n"
         return folder_content
 
-    def open_folder_explorer(self):
+    def button_behaviour(self):
         """Open the system's file explorer for the associated folder."""
         folder_path = global_state.workfolder
         if folder_path and os.path.isdir(folder_path):
@@ -89,3 +86,5 @@ class FolderContentWidget(QWidget):
                 subprocess.Popen(["open", folder_path])
             else:
                 subprocess.Popen(["xdg-open", folder_path])
+        else:
+            start_reconstruction_workflow(self)
