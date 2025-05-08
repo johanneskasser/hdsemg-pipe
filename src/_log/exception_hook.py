@@ -1,7 +1,7 @@
 import traceback
 import platform
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QMessageBox, QApplication, QStyle, QPushButton
 
 from _log.log_config import logger
@@ -26,12 +26,33 @@ def exception_hook(exc_type, exc_value, exc_traceback):
     dlg.setIcon(QMessageBox.Critical)
 
     copy_informative_text_button = QPushButton(QApplication.style().standardIcon(QStyle.SP_FileDialogDetailedView),
-                                               "Copy Informative Text")
+                                               "")
+    copy_informative_text_button.setToolTip("Copy detailed error report to clipboard")
     dlg.addButton(copy_informative_text_button, QMessageBox.ActionRole)
     copy_informative_text_button.setAutoDefault(False)
     copy_informative_text_button.setDefault(False)
-    copy_informative_text_button.clicked.connect(lambda: QApplication.clipboard().setText(informative_text))
+
+    def copy_and_show_success():
+        QApplication.clipboard().setText(informative_text)
+        original_text = copy_informative_text_button.text()
+        copy_informative_text_button.setText("")
+        copy_informative_text_button.setIcon(QApplication.style().standardIcon(QStyle.SP_DialogApplyButton))
+        copy_informative_text_button.setEnabled(False)
+        # Nach 1.5 Sekunden Text zurücksetzen
+        QTimer.singleShot(1500, lambda: (
+            copy_informative_text_button.setText(original_text),
+            copy_informative_text_button.setIcon(QApplication.style().standardIcon(QStyle.SP_FileDialogDetailedView)),
+            copy_informative_text_button.setEnabled(True)
+        ))
+
+    copy_informative_text_button.clicked.connect(copy_and_show_success)
+
+    # Button-Behandlung überschreiben
+    dlg.buttonClicked.connect(lambda button:
+                              dlg.done(dlg.Close) if button != copy_informative_text_button else None)
+
     dlg.setStandardButtons(QMessageBox.Ok)
+    dlg.exec_()
     dlg.exec_()
 
 def _build_detailed_text(exec_value, tb, exc_type):
