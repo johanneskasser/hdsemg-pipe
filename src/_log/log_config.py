@@ -19,7 +19,6 @@ def setup_logging():
                 'formatter': 'standard',
                 'level': 'DEBUG',
                 'stream': 'ext://sys.stdout',
-                'encoding': 'utf-8'
             },
             'file': {
                 'class': 'logging.handlers.RotatingFileHandler',
