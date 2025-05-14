@@ -27,14 +27,15 @@ def process_next_file(step, folder_content_widget):
         logger.info(f"Processing file: {file_path}")
 
         step.worker = ChannelSelectionWorker(file_path)
-        step.worker.finished.connect(lambda: file_processed(step, folder_content_widget))
+        step.worker.finished.connect(lambda: file_processed(step, folder_content_widget, file_path))
         step.worker.start()
     else:
         step.complete_step()
 
-def file_processed(step, folder_content_widget):
+def file_processed(step, folder_content_widget, file_path):
     """Updates progress after a file is processed and moves to the next."""
     step.processed_files += 1
+    global_state.channel_selection_files.append(file_path)
     step.update_progress(step.processed_files, step.total_files)
     folder_content_widget.update_folder_content()
     channel_selection_widget = global_state.get_widget("step3")

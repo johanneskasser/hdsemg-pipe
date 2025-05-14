@@ -140,6 +140,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.expected_folder = global_state.get_decomposition_path()
         self.watcher.addPath(self.expected_folder)
         logger.info(f"File checking initialized for folder: {self.expected_folder}")
+        self.get_decomposition_results()
 
     def check(self):
         venv_openhdemg = config.get(Settings.VENV_PATH)

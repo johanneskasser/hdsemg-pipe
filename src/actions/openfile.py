@@ -6,6 +6,7 @@ import numpy as np
 from PyQt5.QtWidgets import QFileDialog
 
 from _log.log_config import logger
+from actions.enum.FolderNames import FolderNames
 from config.config_enums import Settings
 from config.config_manager import config
 from shared_logic.hdsemg_shared.fileio.file_io import load_file
@@ -67,8 +68,7 @@ def count_mat_files(folder_path):
     """Returns the number of wanted files in a folder"""
     if not folder_path or not os.path.isdir(folder_path):
         return 0
-    return len([f for f in os.listdir(folder_path) if f.endswith('.mat', '.otb', '.otb+', '.otb4')])
-
+    return len([f for f in os.listdir(folder_path) if f.endswith(('.mat', '.otb', '.otb+', '.otb4'))])
 
 def create_work_folder(workfolder_path, file_path=None):
     """Creates a new folder in the workfolder based on the file name."""
@@ -102,21 +102,16 @@ def create_sub_work_folders(workfolder_path):
         logger.error("Created workfolder path does not exist. Please check.")
         return
 
-    original_files_foldername = "original_files"
-    channelselection_foldername = "channelselection"
-    associated_grids_foldername = "associated_grids"
-    decomposition_foldername = "decomposition"
-    cropped_signal_foldername = "cropped_signal"
 
-    original_files_foldername = os.path.join(workfolder_path, original_files_foldername)
+    original_files_foldername = os.path.join(workfolder_path, FolderNames.ORIGINAL_FILES.value)
     original_files_foldername = os.path.normpath(original_files_foldername)
-    channelselection_foldername = os.path.join(workfolder_path, channelselection_foldername)
+    channelselection_foldername = os.path.join(workfolder_path, FolderNames.CHANNELSELECTION.value)
     channelselection_foldername = os.path.normpath(channelselection_foldername)
-    associated_grids_foldername = os.path.join(workfolder_path, associated_grids_foldername)
+    associated_grids_foldername = os.path.join(workfolder_path, FolderNames.ASSOCIATED_GRIDS.value)
     associated_grids_foldername = os.path.normpath(associated_grids_foldername)
-    decomposition_foldername = os.path.join(workfolder_path, decomposition_foldername)
+    decomposition_foldername = os.path.join(workfolder_path, FolderNames.DECOMPOSITION.value)
     decomposition_foldername = os.path.normpath(decomposition_foldername)
-    cropped_signal_foldername = os.path.join(workfolder_path, cropped_signal_foldername)
+    cropped_signal_foldername = os.path.join(workfolder_path, FolderNames.CROPPED_SIGNAL.value)
     cropped_signal_foldername = os.path.normpath(cropped_signal_foldername)
 
     try:
@@ -179,8 +174,6 @@ def pre_process_files(filepaths):
         new_file_path = save_selection_to_mat(new_file_path, data, time, description, sf, fn, grid_info)
         logger.info(f"Saved pre-processed file to: {new_file_path}")
         save_json_means(json_means, new_file_path)
-        logger.debug(f"global_state (repr): {repr(global_state)}")
-        logger.debug(f"global_state is of type: {type(global_state)}")
         global_state.add_original_file(new_file_path)
 
 
