@@ -21,9 +21,10 @@ def init(parent):
 
     # Information label
     info_label = QLabel(
-        "openhdemg is a python application to analyse HD-EMG recordings.<br>"
+        "openhdemg is an open-source project to analyse HD-EMG recordings [<a href=\"https://doi.org/10.1016/j.jelekin.2023.102850\">Valli et al. 2024</a>].<br>"
         "Specify the base path of the virtual environment (venv).<br>"
-        "Please install <a href=\"https://github.com/GiacomoValliPhD/openhdemg\">openhdemg</a> if you have not done so already.<br>"
+        "In anaconda prompt type 'conda info --envs' for all environments and paths.<br>"
+        "Install <a href=\"https://github.com/GiacomoValliPhD/openhdemg\">openhdemg</a> if you have not done so already.<br>"
         "Then provide the path to the venv here."
     )
     info_label.setOpenExternalLinks(True)
