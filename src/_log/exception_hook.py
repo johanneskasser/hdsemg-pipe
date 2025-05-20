@@ -83,10 +83,11 @@ def _build_detailed_text(exec_value, tb, exc_type):
     exec_value_str += "\n\n==== Last 50 Logs ====\n"
     # Append the last 50 lines of the log file
     try:
-        with open("hdsemg-select.log", "r") as log_file:
+        with open("hdsemg-pipe.log", "r") as log_file:
             lines = log_file.readlines()
-            last_50_lines = "".join(lines[-50:])
-            exec_value_str += last_50_lines
+            start_index = max(0, len(lines) - 50)
+            last_lines = lines[start_index:]
+            exec_value_str += "".join(last_lines)
     except FileNotFoundError:
         exec_value_str += "Log file not found."
 

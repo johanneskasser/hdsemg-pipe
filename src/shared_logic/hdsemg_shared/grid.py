@@ -105,13 +105,19 @@ def extract_grid_info(description):
                     "indices": [],
                     "ied_mm": scale_mm,
                     "electrodes": electrodes,
-                    "reference_signals": []  # To store associated reference signals
+                    "reference_signals": [],
+                    "requested_path_idx": None,
+                    "performed_path_idx": None
                 }
             grid_info[grid_key]["indices"].append(idx)
             # Update current grid key
             current_grid_key = grid_key
         else:
-            # If no match and a current grid exists, treat it as a reference signal
+            if "requested path" in entry[0][0]:
+                grid_info[current_grid_key]["requested_path_idx"] = idx
+            if "performed path" in entry[0][0]:
+                grid_info[current_grid_key]["performed_path_idx"] = idx
+
             if current_grid_key:
                 grid_info[current_grid_key]["reference_signals"].append({"index": idx, "name": entry[0][0]})
 
