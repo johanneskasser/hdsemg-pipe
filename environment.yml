@@ -11,6 +11,7 @@ dependencies:
   - pyqt=5.15.*
   - requests>=2.26.0
   - torch>=1.10.0
+  - hdsemg-shared>=0.0.6
   - h5py
   - pip
   - pip:
