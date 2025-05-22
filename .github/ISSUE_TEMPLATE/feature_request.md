@@ -1,20 +1,33 @@
 ---
-name: Feature request
-about: Suggest an idea for this project
-title: ''
+name: 🚀 Feature Request
+about: Suggest a new idea or improvement for this project.
+title: '[Feature] '
 labels: enhancement
 assignees: johanneskasser
+---
+
+## ✨ Feature Description
+
+**What problem are you facing?**  
+_Briefly describe the issue or limitation you have encountered. Example: "It is difficult to batch export selected channels."_
 
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+## 💡 Proposed Solution
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+**What would you like to see implemented?**  
+_Clearly describe your proposed feature or improvement. Example: "Add a batch export option to the File menu for selected channels."_
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+---
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+## 🔄 Alternatives Considered
+
+**Have you considered any alternative solutions?**  
+_List any alternative approaches or features you have thought about._
+
+---
+
+## 📎 Additional Context
+
+**Anything else we should know?**  
+_Add screenshots, mockups, or further context to help us understand your request._

@@ -1,32 +1,67 @@
 ---
-name: Bug report
-about: Create a report to help us improve
-title: ''
+name: 🐞 Bug Report
+about: Report a bug to help us improve the project.
+title: '[BUG] '
 labels: bug
 assignees: johanneskasser
+---
+
+## 🐛 Bug Description
+
+**What is the issue?**  
+_Clearly and concisely describe the bug._
 
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## 🔁 Steps to Reproduce
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+1. Go to: `...`
+2. Click on: `...`
+3. Scroll to: `...`
+4. Observe the error
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+---
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+## 🤔 Expected Behavior
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+_What did you expect to happen instead?_
 
-**Logs**
-Please provide the detailed bug report or any logs regarding your error. The logfile can normally be found in [hdsemg-select-path]/hdsemg-pipe.log
+---
+
+## 🏷️ Severity
+**How severe is this issue?**
+
+| Severity | User Suggestion | Dev Confirmation | Description                      |
+|----------|:---------------:|:----------------:|----------------------------------|
+| Critical |       [ ]       |       [ ]        | Application crash or data loss   |
+| Major    |       [ ]       |       [ ]        | Significant functionality broken |
+| Minor    |       [ ]       |       [ ]        | Minor functionality issue        |
+| Trivial  |       [ ]       |       [ ]        | Cosmetic issue or typo           |
+
+
+
+---
+
+## 🖼️ Screenshots
+
+_If possible, add screenshots to illustrate the problem._
+
+---
+
+## 💻 System Information
+
+- **OS:** [e.g. Windows 11, macOS Ventura]
+- **Python Version:** [e.g. 3.11]
+- **hdsemg-select Version:** [e.g. 1.2.3]
+
+---
+
+## 📄 Logs
+
+_Please provide relevant log excerpts or error messages (e.g. from `[hdsemg-select-path]/hdsemg-select.log`) or the detailed log report._
+
+---
+
+## 📝 Additional Notes
+
+_Any other information that might help us resolve the issue._
