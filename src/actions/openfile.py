@@ -9,9 +9,9 @@ from _log.log_config import logger
 from actions.enum.FolderNames import FolderNames
 from config.config_enums import Settings
 from config.config_manager import config
-from shared_logic.hdsemg_shared.fileio.file_io import load_file
-from shared_logic.hdsemg_shared.fileio.matlab_file_io import save_selection_to_mat
-from shared_logic.hdsemg_shared.grid import extract_grid_info
+from hdsemg_shared.fileio.file_io import load_file
+from hdsemg_shared.fileio.matlab_file_io import save_selection_to_mat
+from hdsemg_shared.grid import extract_grid_info
 from state.global_state import global_state
 
 
