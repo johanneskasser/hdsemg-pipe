@@ -121,7 +121,7 @@ class MainWindow(QMainWindow):
         for step in self.steps[1:]:
             step.setActionButtonsEnabled(False)
 
-        version_label = QLabel(f"hdsemg-pipe | University of Applied Sciences Vienna - Department Physiotherapy | Version: {__version__}")
+        version_label = QLabel(f"hdsemg-pipe | University of Applied Sciences Campus Wien - Physiotherapy | Version: {__version__}")
         version_label.setStyleSheet("padding-right: 10px;")
         self.statusBar().addPermanentWidget(version_label)
 
