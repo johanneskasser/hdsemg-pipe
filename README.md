@@ -8,7 +8,7 @@
 A modular GUI application to guide users through high-density surface EMG (HDsEMG) processing, from raw signal acquisition to motor unit decomposition.
 
 <div align="center">
-  <img src="doc/resources/dashboard.png" alt="Dashboard" width="500">
+  <img src="docs/img/dashboard/dashboard.png" alt="Dashboard" width="500">
 </div>
 
 
@@ -83,7 +83,7 @@ If you prefer using Conda for environment management, run the following:
 ### Compile the resource file:
   ```bash
   cd ./src
-  pyrcc5 resources.qrc -o resources_rc.py
+  pyrcc5 img.qrc -o resources_rc.py
   ```
 
 ### Run the application:
@@ -110,7 +110,7 @@ If you prefer using Conda for environment management, run the following:
 📸 Example:  
 
 <div align="center">
-  <img src="doc/resources/folder_view.png" alt="Folder View" width="500">
+  <img src="docs/img/folder_view.png" alt="Folder View" width="500">
 </div>
 
 ---
@@ -125,7 +125,7 @@ Combine grids across multiple files to form a **virtual electrode grid**.
 
 📸 Example:
 <div align="center">
-  <img src="doc/resources/grid_association.png" alt="Grid Association" width="500">
+  <img src="docs/img/grid_association.png" alt="Grid Association" width="500">
 </div>
 
 ---
@@ -144,7 +144,7 @@ of the grids and select the region of interest. The selected region will be save
 
 📸 Example:
 <div align="center">
-  <img src="doc/resources/define_roi.png" alt="Define ROI" width="500">
+  <img src="docs/img/define_roi.png" alt="Define ROI" width="500">
 </div>
 
 ### 🧼 Step 4: Channel Cleaning
@@ -179,7 +179,7 @@ The app is configurable through the Settings Dialog accessible from the top menu
 - 🪵 Logging level of the application
 
 <div align="center">
-  <img src="doc/resources/settings.png" alt="Settings" width="500">
+  <img src="docs/img/settings.png" alt="Settings" width="500">
 </div>
 
 ---
