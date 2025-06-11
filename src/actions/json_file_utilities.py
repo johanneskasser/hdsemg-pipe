@@ -58,7 +58,7 @@ def concatenate_grid_and_channel_info(channel_selection_filepath, associated_gri
         grids_list.append(grid_entry)
     concatenated_info["grids"] = grids_list
 
-    # Also include additional combined grid info if available.
+    # Also includes additional combined grid info if available.
     combined_info = grids_data.get("combined_grid_info", {})
     concatenated_info["reference_signals"] = combined_info.get("reference_signals", [])
     concatenated_info["combined_emg_grid"] = combined_info.get("combined_emg_grid", {})
