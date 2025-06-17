@@ -10,84 +10,58 @@ on:
 jobs:
   import-check:
     runs-on: ubuntu-latest
+    outputs:
+      errors: ${{ steps.collect-errors.outputs.errors }}
     steps:
       - name: Check out code
         uses: actions/checkout@v3
 
       - name: Enforce hdsemg_pipe-prefixed imports
         id: import_check
-        continue-on-error: true
-        shell: bash
         run: |
-          set -euxo pipefail
-
-          echo ">>> Working directory: $(pwd)"
-          echo ">>> Listing top-level files/directories:"
-          ls -1
-
-          echo ">>> Listing subdirs up to depth=2:"
-          find . -maxdepth 2 -type d
-
-          echo ">>> Starting Python import checker..."
-          python3 - <<'EOF' > import_errors.txt 2>&1
+          python3 - <<'EOF'
           import ast, pathlib, sys
-          
+
           ROOT = pathlib.Path('.')
-          print("ROOT =", ROOT)
-          # detect your package dirs
-          local_modules = {p.name for p in (ROOT/'hdsemg_pipe').iterdir() if p.is_dir()}
-          local_modules.add('hdsemg_pipe')
-          print("local_modules =", local_modules)
-          
-          # gather all .py files
-          py_files = list(ROOT.rglob('*.py'))
-          print(f"Found {len(py_files)} Python files")
           errors = []
-          for path in py_files:
-              print("→ Checking", path)
-              if any(part in ('venv','.venv','__pycache__') for part in path.parts):
-                  print("  (skipping virtual-env or cache)")
+
+          local_modules = {p.name for p in (ROOT / 'hdsemg_pipe').iterdir() if p.is_dir()}
+          local_modules.add('hdsemg_pipe')
+
+          for path in ROOT.rglob('*.py'):
+              if any(part.startswith('.') or part in ('venv','.venv','__pycache__') for part in path.parts):
                   continue
-              src = path.read_text(encoding='utf-8')
-              tree = ast.parse(src, filename=str(path))
+
+              text = path.read_text(encoding='utf-8')
+              tree = ast.parse(text, filename=str(path))
+
               for node in ast.walk(tree):
-                  if isinstance(node, ast.ImportFrom) and node.level == 0:
+                  if isinstance(node, ast.ImportFrom):
                       mod = node.module or ''
-                      root_pkg = mod.split('.',1)[0]
-                      if root_pkg in local_modules and not mod.startswith('hdsemg_pipe'):
-                          msg = f"{path}:{node.lineno}: from {mod} import … → hdsemg_pipe.{mod}"
-                          print("  [ERROR]", msg)
-                          errors.append(msg)
-          
+                      if node.level == 0:
+                          root_pkg = mod.split('.',1)[0]
+                          if root_pkg in local_modules and not mod.startswith('hdsemg_pipe'):
+                              errors.append(f"{path}:{node.lineno}: 'from {mod} import …' should be 'from hdsemg_pipe.{mod} import …'")
+
           if errors:
-              print(f"Total errors: {len(errors)}")
-              for e in errors:
-                  print(e)
+              print("[FAIL] Absolute-import check failed:\n" + "\n".join(errors))
+              with open("import_errors.txt", "w") as f:
+                  f.write("\\n".join(errors))
               sys.exit(1)
           else:
-              print("✔ No import errors found.")
-          EOF
+              print("[OK] All imports are correctly prefixed with 'hdsemg_pipe.'")
+              with open("import_errors.txt", "w") as f:
+                  f.write("")
 
-          rc=$?
-          echo ">>> import-check exit code: $rc"
-
-          echo ">>> Contents of import_errors.txt:"
-          cat import_errors.txt || true
-
-          # publish multiline output
-          if [[ -s import_errors.txt ]]; then
-            echo "errors<<EOF" >> $GITHUB_OUTPUT
-            cat import_errors.txt >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "errors=All imports OK" >> $GITHUB_OUTPUT
-          fi
-
-          # finally, propagate Python’s exit code
-          exit $rc
+      - name: Collect Errors as Output
+        id: collect-errors
+        run: |
+          echo "errors<<EOF" >> $GITHUB_OUTPUT
+          cat import_errors.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Comment on Pull Request (failure)
-        if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && steps.import_check.outcome == 'failure' }}
+        if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && needs.import-check.result == 'success' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -96,9 +70,8 @@ jobs:
             ### ❌ Absolute-import check failed
             Please correct the imports in these files:
             ```
-            ${{ steps.import_check.outputs.errors }}
+            ${{ jobs.import-check.outputs.errors }}
             ```
-
       - name: Comment on Pull Request (success)
         if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && steps.import_check.outcome == 'success' }}
         uses: peter-evans/create-or-update-comment@v4
@@ -112,3 +85,4 @@ jobs:
       - name: Fail if there were import errors
         if: ${{ steps.import_check.outcome == 'failure' }}
         run: exit 1
+
