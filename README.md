@@ -1,6 +1,6 @@
 <div align="center">
 <br>
-  <img src="src/resources/icon.png" alt="App Icon" width="100" height="100"><br>
+  <img src="hdsemg_pipe/resources/icon.png" alt="App Icon" width="100" height="100"><br>
     <h2 align="center">🧠 hdsemg-pipe</h2>
     <h3 align="center">HDsEMG Workflow Manager</h3>
 </div>

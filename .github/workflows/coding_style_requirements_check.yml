@@ -1,0 +1,105 @@
+name: Enforce absolute imports
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/*.py"
+
+jobs:
+  import-check:
+    runs-on: ubuntu-latest
+    continue-on-error: true  # wichtig: blockiert Kommentarjobs nicht
+    outputs:
+      errors: ${{ steps.collect-errors.outputs.errors }}
+      status: ${{ steps.import_check.outcome }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Enforce hdsemg_pipe-prefixed imports
+        id: import_check
+        run: |
+          python3 - <<'EOF'
+          import ast, pathlib, sys
+
+          ROOT = pathlib.Path('.')
+          errors = []
+
+          local_modules = {p.name for p in (ROOT / 'hdsemg_pipe').iterdir() if p.is_dir()}
+          local_modules.add('hdsemg_pipe')
+
+          for path in ROOT.rglob('*.py'):
+              if any(part.startswith('.') or part in ('venv','.venv','__pycache__') for part in path.parts):
+                  continue
+
+              text = path.read_text(encoding='utf-8')
+              tree = ast.parse(text, filename=str(path))
+
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ImportFrom):
+                      mod = node.module or ''
+                      if node.level == 0:
+                          root_pkg = mod.split('.',1)[0]
+                          if root_pkg in local_modules and not mod.startswith('hdsemg_pipe'):
+                              errors.append(f"{path}:{node.lineno}: 'from {mod} import …' should be 'from hdsemg_pipe.{mod} import …'")
+
+          if errors:
+              print("[FAIL] Absolute-import check failed:\n" + "\n".join(errors))
+              with open("import_errors.txt", "w") as f:
+                  f.write("\n".join(errors))
+              sys.exit(1)
+          else:
+              print("[OK] All imports are correctly prefixed with 'hdsemg_pipe.'")
+              with open("import_errors.txt", "w") as f:
+                  f.write("")
+
+      - name: Collect Errors as Output
+        id: collect-errors
+        if: always()
+        run: |
+          # Generate unique delimiter using timestamp and random numbers
+          DELIM="HDS_DELIM_$(date +%s)_${RANDOM}_${RANDOM}"
+          {
+            echo "errors<<$DELIM"
+            cat import_errors.txt 2>/dev/null || true
+            echo
+            echo "$DELIM"
+          } >> $GITHUB_OUTPUT
+  
+  
+
+  comment-on-failure:
+    needs: import-check
+    if: ${{ needs.import-check.outputs.status == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ❌ Import Check Failed:
+            ```
+            ${{ needs.import-check.outputs.errors }}
+            ```
+
+  comment-on-success:
+    needs: import-check
+    if: ${{ needs.import-check.outputs.status == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ✅ All imports look good!
+
+  fail-on-error:
+    needs: [import-check, comment-on-failure, comment-on-success]
+    if: ${{ needs.import-check.outputs.status == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1

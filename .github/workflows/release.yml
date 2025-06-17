@@ -22,7 +22,7 @@ jobs:
           python-version: '3.10.x'
 
       - name: Install dependencies
-        working-directory: ./src
+        working-directory: ./hdsemg_pipe
         run: |
           python -m pip install --upgrade pip
           pip install -r ../requirements.txt
@@ -30,19 +30,19 @@ jobs:
         shell: cmd
 
       - name: Generate version.py from Git tag
-        working-directory: ./src
+        working-directory: ./hdsemg_pipe
         run: |
           APP_VERSION=${RAW_TAG#v}
           echo "__version__ = '${APP_VERSION}'" > version.py
         shell: bash
 
       - name: Make version resource (version.txt)
-        working-directory: ./src
+        working-directory: ./hdsemg_pipe
         run: python make_version.py
         shell: bash
 
       - name: Compile resources file
-        working-directory: ./src
+        working-directory: ./hdsemg_pipe
         run: |
           if not exist resources_rc.py (
             echo Compiling resources.qrc to resources_rc.py
@@ -53,7 +53,7 @@ jobs:
         shell: cmd
 
       - name: Build executable
-        working-directory: ./src
+        working-directory: ./hdsemg_pipe
         run: |
           pyinstaller hdsemg-pipe.spec
         shell: cmd
@@ -62,7 +62,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hdsemg-pipe
-          path: ./src/dist/hdsemg-pipe.exe
+          path: ./hdsemg_pipe/dist/hdsemg-pipe.exe
 
       - name: Gather Release Notes
         shell: 'bash'
@@ -94,7 +94,7 @@ jobs:
       - name: Create release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: ./src/dist/hdsemg-pipe.exe
+          artifacts: ./hdsemg_pipe/dist/hdsemg-pipe.exe
           token: '${{ secrets.GITHUB_TOKEN }}'
           tag: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
