@@ -10,15 +10,16 @@ on:
 jobs:
   import-check:
     runs-on: ubuntu-latest
+    continue-on-error: true  # wichtig: blockiert Kommentarjobs nicht
     outputs:
       errors: ${{ steps.collect-errors.outputs.errors }}
+      status: ${{ steps.import_check.outcome }}
     steps:
       - name: Check out code
         uses: actions/checkout@v3
 
       - name: Enforce hdsemg_pipe-prefixed imports
         id: import_check
-        continue-on-error: true
         run: |
           python3 - <<'EOF'
           import ast, pathlib, sys
@@ -47,7 +48,7 @@ jobs:
           if errors:
               print("[FAIL] Absolute-import check failed:\n" + "\n".join(errors))
               with open("import_errors.txt", "w") as f:
-                  f.write("\\n".join(errors))
+                  f.write("\n".join(errors))
               sys.exit(1)
           else:
               print("[OK] All imports are correctly prefixed with 'hdsemg_pipe.'")
@@ -63,7 +64,7 @@ jobs:
 
   comment-on-failure:
     needs: import-check
-    if: ${{ needs.import-check.result == 'failure' }}
+    if: ${{ needs.import-check.outputs.status == 'failure' }}
     runs-on: ubuntu-latest
     steps:
       - uses: peter-evans/create-or-update-comment@v4
@@ -75,9 +76,10 @@ jobs:
             ```
             ${{ needs.import-check.outputs.errors }}
             ```
+
   comment-on-success:
     needs: import-check
-    if: ${{ needs.import-check.result == 'success' }}
+    if: ${{ needs.import-check.outputs.status == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: peter-evans/create-or-update-comment@v4
@@ -89,8 +91,7 @@ jobs:
 
   fail-on-error:
     needs: [import-check, comment-on-failure, comment-on-success]
-    if: ${{ needs.import-check.result == 'failure' }}
+    if: ${{ needs.import-check.outputs.status == 'failure' }}
     runs-on: ubuntu-latest
     steps:
       - run: exit 1
-
