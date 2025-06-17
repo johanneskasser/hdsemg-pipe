@@ -60,29 +60,36 @@ jobs:
           cat import_errors.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Comment on Pull Request (failure)
-        if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && needs.import-check.result == 'success' }}
-        uses: peter-evans/create-or-update-comment@v4
+  comment-on-failure:
+    needs: import-check
+    if: ${{ needs.import-check.result == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.pull_request.number }}
           body: |
-            ### ❌ Absolute-import check failed
-            Please correct the imports in these files:
+            ❌ Import Check Failed:
             ```
-            ${{ jobs.import-check.outputs.errors }}
+            ${{ needs.import-check.outputs.errors }}
             ```
-      - name: Comment on Pull Request (success)
-        if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && steps.import_check.outcome == 'success' }}
-        uses: peter-evans/create-or-update-comment@v4
+  comment-on-success:
+    needs: import-check
+    if: ${{ needs.import-check.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.pull_request.number }}
           body: |
-            ### ✅ Absolute-Import Check succeeded
-            All Python imports use the required absolute import style.
+            ✅ All imports look good!
 
-      - name: Fail if there were import errors
-        if: ${{ steps.import_check.outcome == 'failure' }}
-        run: exit 1
+  fail-on-error:
+    needs: [import-check, comment-on-failure, comment-on-success]
+    if: ${{ needs.import-check.result == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
 
