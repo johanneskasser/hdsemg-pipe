@@ -60,9 +60,12 @@ class DecompositionResultsStepWidget(BaseStepWidget):
 
     def start_openhdemg(self, on_started_callback=None):
         """Starts the OpenHD-EMG application and optionally calls a callback when it appears to be running."""
-        venv_python = os.path.join(config.get(Settings.VENV_PATH), "Scripts", "python.exe")
-        logger.info(f"Starting openhdemg with {venv_python}")
-        command = [venv_python, "-m", "openhdemg.gui.openhdemg_gui"]
+        if not config.get(Settings.OPENHDEMG_INSTALLED) or None:
+            self.warn("OpenHD-EMG virtual environment path is not set or invalid. Please set it in Settings first.")
+            return
+
+        logger.info(f"Starting openhdemg!")
+        command = ["openhdemg", "-m", "openhdemg.gui.openhdemg_gui"]
         proc = subprocess.Popen(command)
 
         # Starten eines Threads, der nach einer kurzen Zeit prüft, ob der Prozess noch läuft.
@@ -143,11 +146,9 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.get_decomposition_results()
 
     def check(self):
-        venv_openhdemg = config.get(Settings.VENV_PATH)
-        if venv_openhdemg is None or "":
-            self.warn("OpenHD-EMG virtual environment path is not set. Please set it in Settings first.")
-        elif not os.path.exists(venv_openhdemg):
-            self.warn("OpenHD-EMG virtual environment path does not exist.")
+        venv_openhdemg = config.get(Settings.OPENHDEMG_INSTALLED)
+        if venv_openhdemg is None or False:
+            self.warn("openhdemg is not installed. Please download it in Settings first.")
         else:
             self.clear_status()
             self.setActionButtonsEnabled(True)

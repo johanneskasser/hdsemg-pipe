@@ -3,6 +3,7 @@ import os
 import enum
 from threading import Lock
 from _log.log_config import logger
+from config.config_enums import Settings
 
 CONFIG_FILE = "config/config.json"
 
@@ -25,6 +26,7 @@ class ConfigManager:
             with open(CONFIG_FILE, "r") as f:
                 try:
                     self.settings = json.load(f)
+                    self.check_installations()
                 except json.JSONDecodeError:
                     self.settings = {}
                     logger.error("Failed to open config file.")
@@ -50,6 +52,21 @@ class ConfigManager:
         """Get a configuration value."""
         key = key.name
         return self.settings.get(key, default)
+
+    def is_package_installed(self, package_name):
+        """Check if a specific package is installed."""
+        try:
+            import importlib
+            importlib.import_module(package_name)
+            return True
+        except ImportError:
+            return False
+
+
+    def check_installations(self):
+        """Check if the configuration still exists."""
+        self.set(Settings.HDSEMG_SELECT_INSTALLED, self.is_package_installed("hdsemg_select"))
+        self.set(Settings.OPENHDEMG_INSTALLED, self.is_package_installed("openhdemg"))
 
 # Singleton instance
 config = ConfigManager()

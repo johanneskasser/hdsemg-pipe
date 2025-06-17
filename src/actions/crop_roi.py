@@ -23,7 +23,6 @@ def _normalize_single(x):
         return str(x).lower()
 
 def normalize(desc):
-    # Verarbeitet numpy-Arrays elementweise oder einzelne Elemente
     if isinstance(desc, np.ndarray):
         return np.array([_normalize_single(item) for item in desc])
     else:

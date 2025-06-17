@@ -12,6 +12,7 @@ dependencies:
   - requests>=2.26.0
   - torch>=1.10.0
   - hdsemg-shared>=0.10.7
+  - hdsemg-select>=0.0.4.2
   - h5py
   - pip
   - pip:
