@@ -1,0 +1,50 @@
+name: Enforce absolute imports
+
+on:
+  pull_request:
+    paths:
+      - '**/*.py'
+
+jobs:
+  import-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Enforce hdsemg_pipe-prefixed imports
+        run: |
+          python3 - <<'EOF'
+          import ast, pathlib, sys
+
+          ROOT = pathlib.Path('.')
+          errors = []
+
+          # all top-level folders in your package
+          local_modules = {p.name for p in (ROOT / 'hdsemg_pipe').iterdir() if p.is_dir()}
+          local_modules.add('hdsemg_pipe')
+
+          for path in ROOT.rglob('*.py'):
+              # skip venv, tests in external dirs, etc.
+              if any(part.startswith('.') or part in ('venv','.venv','__pycache__') for part in path.parts):
+                  continue
+
+              text = path.read_text(encoding='utf-8')
+              tree = ast.parse(text, filename=str(path))
+
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ImportFrom):
+                      # only absolute imports (level==0)
+                      mod = node.module or ''
+                      if node.level == 0:
+                          root_pkg = mod.split('.',1)[0]
+                          # if we’re importing one of our modules but not via hdsemg_pipe
+                          if root_pkg in local_modules and not mod.startswith('hdsemg_pipe'):
+                              errors.append(f"{path}:{node.lineno}: "
+                                            f"'from {mod} import …' should be "
+                                            f"'from hdsemg_pipe.{mod} import …'")
+
+          if errors:
+              print("[FAIL] Absolute-import check failed:\n" + "\n".join(errors))
+              sys.exit(1)
+          EOF

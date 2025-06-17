@@ -5,14 +5,14 @@ from datetime import datetime
 import numpy as np
 from PyQt5.QtWidgets import QFileDialog
 
-from _log.log_config import logger
-from actions.enum.FolderNames import FolderNames
-from config.config_enums import Settings
-from config.config_manager import config
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.enum.FolderNames import FolderNames
+from hdsemg_pipe.config.config_enums import Settings
+from hdsemg_pipe.config.config_manager import config
 from hdsemg_shared.fileio.file_io import load_file
 from hdsemg_shared.fileio.matlab_file_io import save_selection_to_mat
 from hdsemg_shared.grid import extract_grid_info
-from state.global_state import global_state
+from hdsemg_pipe.state.global_state import global_state
 
 
 def open_file_or_folder(mode='file'):

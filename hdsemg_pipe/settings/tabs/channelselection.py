@@ -3,10 +3,10 @@ import sys
 
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QMessageBox
 
-from _log.log_config import logger
-from config.config_enums import Settings
-from config.config_manager import config
-from settings.tabs.installer import InstallThread
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.config.config_enums import Settings
+from hdsemg_pipe.config.config_manager import config
+from hdsemg_pipe.settings.tabs.installer import InstallThread
 
 
 def is_packaged():

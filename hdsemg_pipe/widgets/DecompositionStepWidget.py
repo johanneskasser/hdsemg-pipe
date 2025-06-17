@@ -6,14 +6,14 @@ import time
 from PyQt5.QtCore import pyqtSignal, QFileSystemWatcher
 from PyQt5.QtWidgets import QPushButton, QDialog
 
-from actions.file_utils import update_extras_in_pickle_file, update_extras_in_json_file
-from config.config_enums import Settings
-from config.config_manager import config
-from _log.log_config import logger
-from state.global_state import global_state
-from ui_elements.loadingbutton import LoadingButton
-from widgets.BaseStepWidget import BaseStepWidget
-from widgets.MappingDialog import MappingDialog
+from hdsemg_pipe.actions.file_utils import update_extras_in_pickle_file, update_extras_in_json_file
+from hdsemg_pipe.config.config_enums import Settings
+from hdsemg_pipe.config.config_manager import config
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.ui_elements.loadingbutton import LoadingButton
+from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.MappingDialog import MappingDialog
 
 
 class DecompositionResultsStepWidget(BaseStepWidget):

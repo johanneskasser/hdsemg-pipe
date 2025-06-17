@@ -1,0 +1,8 @@
+# Add README and requirements files
+include README.md
+include requirements.txt
+include environment.yml
+
+Add all non-Python files
+recursive-include docs *
+recursive-include hdsemg_pipe *.qrc *.py *.ui *.png *.svg *.ico *.icns

@@ -3,11 +3,11 @@ from PyQt5.QtWidgets import (
     QApplication, QDialog, QTabWidget, QWidget, QVBoxLayout,
     QLabel, QDialogButtonBox
 )
-from .tabs.channelselection import init as channelselectiontab_init
-from .tabs.workfolder import init_workfolder_widget
-from .tabs.openhdemg import init as init_openhdemg_widget
-from .tabs.log_setting import init as init_logging_widget
-from _log.log_config import logger
+from hdsemg_pipe.settings.tabs.channelselection import init as channelselectiontab_init
+from hdsemg_pipe.settings.tabs.workfolder import init_workfolder_widget
+from hdsemg_pipe.settings.tabs.openhdemg import init as init_openhdemg_widget
+from hdsemg_pipe.settings.tabs.log_setting import init as init_logging_widget
+from hdsemg_pipe._log.log_config import logger
 from PyQt5.QtCore import pyqtSignal
 
 class SettingsDialog(QDialog):

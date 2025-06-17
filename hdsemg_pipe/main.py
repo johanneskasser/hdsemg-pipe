@@ -3,21 +3,21 @@ import sys
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QFrame, QLabel
 
-from _log.exception_hook import exception_hook
-from controller.automatic_state_reconstruction import start_reconstruction_workflow
-from settings.settings_dialog import SettingsDialog
-from actions.file_manager import start_file_processing
-from _log.log_config import logger, setup_logging
-from state.global_state import global_state
-from widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
-from widgets.DecompositionStepWidget import DecompositionResultsStepWidget
-from widgets.DefineRoiStepWidget import DefineRoiStepWidget
-from widgets.FolderContentWidget import FolderContentWidget
-from widgets.GridAssociationStepWidget import GridAssociationWidget
-from widgets.OpenFileStepWidget import OpenFileStepWidget
-from version import __version__
+from hdsemg_pipe._log.exception_hook import exception_hook
+from hdsemg_pipe.controller.automatic_state_reconstruction import start_reconstruction_workflow
+from hdsemg_pipe.settings.settings_dialog import SettingsDialog
+from hdsemg_pipe.actions.file_manager import start_file_processing
+from hdsemg_pipe._log.log_config import logger, setup_logging
+from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
+from hdsemg_pipe.widgets.DecompositionStepWidget import DecompositionResultsStepWidget
+from hdsemg_pipe.widgets.DefineRoiStepWidget import DefineRoiStepWidget
+from hdsemg_pipe.widgets.FolderContentWidget import FolderContentWidget
+from hdsemg_pipe.widgets.GridAssociationStepWidget import GridAssociationWidget
+from hdsemg_pipe.widgets.OpenFileStepWidget import OpenFileStepWidget
+from hdsemg_pipe.version import __version__
 
-import resources_rc
+import hdsemg_pipe.resources_rc
 
 
 class MainWindow(QMainWindow):
@@ -136,11 +136,14 @@ class MainWindow(QMainWindow):
         """Start processing files and update the given step dynamically."""
         start_file_processing(step)
 
-
-if __name__ == '__main__':
+def main():
     app = QApplication(sys.argv)
     setup_logging()
     sys.excepthook = exception_hook
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
+
+
+if __name__ == '__main__':
+    main()

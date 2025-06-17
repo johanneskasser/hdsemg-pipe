@@ -5,9 +5,8 @@ import platform
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QTextEdit, QLabel, QHBoxLayout, QPushButton, QStyle, QFileDialog, QDialog, QMessageBox
 )
-from state.global_state import global_state
-from controller.automatic_state_reconstruction import start_reconstruction_workflow
-from _log.log_config import logger
+from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.controller.automatic_state_reconstruction import start_reconstruction_workflow
 
 
 class FolderContentWidget(QWidget):

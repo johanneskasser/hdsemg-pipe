@@ -5,8 +5,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont
 
-from _log.log_config import logger
-from state.global_state import global_state
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.state.global_state import global_state
 
 class BaseStepWidget(QWidget):
     stepCompleted = pyqtSignal(int)

@@ -1,7 +1,7 @@
 from PyQt5.QtGui import QMovie, QIcon
 from PyQt5.QtWidgets import QPushButton
 
-import resources_rc
+import hdsemg_pipe.resources_rc
 
 class LoadingButton(QPushButton):
     """

@@ -2,8 +2,8 @@ import os
 
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog
 
-from config.config_enums import Settings
-from config.config_manager import config
+from hdsemg_pipe.config.config_enums import Settings
+from hdsemg_pipe.config.config_manager import config
 
 
 def init_workfolder_widget(parent):

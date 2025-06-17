@@ -4,7 +4,7 @@ import platform
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QMessageBox, QApplication, QStyle, QPushButton
 
-from _log.log_config import logger
+from hdsemg_pipe._log.log_config import logger
 
 
 def exception_hook(exc_type, exc_value, exc_traceback):

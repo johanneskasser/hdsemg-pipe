@@ -1,6 +1,6 @@
 # hdsemg_pipe/version.py
 import subprocess
-from _log.log_config import logger
+from hdsemg_pipe._log.log_config import logger
 
 try:
     tag = subprocess.check_output(

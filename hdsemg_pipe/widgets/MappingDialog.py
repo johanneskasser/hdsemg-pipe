@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
     QDialog, QListWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QMessageBox, QDialogButtonBox
 )
-from state.global_state import global_state
+from hdsemg_pipe.state.global_state import global_state
 
 class MappingDialog(QDialog):
     def __init__(self, existing_mapping=None, parent=None):

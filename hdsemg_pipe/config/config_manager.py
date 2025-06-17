@@ -2,8 +2,8 @@ import json
 import os
 import enum
 from threading import Lock
-from _log.log_config import logger
-from config.config_enums import Settings
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.config.config_enums import Settings
 
 CONFIG_FILE = "config/config.json"
 

@@ -1,12 +1,12 @@
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QPushButton, QVBoxLayout, QMessageBox
 
-from actions.openfile import open_file_or_folder
-from config.config_enums import Settings
-from config.config_manager import config
-from widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.actions.openfile import open_file_or_folder
+from hdsemg_pipe.config.config_enums import Settings
+from hdsemg_pipe.config.config_manager import config
+from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
 
-from _log.log_config import logger
+from hdsemg_pipe._log.log_config import logger
 
 
 class OpenFileStepWidget(BaseStepWidget):

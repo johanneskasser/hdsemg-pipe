@@ -1,7 +1,7 @@
 # state/global_state.py
 import os
-from _log.log_config import logger
-from actions.enum.FolderNames import FolderNames
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.enum.FolderNames import FolderNames
 
 
 class GlobalState:

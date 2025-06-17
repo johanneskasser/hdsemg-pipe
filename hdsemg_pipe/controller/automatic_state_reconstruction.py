@@ -1,8 +1,8 @@
 import os
 
-from _log.log_config import logger
-from actions.enum.FolderNames import FolderNames
-from state.global_state import global_state
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.enum.FolderNames import FolderNames
+from hdsemg_pipe.state.global_state import global_state
 from PyQt5.QtWidgets import QMessageBox, QFileDialog
 
 

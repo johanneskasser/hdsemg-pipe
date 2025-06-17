@@ -2,13 +2,13 @@ import os
 
 from PyQt5.QtWidgets import QPushButton, QDialog, QLabel
 
-from actions.file_utils import copy_files
-from config.config_enums import Settings
-from state.global_state import global_state
-from widgets.BaseStepWidget import BaseStepWidget
-from actions.grid_associations import AssociationDialog
-from config.config_manager import config
-from _log.log_config import logger
+from hdsemg_pipe.actions.file_utils import copy_files
+from hdsemg_pipe.config.config_enums import Settings
+from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.actions.grid_associations import AssociationDialog
+from hdsemg_pipe.config.config_manager import config
+from hdsemg_pipe._log.log_config import logger
 
 
 def check_target_directory():

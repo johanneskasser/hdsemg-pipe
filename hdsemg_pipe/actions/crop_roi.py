@@ -6,7 +6,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.widgets import RangeSlider
 
-from _log.log_config import logger
+from hdsemg_pipe._log.log_config import logger
 from hdsemg_shared.grid import load_single_grid_file
 
 

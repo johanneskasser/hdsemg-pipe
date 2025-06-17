@@ -2,11 +2,11 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout,
     QPushButton, QComboBox
 )
-from _log.log_config import logger
+from hdsemg_pipe._log.log_config import logger
 import logging
 
-from config.config_enums import Settings
-from config.config_manager import config
+from hdsemg_pipe.config.config_enums import Settings
+from hdsemg_pipe.config.config_manager import config
 
 def init(parent):
     """

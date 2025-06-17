@@ -1,9 +1,9 @@
 import os
 
-from actions.openfile import count_mat_files
-from _log.log_config import logger
-from state.global_state import global_state
-from actions.workers import ChannelSelectionWorker
+from hdsemg_pipe.actions.openfile import count_mat_files
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.actions.workers import ChannelSelectionWorker
 
 
 def start_file_processing(step):

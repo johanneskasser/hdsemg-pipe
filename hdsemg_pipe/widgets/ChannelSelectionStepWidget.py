@@ -1,12 +1,11 @@
-from PyQt5.QtWidgets import QPushButton, QLabel
 
-from actions.file_manager import start_file_processing
-from config.config_enums import Settings
-from config.config_manager import config
-from _log.log_config import logger
-from state.global_state import global_state
-from ui_elements.loadingbutton import LoadingButton
-from widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.actions.file_manager import start_file_processing
+from hdsemg_pipe.config.config_enums import Settings
+from hdsemg_pipe.config.config_manager import config
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.ui_elements.loadingbutton import LoadingButton
+from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
 
 
 class ChannelSelectionStepWidget(BaseStepWidget):

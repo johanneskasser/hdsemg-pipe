@@ -10,9 +10,9 @@ import numpy as np
 import pandas as pd
 import torch
 
-from _log.log_config import logger
-from actions.json_file_utilities import concatenate_grid_and_channel_info
-from state.global_state import global_state
+from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.json_file_utilities import concatenate_grid_and_channel_info
+from hdsemg_pipe.state.global_state import global_state
 
 
 def copy_files(file_paths, destination_folder):

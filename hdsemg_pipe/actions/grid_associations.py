@@ -7,10 +7,10 @@ from pathlib import Path
 import numpy as np
 from PyQt5 import QtWidgets, QtCore
 
-from _log.log_config import logger
+from hdsemg_pipe._log.log_config import logger
 from hdsemg_shared.fileio.matlab_file_io import save_selection_to_mat
 from hdsemg_shared.grid import load_single_grid_file
-from state.global_state import global_state
+from hdsemg_pipe.state.global_state import global_state
 
 
 class AssociationDialog(QtWidgets.QDialog):
