@@ -56,22 +56,17 @@ jobs:
                   f.write("")
 
       - name: Collect Errors as Output
-        if: ${{ always() }}
         id: collect-errors
+        if: always()
         run: |
-          # Pick a delimiter that cannot collide with file contents
-          DELIM="ERR_$(uuidgen | tr '[:lower:]' '[:upper:]')"
-
-          # Just in case: loop until the delimiter isn’t found in the file
-          while grep -Fq "$DELIM" import_errors.txt 2>/dev/null; do
-            DELIM="ERR_$(uuidgen | tr '[:lower:]' '[:upper:]')"
-          done
-
+          # Generate unique delimiter using timestamp and random numbers
+          DELIM="HDS_DELIM_$(date +%s)_${RANDOM}_${RANDOM}"
           {
             echo "errors<<$DELIM"
-            cat import_errors.txt 2>/dev/null || true      # OK even if file absent
+            cat import_errors.txt 2>/dev/null || true
+            echo
             echo "$DELIM"
-          } >> "$GITHUB_OUTPUT"
+          } >> $GITHUB_OUTPUT
   
   
 
