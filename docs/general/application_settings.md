@@ -7,17 +7,16 @@ The settings dialog can be accessed from the top menu bar under **Settings** -> 
 ![Settings Dialog](../img/settings/settings_dialog.png)
 
 ### Channel Selection App
-The **Channel Selection App** section allows you to specify the path to the external hdsemg-select application. This is required for the channel selection step in the processing pipeline.
-If the path is set correctly, the application will display a check icon next to the path. If the path is not set or incorrect, a warning icon will be displayed instead.
-The application also displays clear instructions on how to set the path if it is not set correctly.
+The **Channel Selection App** section allows you to manage the installation of [hdsemg-select](https://github.com/johanneskasser/hdsemg-select), an external application used for channel selection.
+By default, the application will install the latest version of hdsemg-select from PyPI. 
+
 
 ### Work Folder
 The **Work Folder** section allows you to specify the working directory of the application. This is the directory where all the data will be stored and processed. As soon as you open a file, the application will create a subdirectory in the working directory with the name of the file or folder. Detailed information can be found in the [Opening Data](../processing/opening_data.md) section.
 
-### Openhdemg Executable
-The **Openhdemg Executable** section allows you to specify the path to the openhdemg executable. This is required for the decomposition step in the processing pipeline.
-The application wants a path to the openhdemg virtual environment, which is the folder where the openhdemg executable is located. If the path is set correctly, the application will display a check icon next to the path. If the path is not set or incorrect, a warning icon will be displayed instead.
-More details about the installation of openhdemg can be found in the [Official Openhdemg Documentation](https://www.giacomovalli.com/openhdemg/quick-start/).
+### Openhdemg Installation
+hdsemg-pipe can install the [openhdemg](https://www.giacomovalli.com/openhdemg/) open source project automatically from PyPI. If the application is running 
+from the sources, you can install openhdemg by going to Settings > Preferences > openhdemg > Install openhdemg. More information about the project can be found here: [Official Openhdemg Documentation](https://www.giacomovalli.com/openhdemg/quick-start/).
 
 ### Logging Level
 The **Logging Level** section allows you to specify the logging level of the application. This is useful for debugging and troubleshooting purposes. The available logging levels are:
