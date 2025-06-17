@@ -7,3 +7,5 @@ pandas>=1.3.5
 torch>=1.10.0
 requests>=2.26.0
 hdsemg-shared>=0.10.7
+hdsemg-select>=0.0.5
+openhdemg>=0.1.2

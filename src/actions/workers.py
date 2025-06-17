@@ -17,27 +17,10 @@ class ChannelSelectionWorker(QThread):
         """Starts the Channel Selection application and waits for it to complete."""
         logger.info(f"Processing: {self.file_path}")
 
-        # Get the executable path from the config
-        channelselection_exe_path = config.get(key=Settings.EXECUTABLE_PATH)
-
-        # Check if the executable path is set
-        if not channelselection_exe_path:
-            logger.warning("Executable path to Channel Selection app is not set!")
-            return
-
-        # Ensure the executable exists and is accessible
-        if not os.path.exists(channelselection_exe_path):
-            logger.error(f"Executable not found: {channelselection_exe_path}")
-            return
-
-        if not os.access(channelselection_exe_path, os.X_OK):
-            logger.error(f"Executable is not accessible: {channelselection_exe_path}")
-            return
-
         output_filepath = self.get_output_filepath()
 
         # Define the command with start parameters
-        command = [channelselection_exe_path, "--inputFile", self.file_path, "--outputFile", output_filepath]
+        command = ["hdsemg-select", "--inputFile", self.file_path, "--outputFile", output_filepath]
 
         try:
             # Start the application

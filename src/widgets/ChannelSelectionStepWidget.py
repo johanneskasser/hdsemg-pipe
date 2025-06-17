@@ -55,8 +55,8 @@ class ChannelSelectionStepWidget(BaseStepWidget):
             self.complete_step()
 
     def check(self):
-        if config.get(Settings.EXECUTABLE_PATH) is None:
-            self.warn("Channel Selection App Executable Path is not set. Please set it in Settings first.")
+        if config.get(Settings.HDSEMG_SELECT_INSTALLED) is False:
+            self.warn("hdsemg-select is not installed. Please install it to proceed (see Settings).")
             self.setActionButtonsEnabled(False)
         else:
             self.clear_status()

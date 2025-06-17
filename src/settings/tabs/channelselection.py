@@ -1,71 +1,93 @@
 import os
+import sys
 
-from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog
+from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QMessageBox
 
+from _log.log_config import logger
 from config.config_enums import Settings
 from config.config_manager import config
+from settings.tabs.installer import InstallThread
+
+
+def is_packaged():
+    return getattr(sys, 'frozen', False)
+
+
+def is_hdsemg_select_installed():
+    return config.get(Settings.HDSEMG_SELECT_INSTALLED, False)
+
 
 def init(parent):
     layout = QVBoxLayout()
-    # Create a horizontal layout for the file specification row
-    file_layout = QHBoxLayout()
-
-    # Information label
     info_label = QLabel(
-        "Please provide the path to the executable file of the Channel Selection App.<br>"
-        "This file is used to launch the Channel Selection App from the HDsEMG pipeline.<br>"
-        "The channelselection App can be installed <a href=\"https://github.com/haripen/Neuromechanics_FHCW\">here.</a>"
+        'The package <b>hdsemg-select</b> is required, to perform the "Channel Selection" step.<br>'
+        'More Information can be found <a href="https://github.com/johanneskasser/hdsemg-select">here</a>.'
     )
     info_label.setOpenExternalLinks(True)
     layout.addWidget(info_label)
 
-    # Label prompting for file path
-    file_label = QLabel("File Path:")
-    file_layout.addWidget(file_label)
+    status_layout = QHBoxLayout()
+    status_label = QLabel()
+    status_layout.addWidget(status_label)
+    install_button = QPushButton('Install hdsemg-select')
+    install_button.setVisible(False)
+    status_layout.addWidget(install_button)
+    progress_bar = QProgressBar()
+    progress_bar.setVisible(False)
+    status_layout.addWidget(progress_bar)
+    layout.addLayout(status_layout)
 
-    # QLineEdit for entering the file path
-    file_line_edit = QLineEdit()
-    file_line_edit.setPlaceholderText("Enter the file path...")
-    file_layout.addWidget(file_line_edit)
-
-    browse_button = QPushButton("Browse")
-    file_layout.addWidget(browse_button)
-
-    # QLabel to display the validity icon (green check or red X)
-    validity_indicator = QLabel()
-    validity_indicator.setFixedWidth(30)
-    file_layout.addWidget(validity_indicator)
-
-    # Add the file layout to the main layout
-    layout.addLayout(file_layout)
-
-    # Function to update the validity indicator based on file status
-    def update_validity():
-        file_path = file_line_edit.text().strip()
-        if os.path.exists(file_path) and file_path.lower().endswith('.exe') or file_path.lower().endswith('.py'):
-            config.set(Settings.EXECUTABLE_PATH, file_path)
-            validity_indicator.setText("✔")
-            validity_indicator.setStyleSheet("color: green; font-size: 20px;")
+    def update_status():
+        if is_hdsemg_select_installed():
+            status_label.setText('hdsemg-select is <b style="color:green">installed</b>.')
+            install_button.setVisible(False)
+            progress_bar.setVisible(False)
         else:
-            validity_indicator.setText("✖")
-            validity_indicator.setStyleSheet("color: red; font-size: 20px;")
+            status_label.setText('hdsemg-select is <b style="color:red">not installed</b>.')
+            if not is_packaged():
+                install_button.setVisible(True)
+            else:
+                install_button.setVisible(False)
+            progress_bar.setVisible(False)
 
-    # Update validity whenever the text changes
-    file_line_edit.textChanged.connect(update_validity)
-    if config.get(Settings.EXECUTABLE_PATH) is not None:
-        file_line_edit.setText(config.get(Settings.EXECUTABLE_PATH))
-        update_validity()
+    def on_install_clicked():
+        install_button.setEnabled(False)
+        progress_bar.setVisible(True)
+        progress_bar.setRange(0, 0)
+        status_label.setText("Installing …")
 
-    def open_file_dialog():
-        # Opens a file dialog. Adjust filters as needed.
-        file_path, _ = QFileDialog.getOpenFileName(
-            parent, "Select File", "",
-            "Executable and Python Files (*.exe *.py);;All Files (*)"
-        )
-        if file_path:
-            file_line_edit.setText(file_path)
+        thread = InstallThread("hdsemg-select", parent=parent)
+        parent._installer_thread = thread  # Store the thread in the parent to keep it alive
+        thread.finished.connect(handle_result)
+        thread.finished.connect(lambda *_: thread.deleteLater())
+        thread.start()
 
-    # Connect the browse button to the file dialog function
-    browse_button.clicked.connect(open_file_dialog)
+    def handle_result(success, msg):
+        progress_bar.setVisible(False)
+        install_button.setEnabled(True)
+        if success:
+            config.set(Settings.HDSEMG_SELECT_INSTALLED, True)
+            status_label.setText(
+                'hdsemg-select <b style="color:green">installed successfully</b>.'
+            )
+            dlg = QMessageBox(parent)
+            dlg.setIcon(QMessageBox.Information)
+            dlg.setWindowTitle("Installation Successful - Application restart required")
+            dlg.setText("The package <b>hdsemg-select</b> has been installed successfully.\n"
+                        "Please restart the application for the changes to take effect.")
+            restart_btn = dlg.addButton("Restart Now", QMessageBox.AcceptRole)
+            dlg.addButton("Restart Later", QMessageBox.RejectRole)
+            dlg.exec_()
+            if dlg.clickedButton() == restart_btn:
+                logger.info("Restarting application after hdsemg-select installation (User Choice).")
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+        else:
+            config.set(Settings.HDSEMG_SELECT_INSTALLED, False)
+            status_label.setText(
+                f'Installation failed: <span style="color:red">{msg}</span>'
+            )
+        update_status()  # still safe – we’re back on the GUI thread
 
+    install_button.clicked.connect(on_install_clicked)
+    update_status()
     return layout
