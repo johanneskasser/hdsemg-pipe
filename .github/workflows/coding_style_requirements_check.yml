@@ -1,7 +1,7 @@
 name: Enforce absolute imports
 
 on:
-  pull_request:
+  push:
     paths:
       - '**/*.py'
   workflow_dispatch:
