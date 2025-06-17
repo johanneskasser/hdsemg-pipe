@@ -18,8 +18,8 @@ setup(
     author="Johannes Kasser",
     author_email="johanneskasser@outlook.de",
     url="https://github.com/johanneskasser/hdsemg-pipe",
-    package_dir={"": "src"},
-    packages=find_packages(where="src"),
+    package_dir={"": "hdsemg_pipe"},
+    packages=find_packages(where="hdsemg_pipe"),
     install_requires=[
         "PyQt5>=5.15.0",
         "pyqt5-tools>=5.15.0; sys_platform == 'win32'",

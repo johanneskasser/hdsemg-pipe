@@ -58,7 +58,7 @@ After installing dependencies, you need to compile the Qt resources:
 
 1. **Navigate to the Source Directory**
    ```bash
-   cd ./src
+   cd ./hdsemg_pipe
    ```
 
 2. **Compile Resources**
@@ -71,7 +71,7 @@ After installing dependencies, you need to compile the Qt resources:
 After installation, you can run the application using:
 
 ```bash
-python src/main.py
+python hdsemg_pipe/main.py
 ```
 
 ## Additional Components

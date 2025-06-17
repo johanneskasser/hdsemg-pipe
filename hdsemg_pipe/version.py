@@ -1,4 +1,4 @@
-# src/version.py
+# hdsemg_pipe/version.py
 import subprocess
 from _log.log_config import logger
 

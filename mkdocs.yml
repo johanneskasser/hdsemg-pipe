@@ -49,4 +49,4 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [src]
+          paths: [hdsemg_pipe]
