@@ -49,4 +49,6 @@ jobs:
           if errors:
               print("[FAIL] Absolute-import check failed:\n" + "\n".join(errors))
               sys.exit(1)
+          else:
+              print("[OK] All imports are absolute and prefixed with 'hdsemg_pipe.'")
           EOF
