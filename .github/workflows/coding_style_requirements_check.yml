@@ -14,12 +14,15 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      # 1) Run Python import checks and capture errors without exiting the job
       - name: Enforce hdsemg_pipe-prefixed imports
         id: import_check
         continue-on-error: true
+        shell: bash
         run: |
-          ERRORS=$(python3 - <<'EOF'
+          set -euo pipefail
+
+          # 1) Python-Checker schreibt alle Fehler nach import_errors.txt
+          python3 - <<'EOF' > import_errors.txt
           import ast, pathlib, sys
           
           ROOT = pathlib.Path('.')
@@ -30,22 +33,30 @@ jobs:
           for path in ROOT.rglob('*.py'):
               if any(part in ('venv','.venv','__pycache__') for part in path.parts):
                   continue
-              tree = ast.parse(path.read_text(), filename=str(path))
+              tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
               for node in ast.walk(tree):
                   if isinstance(node, ast.ImportFrom) and node.level == 0:
                       mod = node.module or ''
                       root_pkg = mod.split('.',1)[0]
                       if root_pkg in local_modules and not mod.startswith('hdsemg_pipe'):
                           errors.append(f"{path}:{node.lineno}: from {mod} import … → hdsemg_pipe.{mod}")
+          
           if errors:
-              echo "::set-output name=errors::$(printf '%s\n' \"${errors[@]}\")"
-              exit 1
+              for e in errors:
+                  print(e)
+              sys.exit(1)
           EOF
-          )
-        shell: bash
 
-      # 2) Only comment on PRs targeting main when the import check failed
-      - name: Comment on Pull Request
+          # 2) Errors als multiline-Output verfügbar machen
+          if [[ -s import_errors.txt ]]; then
+            echo "errors<<EOF" >> $GITHUB_OUTPUT
+            cat import_errors.txt >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "errors=All imports OK" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on Pull Request (failure)
         if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && steps.import_check.outcome == 'failure' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
@@ -58,7 +69,16 @@ jobs:
             ${{ steps.import_check.outputs.errors }}
             ```
 
-      # 3) Finally, fail the job so the PR is blocked by this status check
+      - name: Comment on Pull Request (success)
+        if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && steps.import_check.outcome == 'success' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ### ✅ Absolute-Import Check succeeded
+            All Python imports use the required absolute import style.
+
       - name: Fail if there were import errors
         if: ${{ steps.import_check.outcome == 'failure' }}
         run: exit 1
