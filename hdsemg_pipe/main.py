@@ -12,7 +12,7 @@ from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
 from hdsemg_pipe.widgets.DecompositionStepWidget import DecompositionResultsStepWidget
 from hdsemg_pipe.widgets.DefineRoiStepWidget import DefineRoiStepWidget
-from hdsemg_pipe.widgets.FolderContentWidget import FolderContentWidget
+from widgets.FolderContentWidget import FolderContentWidget
 from hdsemg_pipe.widgets.GridAssociationStepWidget import GridAssociationWidget
 from hdsemg_pipe.widgets.OpenFileStepWidget import OpenFileStepWidget
 from hdsemg_pipe.version import __version__
