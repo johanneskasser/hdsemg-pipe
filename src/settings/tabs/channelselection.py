@@ -1,22 +1,21 @@
 import os
 import sys
-import threading
-import subprocess
 
-from PyQt5.QtCore import QThread
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar, QMessageBox
-from config.config_enums import Settings
-from config.config_manager import config
 
 from _log.log_config import logger
+from config.config_enums import Settings
+from config.config_manager import config
 from settings.tabs.installer import InstallThread
 
 
 def is_packaged():
     return getattr(sys, 'frozen', False)
 
+
 def is_hdsemg_select_installed():
     return config.get(Settings.HDSEMG_SELECT_INSTALLED, False)
+
 
 def init(parent):
     layout = QVBoxLayout()
@@ -58,7 +57,7 @@ def init(parent):
         status_label.setText("Installing …")
 
         thread = InstallThread("hdsemg-select", parent=parent)
-        parent._installer_thread = thread # Store the thread in the parent to keep it alive
+        parent._installer_thread = thread  # Store the thread in the parent to keep it alive
         thread.finished.connect(handle_result)
         thread.finished.connect(lambda *_: thread.deleteLater())
         thread.start()
