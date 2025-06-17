@@ -10,8 +10,8 @@ from hdsemg_pipe.actions.file_manager import start_file_processing
 from hdsemg_pipe._log.log_config import logger, setup_logging
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
-from widgets.DecompositionStepWidget import DecompositionResultsStepWidget
-from hdsemg_pipe.widgets.DefineRoiStepWidget import DefineRoiStepWidget
+from hdsemg_pipe.widgets.DecompositionStepWidget import DecompositionResultsStepWidget
+from widgets.DefineRoiStepWidget import DefineRoiStepWidget
 from hdsemg_pipe.widgets.FolderContentWidget import FolderContentWidget
 from hdsemg_pipe.widgets.GridAssociationStepWidget import GridAssociationWidget
 from hdsemg_pipe.widgets.OpenFileStepWidget import OpenFileStepWidget

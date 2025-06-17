@@ -19,35 +19,62 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          # 1) Run the checker and write any errors to import_errors.txt
-          python3 - <<'EOF' > import_errors.txt
+          set -euxo pipefail
+
+          echo ">>> Working directory: $(pwd)"
+          echo ">>> Listing top-level files/directories:"
+          ls -1
+
+          echo ">>> Listing subdirs up to depth=2:"
+          find . -maxdepth 2 -type d
+
+          echo ">>> Starting Python import checker..."
+          python3 - <<'EOF' > import_errors.txt 2>&1
           import ast, pathlib, sys
           
           ROOT = pathlib.Path('.')
-          errors = []
+          print("ROOT =", ROOT)
+          # detect your package dirs
           local_modules = {p.name for p in (ROOT/'hdsemg_pipe').iterdir() if p.is_dir()}
           local_modules.add('hdsemg_pipe')
+          print("local_modules =", local_modules)
           
-          for path in ROOT.rglob('*.py'):
+          # gather all .py files
+          py_files = list(ROOT.rglob('*.py'))
+          print(f"Found {len(py_files)} Python files")
+          errors = []
+          for path in py_files:
+              print("→ Checking", path)
               if any(part in ('venv','.venv','__pycache__') for part in path.parts):
+                  print("  (skipping virtual-env or cache)")
                   continue
-              tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+              src = path.read_text(encoding='utf-8')
+              tree = ast.parse(src, filename=str(path))
               for node in ast.walk(tree):
                   if isinstance(node, ast.ImportFrom) and node.level == 0:
                       mod = node.module or ''
                       root_pkg = mod.split('.',1)[0]
                       if root_pkg in local_modules and not mod.startswith('hdsemg_pipe'):
-                          errors.append(f"{path}:{node.lineno}: from {mod} import … → hdsemg_pipe.{mod}")
+                          msg = f"{path}:{node.lineno}: from {mod} import … → hdsemg_pipe.{mod}"
+                          print("  [ERROR]", msg)
+                          errors.append(msg)
           
           if errors:
+              print(f"Total errors: {len(errors)}")
               for e in errors:
                   print(e)
               sys.exit(1)
+          else:
+              print("✔ No import errors found.")
           EOF
-          # capture whether python exited with errors
-          rc=$?
 
-          # 2) Always publish the file into the step-output
+          rc=$?
+          echo ">>> import-check exit code: $rc"
+
+          echo ">>> Contents of import_errors.txt:"
+          cat import_errors.txt || true
+
+          # publish multiline output
           if [[ -s import_errors.txt ]]; then
             echo "errors<<EOF" >> $GITHUB_OUTPUT
             cat import_errors.txt >> $GITHUB_OUTPUT
@@ -56,9 +83,8 @@ jobs:
             echo "errors=All imports OK" >> $GITHUB_OUTPUT
           fi
 
-          # 3) Now exit with the original python return code
+          # finally, propagate Python’s exit code
           exit $rc
-
 
       - name: Comment on Pull Request (failure)
         if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && steps.import_check.outcome == 'failure' }}
