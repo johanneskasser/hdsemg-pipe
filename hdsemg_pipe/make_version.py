@@ -7,7 +7,7 @@ from PyInstaller.utils.win32.versioninfo import (
     VarFileInfo,
     VarStruct
 )
-from hdsemg_pipe.version import __version__
+from version import __version__
 
 # Version in 4 Teile zerlegen (z.B. "0.0.2" → (0, 0, 2, 0))
 version_parts = list(map(int, __version__.split('.')))  # Konvertiere map-Objekt zu Liste

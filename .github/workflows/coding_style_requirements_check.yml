@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "**/*.py"  # Check all Python files
+      - "**/*.py"
 
 jobs:
   import-check:
