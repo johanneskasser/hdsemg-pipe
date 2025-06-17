@@ -10,7 +10,6 @@ on:
 jobs:
   import-check:
     runs-on: ubuntu-latest
-    continue-on-error: true
     outputs:
       errors: ${{ steps.collect-errors.outputs.errors }}
     steps:
@@ -19,6 +18,7 @@ jobs:
 
       - name: Enforce hdsemg_pipe-prefixed imports
         id: import_check
+        continue-on-error: true
         run: |
           python3 - <<'EOF'
           import ast, pathlib, sys
