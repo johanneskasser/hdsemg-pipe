@@ -59,13 +59,21 @@ jobs:
         if: ${{ always() }}
         id: collect-errors
         run: |
-          DELIM="__HDS_IMPORT_ERRORS__"    # anything unique works
+          # Pick a delimiter that cannot collide with file contents
+          DELIM="ERR_$(uuidgen | tr '[:lower:]' '[:upper:]')"
+
+          # Just in case: loop until the delimiter isn’t found in the file
+          while grep -Fq "$DELIM" import_errors.txt 2>/dev/null; do
+            DELIM="ERR_$(uuidgen | tr '[:lower:]' '[:upper:]')"
+          done
+
           {
             echo "errors<<$DELIM"
-            cat import_errors.txt 2>/dev/null || true   # cat won't fail if file missing
+            cat import_errors.txt 2>/dev/null || true      # OK even if file absent
             echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
-
+  
+  
 
   comment-on-failure:
     needs: import-check
