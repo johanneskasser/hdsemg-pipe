@@ -59,9 +59,13 @@ jobs:
         if: ${{ always() }}
         id: collect-errors
         run: |
-          echo "errors<<EOF" >> $GITHUB_OUTPUT
-          cat import_errors.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          DELIM="__HDS_IMPORT_ERRORS__"    # anything unique works
+          {
+            echo "errors<<$DELIM"
+            cat import_errors.txt 2>/dev/null || true   # cat won't fail if file missing
+            echo "$DELIM"
+          } >> "$GITHUB_OUTPUT"
+
 
   comment-on-failure:
     needs: import-check
