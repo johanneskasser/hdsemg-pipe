@@ -3,9 +3,9 @@ import sys
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QGridLayout, QAction, qApp, QStyle, QFrame, QLabel
 
-from hdsemg_pipe._log.exception_hook import exception_hook
+from _log.exception_hook import exception_hook
 from hdsemg_pipe.controller.automatic_state_reconstruction import start_reconstruction_workflow
-from settings.settings_dialog import SettingsDialog
+from hdsemg_pipe.settings.settings_dialog import SettingsDialog
 from hdsemg_pipe.actions.file_manager import start_file_processing
 from hdsemg_pipe._log.log_config import logger, setup_logging
 from hdsemg_pipe.state.global_state import global_state

@@ -2,10 +2,10 @@ name: Enforce absolute imports
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - '**/*.py'
-  workflow_dispatch:
+      - "**/*.py"  # Check all Python files
 
 jobs:
   import-check:
