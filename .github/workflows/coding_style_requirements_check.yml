@@ -1,11 +1,11 @@
 name: Enforce absolute imports
 
 on:
-  push:
+  pull_request:
+    branches: [master]
     paths:
       - '**/*.py'
   workflow_dispatch:
-
 
 jobs:
   import-check:
@@ -14,41 +14,51 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
+      # 1) Run Python import checks and capture errors without exiting the job
       - name: Enforce hdsemg_pipe-prefixed imports
+        id: import_check
+        continue-on-error: true
         run: |
-          python3 - <<'EOF'
+          ERRORS=$(python3 - <<'EOF'
           import ast, pathlib, sys
-
+          
           ROOT = pathlib.Path('.')
           errors = []
-
-          # all top-level folders in your package
-          local_modules = {p.name for p in (ROOT / 'hdsemg_pipe').iterdir() if p.is_dir()}
+          local_modules = {p.name for p in (ROOT/'hdsemg_pipe').iterdir() if p.is_dir()}
           local_modules.add('hdsemg_pipe')
-
+          
           for path in ROOT.rglob('*.py'):
-              # skip venv, tests in external dirs, etc.
-              if any(part.startswith('.') or part in ('venv','.venv','__pycache__') for part in path.parts):
+              if any(part in ('venv','.venv','__pycache__') for part in path.parts):
                   continue
-
-              text = path.read_text(encoding='utf-8')
-              tree = ast.parse(text, filename=str(path))
-
+              tree = ast.parse(path.read_text(), filename=str(path))
               for node in ast.walk(tree):
-                  if isinstance(node, ast.ImportFrom):
-                      # only absolute imports (level==0)
+                  if isinstance(node, ast.ImportFrom) and node.level == 0:
                       mod = node.module or ''
-                      if node.level == 0:
-                          root_pkg = mod.split('.',1)[0]
-                          # if we’re importing one of our modules but not via hdsemg_pipe
-                          if root_pkg in local_modules and not mod.startswith('hdsemg_pipe'):
-                              errors.append(f"{path}:{node.lineno}: "
-                                            f"'from {mod} import …' should be "
-                                            f"'from hdsemg_pipe.{mod} import …'")
-
+                      root_pkg = mod.split('.',1)[0]
+                      if root_pkg in local_modules and not mod.startswith('hdsemg_pipe'):
+                          errors.append(f"{path}:{node.lineno}: from {mod} import … → hdsemg_pipe.{mod}")
           if errors:
-              print("[FAIL] Absolute-import check failed:\n" + "\n".join(errors))
-              sys.exit(1)
-          else:
-              print("[OK] All imports are absolute and prefixed with 'hdsemg_pipe.'")
+              echo "::set-output name=errors::$(printf '%s\n' \"${errors[@]}\")"
+              exit 1
           EOF
+          )
+        shell: bash
+
+      # 2) Only comment on PRs targeting master when the import check failed
+      - name: Comment on Pull Request
+        if: ${{ github.event_name == 'pull_request' && github.base_ref == 'master' && steps.import_check.outcome == 'failure' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ### ❌ Absolute-import check failed
+            Please correct the imports in these files:
+            ```
+            ${{ steps.import_check.outputs.errors }}
+            ```
+
+      # 3) Finally, fail the job so the PR is blocked by this status check
+      - name: Fail if there were import errors
+        if: ${{ steps.import_check.outcome == 'failure' }}
+        run: exit 1
