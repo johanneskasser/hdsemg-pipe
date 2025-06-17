@@ -19,9 +19,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
-
-          # 1) Python-Checker schreibt alle Fehler nach import_errors.txt
+          # 1) Run the checker and write any errors to import_errors.txt
           python3 - <<'EOF' > import_errors.txt
           import ast, pathlib, sys
           
@@ -46,8 +44,10 @@ jobs:
                   print(e)
               sys.exit(1)
           EOF
+          # capture whether python exited with errors
+          rc=$?
 
-          # 2) Errors als multiline-Output verfügbar machen
+          # 2) Always publish the file into the step-output
           if [[ -s import_errors.txt ]]; then
             echo "errors<<EOF" >> $GITHUB_OUTPUT
             cat import_errors.txt >> $GITHUB_OUTPUT
@@ -55,6 +55,10 @@ jobs:
           else
             echo "errors=All imports OK" >> $GITHUB_OUTPUT
           fi
+
+          # 3) Now exit with the original python return code
+          exit $rc
+
 
       - name: Comment on Pull Request (failure)
         if: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && steps.import_check.outcome == 'failure' }}
