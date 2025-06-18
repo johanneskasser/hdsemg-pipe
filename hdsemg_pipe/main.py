@@ -70,7 +70,7 @@ class MainWindow(QMainWindow):
         grid_layout.addWidget(separator, 1, 0, 1, 1)  # Row after FolderContentWidget
 
         # Schritt 1: Datei öffnen
-        step1 = OpenFileStepWidget(1, "Open File(s)", "Select the file containing your data.")
+        step1 = OpenFileStepWidget(1, "Open File(s)", "Select the file containing your data. You can select a single file or a folder containing multiple files. The application will search for all supported files in the selected folder.")
         global_state.register_widget(step1)
         self.steps.append(step1)
         grid_layout.addWidget(step1, 2, 0)
