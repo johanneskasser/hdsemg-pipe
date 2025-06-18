@@ -30,7 +30,7 @@ class FolderContentWidget(QWidget):
         self.folder_button = QPushButton()
         folder_icon = self.style().standardIcon(QStyle.SP_DirIcon)
         self.folder_button.setIcon(folder_icon)
-        self.folder_button.setToolTip("Open Folder")
+        self.update_tooltip()
         self.folder_button.clicked.connect(self.button_behaviour)
         top_layout.addWidget(self.folder_button)
 
@@ -59,6 +59,14 @@ class FolderContentWidget(QWidget):
             folder_structure = ""
 
         self.folder_display.setText(folder_structure)
+        self.update_tooltip()
+
+    def update_tooltip(self):
+        folder_path = global_state.workfolder
+        if folder_path and os.path.isdir(folder_path):
+            self.folder_button.setToolTip(f"Open Folder: {folder_path}")
+        else:
+            self.folder_button.setToolTip("Open a existing workfolder to continue the work where you have stopped.")
 
     def get_folder_structure(self, folder_path, indent=""):
         """Recursively get folder content as a structured string."""
