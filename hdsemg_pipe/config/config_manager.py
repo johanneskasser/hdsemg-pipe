@@ -30,9 +30,13 @@ class ConfigManager:
                 except json.JSONDecodeError:
                     self.settings = {}
                     logger.error("Failed to open config file.")
+                    self.check_installations()
         else:
-            logger.error("Config file does not exist yet.")
+            logger.error("Config file does not exist yet. Creating...")
+            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+            open(CONFIG_FILE, "a").close()
             self.settings = {}
+            self.check_installations()
 
     def save_config(self):
         """Save configuration to JSON file."""

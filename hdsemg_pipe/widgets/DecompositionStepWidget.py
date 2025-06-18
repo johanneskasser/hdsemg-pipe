@@ -159,7 +159,6 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             logger.info(f"Decomposition folder set to: {self.expected_folder}")
         except ValueError:
             self.setActionButtonsEnabled(False)
-            logger.error("Failed to set decomposition folder.")
 
     def open_mapping_dialog(self):
         """

@@ -94,9 +94,9 @@ class BaseStepWidget(QWidget):
         global_state.complete_widget(f"step{self.step_index}")
         self.stepCompleted.emit(self.step_index)
 
-    def setActionButtonsEnabled(self, enabled):
+    def setActionButtonsEnabled(self, enabled, override=False):
         """Enables or disables action buttons."""
-        if enabled == True and global_state.is_widget_completed(f"step{self.step_index - 1}") or enabled == False:
+        if enabled == True and global_state.is_widget_completed(f"step{self.step_index - 1}") or enabled == False or override:
             for button in self.buttons:
                 button.setEnabled(enabled)
 

@@ -42,7 +42,7 @@ class OpenFileStepWidget(BaseStepWidget):
     def check(self):
         if config.get(Settings.WORKFOLDER_PATH) is None:
             self.warn("Workfolder path is not set. Please set it in settings first.")
-            self.setActionButtonsEnabled(False)
+            self.setActionButtonsEnabled(enabled=False, override=True)
         else:
             self.clear_status()
-            self.setActionButtonsEnabled(True)
+            self.setActionButtonsEnabled(enabled=True, override=True)

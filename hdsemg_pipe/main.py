@@ -129,6 +129,8 @@ class MainWindow(QMainWindow):
         """Open the settings dialog."""
         if self.settingsDialog.exec_():
             logger.debug("Settings dialog closed and accepted")
+            for step in self.steps:
+                step.check()
         else:
             logger.debug("Settings dialog closed")
 
