@@ -76,12 +76,16 @@ class BaseStepWidget(QWidget):
 
     def create_buttons(self):
         """Subclasses override this to define their step's action buttons."""
-        pass
+        raise NotImplementedError("Subclasses must implement the create_buttons method.")
 
     def add_buttons_to_layout(self):
         """Populates the vertical layout with the self.buttons list."""
         for btn in self.buttons:
             self.button_layout.addWidget(btn)
+
+    def check(self):
+        """Checks if the step can be completed. Subclasses should implement this."""
+        raise NotImplementedError("Subclasses must implement the check method.")
 
     def complete_step(self):
         """Marks the step as completed and displays a checkmark icon."""
