@@ -34,7 +34,7 @@ string_table = StringTable(
         StringStruct('OriginalFilename', 'hdsemg-pipe.exe'),
         StringStruct('ProductName', 'hdsemg-pipe'),
         StringStruct('ProductVersion', __version__),
-        StringStruct('CompanyName', 'University of Applied Sciences Vienna - Department Physiotherapy'),
+        StringStruct('CompanyName', 'University of Applied Sciences Campus Wien | Physiotherapy'),
     ],
 )
 
