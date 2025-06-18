@@ -92,54 +92,58 @@ jobs:
 
       - name: Calculate new artifact size
         id: artifact_size
+        shell: pwsh
         run: |
-          echo "Berechne Größe der neuen Artefakte..."
-          win_size=$(du -cb windows-artifact/*.exe | tail -1 | awk '{print $1}')
-          echo "Windows artifact size: $win_size bytes"
-          echo "total_size=$win_size" >> $GITHUB_OUTPUT
+          Write-Host "Berechne Größe der neuen Artefakte..."
+          $artifact = Get-Item ./hdsemg_pipe/dist/hdsemg-pipe.exe
+          $win_size = $artifact.Length
+          Write-Host "Windows artifact size: $win_size bytes"
+          echo "total_size=$win_size" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Free up space for new artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
         run: |
           # Setze das Quota-Limit (z.B. 2 GB = 2147483648 Bytes)
-          QUOTA=2147483648
-          echo "Quota: $QUOTA bytes"
-          NEW_SIZE=${{ steps.artifact_size.outputs.total_size }}
-          echo "Benötigter Platz für neue Artefakte: $NEW_SIZE bytes"
-          
+          $QUOTA = 2147483648
+          Write-Host "Quota: $QUOTA bytes"
+          $NEW_SIZE = [int]::Parse("${{ steps.artifact_size.outputs.total_size }}")
+          Write-Host "Benötigter Platz für neue Artefakte: $NEW_SIZE bytes"
+
           # Hole alle Releases (älteste zuerst)
-          gh release list --limit 100 --repo ${{ github.repository }} | tac > releases.txt
-          
-          # Berechne belegten Speicher durch existierende Releases
-          USED=0
-          declare -A rel_sizes
-          while read -r line; do
-            tag=$(echo "$line" | awk '{print $1}')
-            size=0
-            for asset in $(gh release view "$tag" --repo ${{ github.repository }} --json assets -q '.assets[].name'); do
-              asset_size=$(gh release view "$tag" --repo ${{ github.repository }} --json assets -q ".assets[] | select(.name == \"$asset\").size")
-              size=$((size + asset_size))
-            done
-            rel_sizes[$tag]=$size
-            USED=$((USED + size))
-            echo "Release $tag: $size bytes"
-          done < releases.txt
-          echo "Belegter Speicher: $USED bytes"
-          
+          $releases = gh release list --limit 100 --repo $env:GITHUB_REPOSITORY | Sort-Object { $_.Split()[2] }  # sort by created date
+
+          $USED = 0
+          $rel_sizes = @{}
+          foreach ($line in $releases) {
+            $tag = $line.Split()[0]
+            $assets = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
+            $size = 0
+            foreach ($asset in $assets.assets) {
+              $size += $asset.size
+            }
+            $rel_sizes[$tag] = $size
+            $USED += $size
+            Write-Host "Release $tag: $size bytes"
+          }
+          Write-Host "Belegter Speicher: $USED bytes"
+
           # Lösche so viele alte Releases, bis genug Platz ist
-          while [ $((USED + NEW_SIZE)) -gt $QUOTA ]; do
-            oldest=$(head -1 releases.txt | awk '{print $1}')
-            if [ -z "$oldest" ]; then
-              echo "Keine weiteren Releases zum Löschen gefunden. Abbruch."
+          $releaseTags = $rel_sizes.Keys | Sort-Object { $releases.IndexOf(($_ + ' ')) }
+          $idx = 0
+          while (($USED + $NEW_SIZE) -gt $QUOTA) {
+            if ($idx -ge $releaseTags.Count) {
+              Write-Host "Keine weiteren Releases zum Löschen gefunden. Abbruch."
               exit 1
-            fi
-            echo "Lösche Release $oldest mit ${rel_sizes[$oldest]} bytes, um Platz zu schaffen..."
-            gh release delete "$oldest" --repo ${{ github.repository }} --yes
-            USED=$((USED - ${rel_sizes[$oldest]}))
-            sed -i '1d' releases.txt
-          done
-          echo "Genug Platz für neue Artefakte vorhanden."
+            }
+            $oldest = $releaseTags[$idx]
+            Write-Host "Lösche Release $oldest mit $($rel_sizes[$oldest]) bytes, um Platz zu schaffen..."
+            gh release delete $oldest --repo $env:GITHUB_REPOSITORY --yes
+            $USED -= $rel_sizes[$oldest]
+            $idx++
+          }
+          Write-Host "Genug Platz für neue Artefakte vorhanden."
 
 
       - name: Create release
