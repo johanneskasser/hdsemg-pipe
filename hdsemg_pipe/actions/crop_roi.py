@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import numpy as np
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.widgets import RangeSlider
@@ -72,7 +72,15 @@ class CropRoiDialog(QtWidgets.QDialog):
         self.ax = self.figure.add_subplot(111)
         layout.addWidget(self.canvas, stretch=1)
 
-        control_panel = QtWidgets.QVBoxLayout()
+        # --- scrollbarer Bereich für das Control Panel ---
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        scroll_area.setMaximumWidth(400)  # Maximalbreite für das Panel
+
+        control_panel_widget = QtWidgets.QWidget()
+        control_panel = QtWidgets.QVBoxLayout(control_panel_widget)
         self.checkbox_groups = {}
         self.checkboxes = {}
 
@@ -125,7 +133,9 @@ class CropRoiDialog(QtWidgets.QDialog):
 
             group_box.setLayout(vbox)
             control_panel.addWidget(group_box)
-            self.checkbox_groups[uid] = group_box
+        control_panel.addStretch(1)
+        scroll_area.setWidget(control_panel_widget)
+        layout.addWidget(scroll_area)
 
         ok_button = QtWidgets.QPushButton("OK")
         ok_button.clicked.connect(self.on_ok_pressed)
