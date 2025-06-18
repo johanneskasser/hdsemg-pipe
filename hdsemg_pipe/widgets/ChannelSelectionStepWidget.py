@@ -1,3 +1,4 @@
+from PyQt5.QtWidgets import QMessageBox
 
 from hdsemg_pipe.actions.file_manager import start_file_processing
 from hdsemg_pipe.config.config_enums import Settings
@@ -28,6 +29,11 @@ class ChannelSelectionStepWidget(BaseStepWidget):
         if not global_state.cropped_files:
             logger.warning("No .mat files found.")
             return
+        if not config.get(Settings.HDSEMG_SELECT_INSTALLED):
+            QMessageBox.information(self, "Warning", "hdsemg-select is not installed. Please install it in settings first.", QMessageBox.Ok)
+            self.setActionButtonsEnabled(False)
+            return
+        logger.debug("Starting channel selection processing.")
         self.btn_select_channels.setEnabled(False)
         self.btn_select_channels.start_loading()
         self.processed_files = 0
