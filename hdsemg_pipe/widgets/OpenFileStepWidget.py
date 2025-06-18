@@ -15,10 +15,12 @@ class OpenFileStepWidget(BaseStepWidget):
     def create_buttons(self):
         """Erstellt Buttons für das Öffnen einer Datei oder eines Ordners."""
         btn_open_file = QPushButton("Open File")
+        btn_open_file.setToolTip("Select <b>one</b> file to open.")
         btn_open_file.clicked.connect(lambda: self.select_file_or_folder("file"))
         self.buttons.append(btn_open_file)
 
         btn_open_folder = QPushButton("Open Folder")
+        btn_open_folder.setToolTip("Select a <b>folder</b> to open. The application will search for all supported files in this folder.")
         btn_open_folder.clicked.connect(lambda: self.select_file_or_folder("folder"))
         self.buttons.append(btn_open_folder)
 
