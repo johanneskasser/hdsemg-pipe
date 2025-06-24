@@ -3,13 +3,13 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import List
 
 import numpy as np
 from PyQt5 import QtWidgets, QtCore
 
 from hdsemg_pipe._log.log_config import logger
-from hdsemg_shared.fileio.matlab_file_io import save_selection_to_mat
-from hdsemg_shared.grid import load_single_grid_file
+from hdsemg_shared.fileio.file_io import EMGFile, Grid
 from hdsemg_pipe.state.global_state import global_state
 
 
@@ -18,7 +18,7 @@ class AssociationDialog(QtWidgets.QDialog):
         super().__init__(parent)
         logger.info("Initializing AssociationDialog with %d files", len(file_paths))
         self.file_paths = file_paths
-        self.grids = []
+        self.emg_files: List[EMGFile] = []
         self.load_files()
         self.init_ui()
         self.setWindowTitle("Grid Association Tool")
@@ -29,15 +29,15 @@ class AssociationDialog(QtWidgets.QDialog):
         for fp in self.file_paths:
             try:
                 logger.info("Loading file: %s", fp)
-                grids = load_single_grid_file(fp)
-                self.grids.extend(grids)
-                logger.debug("Extracted %d grids from %s", len(grids), Path(fp).name)
-                for grid in grids:
-                    logger.debug("Added grid %s from %s", grid['grid_key'], grid['file_name'])
+                emg = EMGFile.load(filepath=fp)
+                self.emg_files.append(emg)
+                logger.debug("Extracted %d grids from %s", len(emg.grids), Path(fp).name)
+                for grid in emg.grids:
+                    logger.debug("Added grid %s from %s", grid.grid_key, emg.file_name)
             except Exception as e:
                 logger.error(f"Failed to load {fp}: {str(e)}", exc_info=True)
                 QtWidgets.QMessageBox.warning(self, "Loading Error", f"Failed to load {fp}:\n{str(e)}")
-            logger.info("Total grids loaded: %d", len(self.grids))
+            logger.info("Total files loaded: %d", len(self.emg_files))
 
     def init_ui(self):
         # Create list widgets
@@ -46,11 +46,12 @@ class AssociationDialog(QtWidgets.QDialog):
         self.selected_list.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
 
         # Populate available list
-        for grid in self.grids:
-            item_text = f"{grid['rows']}x{grid['cols']} Grid ({len(grid['ref_indices'])} refs) - {grid['file_name']}"
-            item = QtWidgets.QListWidgetItem(item_text)
-            item.setData(QtCore.Qt.UserRole, grid)
-            self.available_list.addItem(item)
+        for emg in self.emg_files:
+            for grid in emg.grids:
+                item_text = f"{grid.rows}x{grid.cols} Grid ({len(grid.ref_indices)} refs) - {emg.file_name}"
+                item = QtWidgets.QListWidgetItem(item_text)
+                item.setData(QtCore.Qt.UserRole, grid)
+                self.available_list.addItem(item)
 
         # Buttons
         self.add_btn = QtWidgets.QPushButton(">>")
@@ -277,15 +278,10 @@ class AssociationDialog(QtWidgets.QDialog):
             save_path = os.path.join(workfolder, filename)
             logger.info("Saving association '%s' to MAT file: %s", assoc_name, save_path)
 
-            save_path = save_selection_to_mat(
-                save_path,
-                combined_data,
-                combined_time,
-                combined_description,
-                combined_sf,
-                assoc_name,
-                combined_grid_info
-            )
+            assoc_emg_file = EMGFile(combined_data, combined_time, combined_description, combined_sf, assoc_name)
+
+            assoc_emg_file.save(save_path)
+
             logger.info("MAT file saved successfully at %s", save_path)
 
             save_association_json(save_path, assoc_name, selected_grids, combined_grid_info)

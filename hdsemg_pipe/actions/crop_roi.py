@@ -1,251 +1,176 @@
 from pathlib import Path
-
+from dataclasses import dataclass
 import numpy as np
 from PyQt5 import QtWidgets, QtCore
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.widgets import RangeSlider
 
+from hdsemg_shared.fileio.file_io import EMGFile, Grid
 from hdsemg_pipe._log.log_config import logger
-from hdsemg_shared.grid import load_single_grid_file
 
+@dataclass
+class GridData:
+    """Helper to pair an EMGFile with one of its Grids."""
+    emgfile: EMGFile
+    grid: Grid
 
 def _normalize_single(x):
-    # Verarbeitet Elemente rekursiv, um verschachtelte Strukturen aufzulösen
     if isinstance(x, str):
         return x.lower()
-    elif isinstance(x, (list, tuple, np.ndarray)):
-        parts = []
-        for item in x:
-            parts.append(_normalize_single(item))
-        return ' '.join(parts).lower()
-    else:
-        return str(x).lower()
+    if isinstance(x, (list, tuple, np.ndarray)):
+        return " ".join(_normalize_single(xx) for xx in x)
+    return str(x).lower()
 
 def normalize(desc):
     if isinstance(desc, np.ndarray):
         return np.array([_normalize_single(item) for item in desc])
-    else:
-        return _normalize_single(desc)
-
+    return _normalize_single(desc)
 
 class CropRoiDialog(QtWidgets.QDialog):
     def __init__(self, file_paths, parent=None):
         super().__init__(parent)
-        logger.info("Initializing Crop ROI Dialog with %d files", len(file_paths))
-        self.file_paths = file_paths
-        self.grids = []
-        self.selected_thresholds = None
+        logger.info("Initializing Crop ROI Dialog for %d files", len(file_paths))
 
+        self.file_paths = file_paths
+        self.grid_items: list[GridData] = []
+        self.selected_thresholds = (0,0)
         self.reference_signal_map = {}
         self.threshold_lines = []
+
         self.load_files()
         self.init_ui()
 
     def load_files(self):
-        logger.debug("Starting file loading process")
+        """Load each file via EMGFile and collect its Grids."""
         for fp in self.file_paths:
             try:
                 logger.info("Loading file: %s", fp)
-                grids = load_single_grid_file(fp)
-                self.grids.extend(grids)
-                logger.debug("Extracted %d grids from %s", len(grids), Path(fp).name)
-                for grid in grids:
-                    logger.debug("Added grid %s from %s", grid['grid_key'], grid['file_name'])
+                emg = EMGFile.load(fp)
+                for grid in emg.grids:
+                    self.grid_items.append(GridData(emgfile=emg, grid=grid))
+                logger.debug("→ %d grids from %s", len(emg.grids), Path(fp).name)
             except Exception as e:
-                logger.error("Failed to load %s: %s", fp, str(e), exc_info=True)
-                QtWidgets.QMessageBox.warning(self, "Loading Error", f"Failed to load {fp}:\n{str(e)}")
-        logger.info("Total grids loaded: %d", len(self.grids))
+                logger.error("Failed to load %s: %s", fp, e, exc_info=True)
+                QtWidgets.QMessageBox.warning(self, "Loading Error", f"Failed to load {fp}:\n{e}")
+
+        logger.info("Total grids loaded: %d", len(self.grid_items))
 
     def init_ui(self):
-        logger.debug("Initializing UI components")
         self.setWindowTitle("Crop Region of Interest (ROI)")
-        self.setGeometry(100, 100, 1200, 1000)
+        self.resize(1200, 1000)
 
+        # Build ref-signal map now that grid_items exists
         self.reference_signal_map = self.build_reference_signal_map()
 
         layout = QtWidgets.QHBoxLayout(self)
 
+        # --- Plot area ---
         self.figure = Figure()
         self.figure.subplots_adjust(bottom=0.25)
         self.canvas = FigureCanvas(self.figure)
         self.ax = self.figure.add_subplot(111)
         layout.addWidget(self.canvas, stretch=1)
 
-        # --- scrollbarer Bereich für das Control Panel ---
-        scroll_area = QtWidgets.QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        scroll_area.setMaximumWidth(400)  # Maximalbreite für das Panel
+        # --- Control panel ---
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumWidth(400)
 
-        control_panel_widget = QtWidgets.QWidget()
-        control_panel = QtWidgets.QVBoxLayout(control_panel_widget)
-        self.checkbox_groups = {}
+        panel = QtWidgets.QWidget()
+        vbox = QtWidgets.QVBoxLayout(panel)
         self.checkboxes = {}
 
-        for grid in self.grids:
-            key = grid['grid_key']
-            uid = grid['grid_uid']
-            group_box = QtWidgets.QGroupBox(f"Grid: {key}")
-            vbox = QtWidgets.QVBoxLayout()
+        for gd in self.grid_items:
+            key = gd.grid.grid_key
+            uid = gd.grid.grid_uid
+            box = QtWidgets.QGroupBox(f"Grid: {key}")
+            box_layout = QtWidgets.QVBoxLayout()
             self.checkboxes[uid] = []
 
-            ref_signals = self.reference_signal_map.get(uid).get("ref_signals", [])
-            ref_descriptions = self.reference_signal_map.get(uid).get("ref_descriptions", [])
-            emg_indices = grid.get('emg_indices', [])
+            ref_descs = self.reference_signal_map[uid]["ref_descriptions"]
+            for idx, desc in enumerate(ref_descs):
+                cb = QtWidgets.QCheckBox(f"Ref {idx} – {desc}")
+                cb.setChecked(idx == 0)
+                cb.stateChanged.connect(self.update_plot)
+                box_layout.addWidget(cb)
+                self.checkboxes[uid].append(cb)
 
-            # Identify force channels based on keywords in reference signal names
-            force_refs = {}
-            # Use transpose to iterate over columns
-            for i, ref in enumerate(ref_signals.T):
-                ref_name = ref_descriptions[i]
-                if "requested path" in ref_name or "performed path" in ref_name:
-                    force_refs[ref_name] = ref
+            box.setLayout(box_layout)
+            vbox.addWidget(box)
 
-            if ref_signals.size > 0:
-                # Case 1: There are reference signals
-                if force_refs:
-                    # Case 1a: Force channels found - check only these
-                    for i, ref in enumerate(ref_signals.T):
-                        is_checked = ref_descriptions[i] in force_refs
-                        cb = QtWidgets.QCheckBox(f"Ref {i} - {'Force -' if is_checked else ''} {ref_descriptions[i]}")
-                        cb.setChecked(is_checked)
-                        cb.stateChanged.connect(self.update_plot)
-                        vbox.addWidget(cb)
-                        self.checkboxes[uid].append(cb)
-                else:
-                    # Case 1b: No force channels - check first reference channel
-                    for i, ref in enumerate(ref_signals.T):
-                        cb = QtWidgets.QCheckBox(f"Ref {i} - {ref_descriptions[i]}")
-                        cb.setChecked(i == 0)
-                        cb.stateChanged.connect(self.update_plot)
-                        vbox.addWidget(cb)
-                        self.checkboxes[uid].append(cb)
-            else:
-                # Case 2: No reference signals - check first EMG channel
-                if emg_indices:
-                    cb = QtWidgets.QCheckBox("EMG Channel 0")
-                    cb.setChecked(True)
-                    cb.stateChanged.connect(self.update_plot)
-                    vbox.addWidget(cb)
-                    self.checkboxes[uid].append(cb)
+        ok = QtWidgets.QPushButton("OK")
+        ok.clicked.connect(self.on_ok_pressed)
+        vbox.addWidget(ok)
+        vbox.addStretch(1)
 
-            group_box.setLayout(vbox)
-            control_panel.addWidget(group_box)
-        control_panel.addStretch(1)
-        scroll_area.setWidget(control_panel_widget)
-        layout.addWidget(scroll_area)
+        scroll.setWidget(panel)
+        layout.addWidget(scroll, stretch=0)
 
-        ok_button = QtWidgets.QPushButton("OK")
-        ok_button.clicked.connect(self.on_ok_pressed)
-        control_panel.addWidget(ok_button)
-
-        layout.addLayout(control_panel, stretch=0)
-
+        # --- Range slider ---
         slider_ax = self.figure.add_axes([0.1, 0.1, 0.8, 0.03])
-        x_min, x_max = self.compute_data_xrange()
-        self.x_slider = RangeSlider(
-            slider_ax,
-            label="",
-            valmin=x_min,
-            valmax=x_max,
-            valinit=(x_min, x_max),
-            orientation="horizontal"
-        )
+        lo, hi = self.compute_data_xrange()
+        self.x_slider = RangeSlider(slider_ax, "", lo, hi, (lo, hi))
         self.x_slider.on_changed(self.update_threshold_lines)
 
         self.update_plot()
 
     def compute_data_xrange(self):
-        """
-        Returns (x_min, x_max) based on the maximum data length of the loaded grids.
-        """
-        max_length = 0
-        for grid in self.grids:
-            data = grid['data']
-            if data.shape[0] > max_length:
-                max_length = data.shape[0]
-        return (0, max_length - 1 if max_length > 0 else 0)
+        maxlen = max((gd.emgfile.data.shape[0] for gd in self.grid_items), default=0)
+        return (0, maxlen - 1 if maxlen>0 else 0)
 
     def on_ok_pressed(self):
-        """
-        Called when the user presses OK. Store the slider values as the selected thresholds.
-        """
-        lower_x, upper_x = self.x_slider.val
-        self.selected_thresholds = (lower_x, upper_x)
-        logger.info("User selected x-range: (%.2f, %.2f)", lower_x, upper_x)
+        self.selected_thresholds = tuple(self.x_slider.val)
+        logger.info("User selected x-range: %s", self.selected_thresholds)
         self.accept()
 
-    def update_threshold_lines(self, val=None):
-        """
-        Updates vertical threshold lines based on the RangeSlider values.
-        """
-        for line in self.threshold_lines:
-            try:
-                line.remove()
-            except Exception:
-                pass
+    def update_threshold_lines(self, _=None):
+        for ln in self.threshold_lines:
+            try: ln.remove()
+            except: pass
         self.threshold_lines.clear()
-
-        lower_x, upper_x = self.x_slider.val
-        line1 = self.ax.axvline(lower_x, color='red', linestyle='--', label='Lower Threshold')
-        line2 = self.ax.axvline(upper_x, color='green', linestyle='--', label='Upper Threshold')
-        self.threshold_lines.extend([line1, line2])
+        lo, hi = self.x_slider.val
+        l1 = self.ax.axvline(lo, linestyle='--', label='Lower')
+        l2 = self.ax.axvline(hi, linestyle='--', label='Upper')
+        self.threshold_lines.extend([l1, l2])
         self.canvas.draw_idle()
 
     def update_plot(self):
-        """
-        Updates the plot with the selected reference signals.
-        """
         self.ax.clear()
-        colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
-        color_index = 0
-
-        for grid in self.grids:
-            key = grid['grid_key']
-            uid = grid['grid_uid']
-            ref_data = self.reference_signal_map.get(uid).get("ref_signals", None)
-            if ref_data is None:
-                continue
-
-            for i, cb in enumerate(self.checkboxes[uid]):
+        for gd in self.grid_items:
+            uid = gd.grid.grid_uid
+            ref_data = self.reference_signal_map[uid]["ref_signals"]
+            for idx, cb in enumerate(self.checkboxes[uid]):
                 if cb.isChecked():
-                    color = colors[color_index % len(colors)]
-                    self.ax.plot(ref_data[:, i], label=f"{key} - Ref {i}", color=color)
-                    color_index += 1
-
+                    self.ax.plot(ref_data[:, idx], label=f"{gd.grid.grid_key}-Ref{idx}")
         self.ax.legend(loc='upper right')
         self.update_threshold_lines()
         self.canvas.draw_idle()
 
     def build_reference_signal_map(self):
         """
-        Creates a dictionary { grid_uid -> { 'ref_signals': array_of_reference_signals, 'descriptions': array_of_reference_signal_descriptions } }
-        where the array has the shape (N, number_of_channels). If no reference channels are available,
-        the first EMG channel is used as a fallback.
+        Map each grid_uid → {
+            'ref_signals': 2D np.array (samples×nRefs),
+            'ref_descriptions': list[str]
+        }
         """
-        logger.debug("Building reference signal map from loaded grids")
-        ref_signal_map = {}
-        for grid in self.grids:
-            uid = grid['grid_uid']
-            try:
-                data = grid['data']
-                ref_indices = grid.get('ref_indices', [])
-                descriptions = grid.get('description', None)
-                if not ref_indices and not descriptions:
-                    ref_data = data[:, 0:1]
-                    ref_descriptions = []
-                else:
-                    ref_descriptions = normalize(descriptions[ref_indices, :])
-                    ref_data = data[:, ref_indices]
+        mp = {}
+        for gd in self.grid_items:
+            uid = gd.grid.grid_uid
+            data = gd.emgfile.data
+            desc = gd.emgfile.description
+            idxs = gd.grid.ref_indices or []
+            if not idxs:
+                # fallback to first EMG channel
+                idxs = [gd.grid.emg_indices[0]] if gd.grid.emg_indices else [0]
 
-                ref_signal_map[uid] = {
-                    'ref_signals': ref_data,
-                    'ref_descriptions': ref_descriptions
-                }
+            ref_descs = [desc[i] for i in idxs]
+            # normalize to str
+            ref_descs = [normalize(rd) for rd in ref_descs]
+            ref_data = data[:, idxs]
 
-                logger.debug("Mapped grid '%s' with %d reference channels", uid, len(ref_indices) if ref_indices else 1)
-            except Exception as e:
-                logger.error("Error processing grid '%s': %s", uid, str(e), exc_info=True)
-        return ref_signal_map
+            mp[uid] = {
+                "ref_signals": ref_data,
+                "ref_descriptions": ref_descs
+            }
+        return mp
