@@ -11,9 +11,8 @@ dependencies:
   - pyqt=5.15.*
   - requests>=2.26.0
   - torch>=1.10.0
-  - hdsemg-shared>=0.10.7
-  - hdsemg-select>=0.0.5
-  - openhdemg>=0.1.2
+  - hdsemg-shared>=0.11.1
+  - hdsemg-select>=0.1.0
   - h5py
   - pip
   - pip:

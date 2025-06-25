@@ -9,9 +9,7 @@ from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.enum.FolderNames import FolderNames
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
-from hdsemg_shared.fileio.file_io import load_file
-from hdsemg_shared.fileio.matlab_file_io import save_selection_to_mat
-from hdsemg_shared.grid import extract_grid_info
+from hdsemg_shared.fileio.file_io import EMGFile
 from hdsemg_pipe.state.global_state import global_state
 
 
@@ -132,37 +130,35 @@ def create_sub_work_folders(workfolder_path):
 def pre_process_files(filepaths):
     for file in filepaths:
         logger.info(f"Pre-processing file: {file}")
-        data, time, description, sf, fn, fs = load_file(file)
-        grid_info = extract_grid_info(description)
+        emg = EMGFile.load(file)
 
         json_means = {}
         json_means["filename"] = os.path.basename(file)
 
         # Subtract Mean from data to remove DC offset so that signals oscillate around zero
-        for grid_key, grid_data in grid_info.items():
-            json_means[grid_key] = []  # Liste für jeden Channel dieses Grids
-            for ch_index in grid_data['indices']:
-                mean_before = data[:, ch_index].mean()
-                logger.debug(f"Grid: {grid_key}, Channel Index: {ch_index}, Mean Before Subtraction: {mean_before}")
-                data[:, ch_index] -= mean_before
-                mean_after = data[:, ch_index].mean()
-                logger.debug(f"Grid: {grid_key}, Channel Index: {ch_index}, Mean After Subtraction: {mean_after}")
+        for grid in emg.grids:
+            json_means[grid.grid_uid] = []  # Liste für jeden Channel dieses Grids
+            for ch_index in grid.emg_indices:
+                mean_before = emg.data[:, ch_index].mean()
+                logger.debug(f"Grid: {grid.grid_uid}({grid.grid_key}), Channel Index: {ch_index}, Mean Before Subtraction: {mean_before}")
+                emg.data[:, ch_index] -= mean_before
+                mean_after = emg.data[:, ch_index].mean()
+                logger.debug(f"Grid: {grid.grid_uid}({grid.grid_key}), Channel Index: {ch_index}, Mean After Subtraction: {mean_after}")
                 # Speichern der Mittelwertdaten in json_means
-                json_means[grid_key].append({
+                json_means[grid.grid_uid].append({
                     "channel_index": ch_index,
                     "method": "mean",
                     "mean_before": mean_before,
                     "mean_after": mean_after
                 })
-            for ref in grid_data['reference_signals']:
-                ref_idx = ref['index']
-                baseline_before = data[:, ref_idx].min()
-                logger.debug(f"Grid: {grid_key}, Channel Index: {ref_idx}, Mean Before Subtraction: {baseline_before}")
-                data[:, ref_idx] -= baseline_before # shift reference signals to zero
-                baseline_after = data[:, ref_idx].min()
-                logger.debug(f"Grid: {grid_key}, Channel Index: {ref_idx}, Mean After Subtraction: {baseline_after}")
-                json_means[grid_key].append({
-                    "reference_index": ref_idx,
+            for ref in grid.ref_indices:
+                baseline_before = emg.data[:, ref].min()
+                logger.debug(f"Grid: {grid.grid_uid}({grid.grid_key}), Channel Index: {ref}, Mean Before Subtraction: {baseline_before}")
+                emg.data[:, ref] -= baseline_before # shift reference signals to zero
+                baseline_after = emg.data[:, ref].min()
+                logger.debug(f"Grid: {grid.grid_uid}({grid.grid_key}), Channel Index: {ref}, Mean After Subtraction: {baseline_after}")
+                json_means[grid.grid_uid].append({
+                    "reference_index": ref,
                     "method": "min",
                     "value_before": float(baseline_before),
                     "value_after": float(baseline_after)
@@ -170,8 +166,11 @@ def pre_process_files(filepaths):
         # Save the pre-processed data to the original files folder
         logger.info(f"Finished pre-processing file: {file}")
         original_files_foldername = global_state.get_original_files_path()
+        if not os.path.basename(file).endswith(".mat"):
+            logger.debug(f"File {file} does not have a .mat extension. Saving as .mat")
+            file = os.path.splitext(file)[0] + ".mat"
         new_file_path = os.path.join(original_files_foldername, os.path.basename(file))
-        new_file_path = save_selection_to_mat(new_file_path, data, time, description, sf, fn, grid_info)
+        emg.save(str(new_file_path))
         logger.info(f"Saved pre-processed file to: {new_file_path}")
         save_json_means(json_means, new_file_path)
         global_state.add_original_file(new_file_path)
