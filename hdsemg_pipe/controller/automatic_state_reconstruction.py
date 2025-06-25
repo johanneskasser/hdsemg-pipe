@@ -4,11 +4,17 @@ from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.enum.FolderNames import FolderNames
 from hdsemg_pipe.state.global_state import global_state
 from PyQt5.QtWidgets import QMessageBox, QFileDialog
+from hdsemg_pipe.config.config_manager import config
+from hdsemg_pipe.config.config_enums import Settings
 
 
 def start_reconstruction_workflow(parent):
+    workfolder_path = config.get(Settings.WORKFOLDER_PATH)
+    if workfolder_path is None:
+        workfolder_path = os.getcwd()
+
     if global_state.workfolder is None:
-        selected_folder = QFileDialog.getExistingDirectory(parent, "Select existing pipeline folder")
+        selected_folder = QFileDialog.getExistingDirectory(parent, "Select existing pipeline folder", directory=workfolder_path)
         if selected_folder:
             try:
                 reconstruct_folder_state(folderpath=selected_folder)

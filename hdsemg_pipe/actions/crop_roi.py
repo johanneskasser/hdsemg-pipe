@@ -110,7 +110,7 @@ class CropRoiDialog(QtWidgets.QDialog):
         # --- Range slider ---
         slider_ax = self.figure.add_axes([0.1, 0.1, 0.8, 0.03])
         lo, hi = self.compute_data_xrange()
-        self.x_slider = RangeSlider(slider_ax, "", lo, hi, (lo, hi))
+        self.x_slider = RangeSlider(slider_ax, "", lo, hi, valinit=(lo, hi))
         self.x_slider.on_changed(self.update_threshold_lines)
 
         self.update_plot()
