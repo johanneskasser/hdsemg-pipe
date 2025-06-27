@@ -3,107 +3,77 @@ name: Build & Publish
 on:
   push:
     tags:
-      - 'v*'                     # e.g. v0.1.0 or v0.1.0-rc1
+      - 'v*'
 
 jobs:
 
-  # ────────────────────────────── build once ──────────────────────────────
-  build:
+  publish-testpypi:
+    if: contains(github.ref_name, 'dev') || contains(github.ref_name, 'rc') ||
+        contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') ||
+        contains(github.ref_name, 'test')
     runs-on: ubuntu-latest
-    outputs:
-      dist_dir: ${{ steps.build.outputs.dist }}
+    environment: testpypi
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with: { python-version: '3.10' }
 
-      - name: Install build tools
-        run: python -m pip install --upgrade pip build
-
-      - id: build                  # save “dist/*” path for later jobs
-        name: Build sdist & wheel
+      - name: Install & build
         run: |
+          python -m pip install --upgrade pip build twine
           python -m build
-          echo "dist=$(pwd)/dist" >> "$GITHUB_OUTPUT"
 
-      - name: Upload dist artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: ${{ steps.build.outputs.dist }}
-
-  # ─────────────────────── upload to **Test** PyPI ────────────────────────
-  publish-testpypi:
-    needs: build
-    if:  contains(github.ref_name, 'dev') || contains(github.ref_name, 'rc') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'test')
-    runs-on: ubuntu-latest
-    environment: testpypi
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
       - name: Publish to TestPyPI
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.TEST_PYPI_TOKEN }}
-        run: |
-          python -m pip install --upgrade twine
-          twine upload --repository-url https://test.pypi.org/legacy/ dist/*
+        run: twine upload --repository-url https://test.pypi.org/legacy/ dist/*
 
-  # ───────────────────────── upload to PyPI ──────────────────────────
   publish-pypi:
-    needs: build
-    if:  ${{ !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'rc') &&
-             !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta') &&
-             !contains(github.ref_name, 'test') }}
+    if: ${{ !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'rc') &&
+            !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta') &&
+            !contains(github.ref_name, 'test') }}
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      contents: write
+      id-token: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.10' }
+
+      - name: Install & build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: |
-          python -m pip install --upgrade twine
-          twine upload dist/*
+        run: twine upload dist/*
 
       - name: Gather Release Notes
         id: notes
         shell: bash
         run: |
-          # 1) previous tag (second newest by creation date)
-          PREV_TAG=$(git tag --sort=-creatordate | sed -n '2p')
-          echo "Previous tag: $PREV_TAG"
-          echo "This tag:     $RAW_TAG"
-          
-          # 2) README at top of release-notes.md
+          PREV_TAG=$(git tag --sort=-creatordate | sed -n '2p') || true
           echo '<!-- Auto-generated. Do not edit. -->' > release-notes.md
           echo >> release-notes.md
           cat README.md >> release-notes.md
-          
-          # 3) changelog header
-          echo >> release-notes.md
-          echo '## Changelog' >> release-notes.md
-          echo >> release-notes.md
-          
-          # 4) commits between PREV_TAG and RAW_TAG
+          echo >> release-notes.md && echo '## Changelog' >> release-notes.md && echo >> release-notes.md
           if [ -n "$PREV_TAG" ]; then
-            git log "$PREV_TAG..$RAW_TAG" \
+            git log "$PREV_TAG..${GITHUB_REF_NAME}" \
               --pretty=format:'- [`%h`](https://github.com/${{ github.repository }}/commit/%H) %s' \
               >> release-notes.md
           else
             echo '- Initial release' >> release-notes.md
           fi
-          
-          # 5) expose the path for the next step
-          echo "notes_file=release-notes.md" >> "$GITHUB_OUTPUT"
-          
+          echo "notes_file=release-notes.md" >>"$GITHUB_OUTPUT"
+
       - name: Create release
         uses: ncipollo/release-action@v1
         with:
@@ -111,5 +81,3 @@ jobs:
           tag:   ${{ github.ref_name }}
           name:  Release ${{ github.ref_name }}
           bodyFile: ${{ steps.notes.outputs.notes_file }}
-        
-
