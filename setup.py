@@ -7,8 +7,9 @@ from setuptools import setup, find_packages
 
 version = os.getenv("PACKAGE_VERSION", "0.0.1")
 
-if not re.match(r"^\d+\.", version):
-    print("ERROR: PACKAGE_VERSION must be in format X.Y.Z. Setting to 0.0.1.")
+pattern = r"^\d+\.\d+\.\d+(?:-(?:dev|rc|alpha|beta|test)\d*)?$"
+if not re.match(pattern, version):
+    print("ERROR: PACKAGE_VERSION must be a valid format. Setting to 0.0.1.")
     version = "0.0.1"
 
 this_dir = Path(__file__).parent

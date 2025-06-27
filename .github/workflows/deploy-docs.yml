@@ -6,9 +6,6 @@ on:
       - main
     tags:
       - 'v*'
-    paths:
-      - 'mkdocs.yml'
-      - 'docs/**'
 
 permissions:
   contents: write
@@ -16,6 +13,9 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'rc') &&
+      !contains(github.ref_name, 'alpha') && !contains(github.ref_name, 'beta') &&
+      !contains(github.ref_name, 'test') }}
     steps:
       - uses: actions/checkout@v3
         with:
