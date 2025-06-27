@@ -27,6 +27,12 @@ jobs:
           python -m build
           echo "dist=$(pwd)/dist" >> "$GITHUB_OUTPUT"
 
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: ${{ steps.build.outputs.dist }}
+
   # ─────────────────────── upload to **Test** PyPI ────────────────────────
   publish-testpypi:
     needs: build
