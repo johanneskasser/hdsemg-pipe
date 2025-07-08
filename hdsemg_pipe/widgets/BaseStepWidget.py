@@ -18,6 +18,12 @@ class BaseStepWidget(QWidget):
         self.step_completed = False
         self.buttons = []
 
+        # Set a fixed width for the whole widget (wider to avoid text cutoff)
+        self.setFixedWidth(850)  # Increased width
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
+
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
         # Main horizontal layout
         self.main_layout = QHBoxLayout(self)
         self.main_layout.setContentsMargins(2, 2, 2, 2)
