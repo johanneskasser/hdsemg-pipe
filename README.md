@@ -17,17 +17,30 @@ This includes detailed guides on installation, usage, and contributing to the pr
 
 ## Installation
 
-In order to install hdsemg-pipe, follow the instructions in the [installation guide](docs/installation.md).
+In order to install hdsemg-pipe, follow the instructions in the [installation guide](https://johanneskasser.github.io/hdsemg-pipe/latest/installation/).
 
 ### Quick Installation
 
-1. hdsemg-pipe is available as a Python package and can be installed via pip:
+1. Create a virtual environment (recommended):
+
+```bash
+    # Create a virtual environment
+    python -m venv venv
+    
+    # Activate the virtual environment
+    # On Windows:
+    venv\Scripts\activate
+    # On Unix or MacOS:
+    source venv/bin/activate
+```
+
+2. hdsemg-pipe is available as a Python package and can be installed via pip:
 
 ```bash
   pip install hdsemg-pipe
 ```
 
-2. After the installation, you can run the application using from the command line:
+3. After the installation, you can run the application using from the command line:
 
 ```bash
   hdsemg-pipe
