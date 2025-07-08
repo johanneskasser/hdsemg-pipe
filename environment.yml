@@ -10,7 +10,8 @@ dependencies:
   - pandas>=1.3.5
   - pyqt=5.15
   - requests>=2.26.0
-  - torch>=1.10.0
+  - cpuonly
+  - pytorch>=1.10.0
   - hdsemg-shared>=0.11.1
   - hdsemg-select>=0.1.1
   - h5py
