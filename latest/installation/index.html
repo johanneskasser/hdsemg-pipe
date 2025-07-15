@@ -338,13 +338,22 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#method-2-install-from-source" class="md-nav__link">
+  <a href="#method-2-install-via-conda-with-pypi-package" class="md-nav__link">
     <span class="md-ellipsis">
-      Method 2: Install from Source
+      Method 2: Install via Conda with PyPI package
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Method 2: Install from Source">
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#method-3-install-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Method 3: Install from Source
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Method 3: Install from Source">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -358,15 +367,6 @@
         
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#method-3-pre-compiled-release-windows-only" class="md-nav__link">
-    <span class="md-ellipsis">
-      Method 3: Pre-compiled Release (Windows only)
-    </span>
-  </a>
   
 </li>
         
@@ -849,13 +849,22 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#method-2-install-from-source" class="md-nav__link">
+  <a href="#method-2-install-via-conda-with-pypi-package" class="md-nav__link">
     <span class="md-ellipsis">
-      Method 2: Install from Source
+      Method 2: Install via Conda with PyPI package
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Method 2: Install from Source">
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#method-3-install-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      Method 3: Install from Source
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Method 3: Install from Source">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -869,15 +878,6 @@
         
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#method-3-pre-compiled-release-windows-only" class="md-nav__link">
-    <span class="md-ellipsis">
-      Method 3: Pre-compiled Release (Windows only)
-    </span>
-  </a>
   
 </li>
         
@@ -999,7 +999,7 @@
 
 
 <h1 id="installation-guide">Installation Guide<a class="headerlink" href="#installation-guide" title="Permanent link">&para;</a></h1>
-<p>This guide describes the three available methods for installing hdsemg-pipe and setting up all required dependencies.</p>
+<p>This guide describes the available methods for installing hdsemg-pipe and setting up all required dependencies.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <p>Before installing hdsemg-pipe, please ensure you have the following installed:</p>
 <ul>
@@ -1011,8 +1011,8 @@
 <p>There are three ways to install hdsemg-pipe:</p>
 <ol>
 <li><strong>PyPI package (recommended for most users)</strong></li>
+<li><strong>Conda environment with PyPI package</strong></li>
 <li><strong>From source</strong></li>
-<li><strong>Pre-compiled release (Windows .exe)</strong></li>
 </ol>
 <h3 id="method-1-install-via-pypi">Method 1: Install via PyPI<a class="headerlink" href="#method-1-install-via-pypi" title="Permanent link">&para;</a></h3>
 <ol>
@@ -1028,7 +1028,24 @@
    <code>2. **Install hdsemg-pipe**</code>bash
    pip install hdsemg-pipe
    ```</p>
-<h3 id="method-2-install-from-source">Method 2: Install from Source<a class="headerlink" href="#method-2-install-from-source" title="Permanent link">&para;</a></h3>
+<h3 id="method-2-install-via-conda-with-pypi-package">Method 2: Install via Conda with PyPI package<a class="headerlink" href="#method-2-install-via-conda-with-pypi-package" title="Permanent link">&para;</a></h3>
+<p>This method uses Conda to manage the core dependencies while installing hdsemg-pipe from PyPI.</p>
+<ol>
+<li>
+<p><strong>Download the environment file</strong>
+   <code>bash
+   wget https://raw.githubusercontent.com/johanneskasser/hdsemg-pipe/main/environment-pypi.yml</code>
+   Or download <code>environment-pypi.yml</code> directly from the repository.</p>
+</li>
+<li>
+<p><strong>Create and activate Conda environment</strong>
+   <code>bash
+   conda env create -f environment-pypi.yml
+   conda activate hdsemg-preprocessing</code></p>
+</li>
+</ol>
+<p>The environment will automatically install hdsemg-pipe and all its dependencies.</p>
+<h3 id="method-3-install-from-source">Method 3: Install from Source<a class="headerlink" href="#method-3-install-from-source" title="Permanent link">&para;</a></h3>
 <ol>
 <li><strong>Clone the repository</strong>
    <code>bash
@@ -1056,11 +1073,6 @@
    <code>bash
    conda env create -f environment.yml
    conda activate hdsemg-pipe</code></li>
-</ol>
-<h3 id="method-3-pre-compiled-release-windows-only">Method 3: Pre-compiled Release (Windows only)<a class="headerlink" href="#method-3-pre-compiled-release-windows-only" title="Permanent link">&para;</a></h3>
-<ol>
-<li><strong>Download the latest .exe file from the <a href="https://github.com/johanneskasser/hdsemg-pipe/releases">Releases page</a>.</strong></li>
-<li><strong>Run the .exe and follow the instructions.</strong></li>
 </ol>
 <h2 id="compile-resources-only-for-source-installation">Compile Resources (only for Source Installation)<a class="headerlink" href="#compile-resources-only-for-source-installation" title="Permanent link">&para;</a></h2>
 <p>After installing the dependencies, you need to compile the Qt resources:</p>
