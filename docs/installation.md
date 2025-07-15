@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide describes the three available methods for installing hdsemg-pipe and setting up all required dependencies.
+This guide describes the available methods for installing hdsemg-pipe and setting up all required dependencies.
 
 ## Prerequisites
 
@@ -15,8 +15,8 @@ Before installing hdsemg-pipe, please ensure you have the following installed:
 There are three ways to install hdsemg-pipe:
 
 1. **PyPI package (recommended for most users)**
-2. **From source**
-3. **Pre-compiled release (Windows .exe)**
+2. **Conda environment with PyPI package**
+3. **From source**
 
 ### Method 1: Install via PyPI
 
@@ -35,7 +35,25 @@ There are three ways to install hdsemg-pipe:
    pip install hdsemg-pipe
    ```
 
-### Method 2: Install from Source
+### Method 2: Install via Conda with PyPI package
+
+This method uses Conda to manage the core dependencies while installing hdsemg-pipe from PyPI.
+
+1. **Download the environment file**
+   ```bash
+   wget https://raw.githubusercontent.com/johanneskasser/hdsemg-pipe/main/environment-pypi.yml
+   ```
+   Or download `environment-pypi.yml` directly from the repository.
+
+2. **Create and activate Conda environment**
+   ```bash
+   conda env create -f environment-pypi.yml
+   conda activate hdsemg-preprocessing
+   ```
+
+The environment will automatically install hdsemg-pipe and all its dependencies.
+
+### Method 3: Install from Source
 
 1. **Clone the repository**
    ```bash
@@ -69,11 +87,6 @@ There are three ways to install hdsemg-pipe:
    conda env create -f environment.yml
    conda activate hdsemg-pipe
    ```
-
-### Method 3: Pre-compiled Release (Windows only)
-
-1. **Download the latest .exe file from the [Releases page](https://github.com/johanneskasser/hdsemg-pipe/releases).**
-2. **Run the .exe and follow the instructions.**
 
 ## Compile Resources (only for Source Installation)
 
