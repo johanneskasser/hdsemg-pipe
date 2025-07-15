@@ -60,6 +60,8 @@ class FolderContentWidget(QWidget):
 
         self.folder_display.setText(folder_structure)
         self.update_tooltip()
+        # Enable/disable button based on workfolder existence
+        self.folder_button.setEnabled(bool(folder_path and os.path.isdir(folder_path)))
 
     def update_tooltip(self):
         folder_path = global_state.workfolder
