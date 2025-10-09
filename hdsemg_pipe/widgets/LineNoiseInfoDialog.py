@@ -3,6 +3,7 @@ Information dialog explaining different line noise removal methods.
 """
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton, QHBoxLayout
 from PyQt5.QtCore import Qt
+from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius
 
 
 class LineNoiseInfoDialog(QDialog):
@@ -16,17 +17,28 @@ class LineNoiseInfoDialog(QDialog):
 
     def initUI(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(Spacing.LG)
+        layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
 
         # Text browser for rich text display
         info_text = QTextBrowser()
         info_text.setOpenExternalLinks(True)
         info_text.setHtml(self.get_info_html())
+        info_text.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.MD}px;
+            }}
+        """)
         layout.addWidget(info_text)
 
         # Close button
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(Styles.button_secondary())
         close_btn.clicked.connect(self.accept)
         button_layout.addWidget(close_btn)
         layout.addLayout(button_layout)

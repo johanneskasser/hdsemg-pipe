@@ -5,6 +5,7 @@ from hdsemg_pipe.actions.openfile import open_file_or_folder
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.ui_elements.theme import Styles
 
 from hdsemg_pipe._log.log_config import logger
 
@@ -13,13 +14,15 @@ class OpenFileStepWidget(BaseStepWidget):
     fileSelected = pyqtSignal(str)
 
     def create_buttons(self):
-        """Erstellt Buttons für das Öffnen einer Datei oder eines Ordners."""
+        """Create buttons for opening a file or folder."""
         btn_open_file = QPushButton("Open File")
+        btn_open_file.setStyleSheet(Styles.button_primary())
         btn_open_file.setToolTip("Select <b>one</b> file to open.")
         btn_open_file.clicked.connect(lambda: self.select_file_or_folder("file"))
         self.buttons.append(btn_open_file)
 
         btn_open_folder = QPushButton("Open Folder")
+        btn_open_folder.setStyleSheet(Styles.button_secondary())
         btn_open_folder.setToolTip("Select a <b>folder</b> to open. The application will search for all supported files in this folder.")
         btn_open_folder.clicked.connect(lambda: self.select_file_or_folder("folder"))
         self.buttons.append(btn_open_folder)

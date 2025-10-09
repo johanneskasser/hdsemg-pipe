@@ -1,12 +1,13 @@
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QStyle, QToolButton,
-    QSizePolicy, QVBoxLayout, QHBoxLayout
+    QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.ui_elements.theme import Colors, Fonts, Spacing, BorderRadius, Styles
 
 class BaseStepWidget(QWidget):
     stepCompleted = pyqtSignal(int)
@@ -22,20 +23,27 @@ class BaseStepWidget(QWidget):
         self.setFixedWidth(850)  # Increased width
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
 
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        # Card-style container
+        self.setStyleSheet(f"""
+            BaseStepWidget {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.LG};
+            }}
+        """)
 
         # Main horizontal layout
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(2, 2, 2, 2)
-        self.main_layout.setSpacing(5)
+        self.main_layout.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        self.main_layout.setSpacing(Spacing.MD)
 
-        # Column 1 - Step Name (mit Container-Widget)
+        # Column 1 - Step Name
         self.col_name_widget = QWidget()
-        self.col_name_widget.setFixedWidth(180)  # Feste Breite hier
+        self.col_name_widget.setFixedWidth(180)
         self.col_name = QVBoxLayout(self.col_name_widget)
         self.col_name.setContentsMargins(0, 0, 0, 0)
         self.name_label = QLabel(self.step_name)
-        self.name_label.setFont(QFont("Arial", weight=QFont.Bold))
+        self.name_label.setStyleSheet(Styles.label_heading(size="md"))
         self.col_name.addWidget(self.name_label, alignment=Qt.AlignLeft|Qt.AlignVCenter)
         self.main_layout.addWidget(self.col_name_widget)
 
@@ -45,14 +53,26 @@ class BaseStepWidget(QWidget):
         self.info_button = QToolButton()
         self.info_button.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxInformation))
         self.info_button.setToolTip(tooltip)
-        self.info_button.setFixedSize(24, 24)
+        self.info_button.setFixedSize(28, 28)
+        self.info_button.setStyleSheet(f"""
+            QToolButton {{
+                background-color: transparent;
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: 2px;
+            }}
+            QToolButton:hover {{
+                background-color: {Colors.GRAY_100};
+            }}
+        """)
         self.col_info.addWidget(self.info_button, alignment=Qt.AlignCenter)
         self.main_layout.addWidget(self.col_info_widget)
 
-        # Column 3 - Additional Info (expandierend)
+        # Column 3 - Additional Info (expanding)
         self.col_additional_widget = QWidget()
         self.col_additional = QVBoxLayout(self.col_additional_widget)
         self.additional_information_label = QLabel("")
+        self.additional_information_label.setStyleSheet(Styles.label_secondary())
         self.col_additional.addWidget(self.additional_information_label, alignment=Qt.AlignLeft|Qt.AlignVCenter)
         self.main_layout.addWidget(self.col_additional_widget, stretch=1)
 
@@ -60,7 +80,8 @@ class BaseStepWidget(QWidget):
         self.col_buttons_widget = QWidget()
         self.col_buttons_widget.setFixedWidth(140)
         self.button_layout = QVBoxLayout(self.col_buttons_widget)
-        self.button_layout.setSpacing(3)
+        self.button_layout.setSpacing(Spacing.SM)
+        self.button_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.addWidget(self.col_buttons_widget)
 
         # Column 5 - Status Icons
@@ -107,28 +128,63 @@ class BaseStepWidget(QWidget):
                 button.setEnabled(enabled)
 
     def success(self, message):
-        icon = self.style().standardIcon(QStyle.SP_DialogApplyButton)
-        self.status_icon.setPixmap(icon.pixmap(20, 20))
+        """Show success status with modern badge."""
+        self.status_icon.setText("✓")
+        self.status_icon.setStyleSheet(f"""
+            QLabel {{
+                background-color: {Colors.GREEN_100};
+                color: {Colors.GREEN_800};
+                border: 1px solid {Colors.GREEN_BORDER};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+                font-weight: {Fonts.WEIGHT_BOLD};
+                font-size: {Fonts.SIZE_LG};
+            }}
+        """)
         self.status_icon.setVisible(True)
         self.setToolTip(message)
         logger.info("Success: " + message)
 
     def warn(self, message):
-        icon = self.style().standardIcon(QStyle.SP_MessageBoxWarning)
-        self.status_icon.setPixmap(icon.pixmap(20, 20))
+        """Show warning status with modern badge."""
+        self.status_icon.setText("⚠")
+        self.status_icon.setStyleSheet(f"""
+            QLabel {{
+                background-color: {Colors.YELLOW_100};
+                color: {Colors.YELLOW_600};
+                border: 1px solid {Colors.YELLOW_500};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+                font-weight: {Fonts.WEIGHT_BOLD};
+                font-size: {Fonts.SIZE_LG};
+            }}
+        """)
         self.status_icon.setVisible(True)
         self.setToolTip(message)
         logger.warning("Warning: " + message)
 
     def error(self, message):
-        icon = self.style().standardIcon(QStyle.SP_MessageBoxCritical)
-        self.status_icon.setPixmap(icon.pixmap(20, 20))
+        """Show error status with modern badge."""
+        self.status_icon.setText("✕")
+        self.status_icon.setStyleSheet(f"""
+            QLabel {{
+                background-color: {Colors.RED_100};
+                color: {Colors.RED_700};
+                border: 1px solid {Colors.RED_500};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+                font-weight: {Fonts.WEIGHT_BOLD};
+                font-size: {Fonts.SIZE_LG};
+            }}
+        """)
         self.status_icon.setVisible(True)
         self.setToolTip(message)
         logger.error("Error: " + message)
 
     def clear_status(self):
+        """Clear status display."""
         self.status_icon.clear()
         self.status_icon.setVisible(False)
+        self.status_icon.setStyleSheet("")
         self.checkmark_label.clear()
         self.setToolTip("")

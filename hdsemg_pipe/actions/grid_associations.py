@@ -11,6 +11,7 @@ from PyQt5 import QtWidgets, QtCore
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_shared.fileio.file_io import EMGFile, Grid
 from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
 
 
 class AssociationDialog(QtWidgets.QDialog):
@@ -40,10 +41,42 @@ class AssociationDialog(QtWidgets.QDialog):
             logger.info("Total files loaded: %d", len(self.emg_files))
 
     def init_ui(self):
-        # Create list widgets
+        """Initialize modern UI with GitHub-style design."""
+        # Set dialog background
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {Colors.BG_SECONDARY};
+            }}
+        """)
+
+        # Create list widgets with modern styling
         self.available_list = QtWidgets.QListWidget()
         self.selected_list = QtWidgets.QListWidget()
         self.selected_list.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
+
+        # Style both lists
+        list_style = f"""
+            QListWidget {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.SM}px;
+                font-size: {Fonts.SIZE_BASE};
+            }}
+            QListWidget::item {{
+                padding: {Spacing.SM}px;
+                border-radius: {BorderRadius.SM};
+            }}
+            QListWidget::item:hover {{
+                background-color: {Colors.GRAY_100};
+            }}
+            QListWidget::item:selected {{
+                background-color: {Colors.BLUE_100};
+                color: {Colors.BLUE_900};
+            }}
+        """
+        self.available_list.setStyleSheet(list_style)
+        self.selected_list.setStyleSheet(list_style)
 
         # Populate available list
         for emg in self.emg_files:
@@ -53,70 +86,127 @@ class AssociationDialog(QtWidgets.QDialog):
                 item.setData(QtCore.Qt.UserRole, grid)
                 self.available_list.addItem(item)
 
-        # Buttons
-        self.add_btn = QtWidgets.QPushButton(">>")
-        self.remove_btn = QtWidgets.QPushButton("<<")
+        # Transfer buttons with icon-style
+        self.add_btn = QtWidgets.QPushButton("Add →")
+        self.remove_btn = QtWidgets.QPushButton("← Remove")
+        self.add_btn.setStyleSheet(Styles.button_secondary())
+        self.remove_btn.setStyleSheet(Styles.button_secondary())
         self.add_btn.clicked.connect(self.add_selected)
         self.remove_btn.clicked.connect(self.remove_selected)
 
-        # Name input and buttons
+        # Name input with modern styling
         self.name_edit = QtWidgets.QLineEdit()
-        self.add_assoc_btn = QtWidgets.QPushButton("+")
+        self.name_edit.setPlaceholderText("Enter association name...")
+        self.name_edit.setStyleSheet(Styles.input_field())
+
+        # Action buttons
+        self.add_assoc_btn = QtWidgets.QPushButton("+ Add Another")
         self.add_assoc_btn.setToolTip("Save current association and add another")
-        self.save_close_btn = QtWidgets.QPushButton("Save && Close")
+        self.add_assoc_btn.setStyleSheet(Styles.button_secondary())
+        self.save_close_btn = QtWidgets.QPushButton("Save & Close")
+        self.save_close_btn.setStyleSheet(Styles.button_primary())
+
         self.add_assoc_btn.clicked.connect(lambda: self.save_association(close_dialog=False))
         self.save_close_btn.clicked.connect(lambda: self.save_association(close_dialog=True))
 
         # Saved files list
         self.saved_files_list = QtWidgets.QListWidget()
         self.saved_files_list.setToolTip("Successfully saved associations")
-        self.saved_files_list.setAlternatingRowColors(True)
+        self.saved_files_list.setStyleSheet(list_style)
 
-        # Layout
-        layout = QtWidgets.QHBoxLayout()
+        # Create labels with modern styling
+        def create_section_label(text):
+            label = QtWidgets.QLabel(text)
+            label.setStyleSheet(f"""
+                QLabel {{
+                    color: {Colors.TEXT_PRIMARY};
+                    font-size: {Fonts.SIZE_LG};
+                    font-weight: {Fonts.WEIGHT_SEMIBOLD};
+                    margin-bottom: {Spacing.SM}px;
+                }}
+            """)
+            return label
 
-        # Left panel
+        # Main layout with proper spacing
+        main_layout = QtWidgets.QVBoxLayout()
+        main_layout.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
+        main_layout.setSpacing(Spacing.LG)
+
+        # Top section: Grid selection
+        grid_layout = QtWidgets.QHBoxLayout()
+        grid_layout.setSpacing(Spacing.MD)
+
+        # Left panel (Available grids)
         left_panel = QtWidgets.QVBoxLayout()
-        left_panel.addWidget(QtWidgets.QLabel("Available Grids:"))
+        left_panel.setSpacing(Spacing.SM)
+        left_panel.addWidget(create_section_label("Available Grids"))
         left_panel.addWidget(self.available_list)
 
-        # Button panel
+        # Button panel (center)
         btn_panel = QtWidgets.QVBoxLayout()
         btn_panel.addStretch()
         btn_panel.addWidget(self.add_btn)
+        btn_panel.addSpacing(Spacing.SM)
         btn_panel.addWidget(self.remove_btn)
         btn_panel.addStretch()
 
-        # Right panel
+        # Right panel (Selected grids)
         right_panel = QtWidgets.QVBoxLayout()
-        right_panel.addWidget(QtWidgets.QLabel("Selected Grids (Order Matters):"))
+        right_panel.setSpacing(Spacing.SM)
+
+        selected_label_layout = QtWidgets.QVBoxLayout()
+        selected_label = create_section_label("Selected Grids")
+        order_hint = QtWidgets.QLabel("(Order matters - drag to reorder)")
+        order_hint.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_SECONDARY};
+                font-size: {Fonts.SIZE_SM};
+                font-style: italic;
+            }}
+        """)
+        selected_label_layout.addWidget(selected_label)
+        selected_label_layout.addWidget(order_hint)
+        selected_label_layout.setSpacing(0)
+
+        right_panel.addLayout(selected_label_layout)
         right_panel.addWidget(self.selected_list)
-        right_panel.addWidget(self.add_assoc_btn)
 
-        # Saved files panel
-        saved_panel = QtWidgets.QVBoxLayout()
-        saved_panel.addWidget(QtWidgets.QLabel("Saved Associations:"))
-        saved_panel.addWidget(self.saved_files_list)
-        right_panel.addLayout(saved_panel)
+        grid_layout.addLayout(left_panel, 1)
+        grid_layout.addLayout(btn_panel, 0)
+        grid_layout.addLayout(right_panel, 1)
 
-        # Main layout
-        layout.addLayout(left_panel)
-        layout.addLayout(btn_panel)
-        layout.addLayout(right_panel)
+        main_layout.addLayout(grid_layout)
 
-        # Main container
-        main_layout = QtWidgets.QVBoxLayout()
-        main_layout.addLayout(layout)
+        # Middle section: Association name input
+        name_group = QtWidgets.QGroupBox("Association Details")
+        name_group.setStyleSheet(Styles.groupbox())
+        name_layout = QtWidgets.QVBoxLayout()
+        name_layout.setSpacing(Spacing.SM)
 
-        # Button row
+        name_label = QtWidgets.QLabel("Association Name:")
+        name_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-weight: {Fonts.WEIGHT_MEDIUM};")
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(self.name_edit)
+
+        name_group.setLayout(name_layout)
+        main_layout.addWidget(name_group)
+
+        # Bottom section: Saved associations
+        saved_group = QtWidgets.QGroupBox("Saved Associations")
+        saved_group.setStyleSheet(Styles.groupbox())
+        saved_layout = QtWidgets.QVBoxLayout()
+        saved_layout.setSpacing(Spacing.SM)
+        saved_layout.addWidget(self.saved_files_list)
+        saved_group.setLayout(saved_layout)
+        main_layout.addWidget(saved_group)
+
+        # Button row at bottom
         button_row = QtWidgets.QHBoxLayout()
-        button_row.addWidget(self.save_close_btn)
+        button_row.setSpacing(Spacing.SM)
+        button_row.addWidget(self.add_assoc_btn)
         button_row.addStretch()
+        button_row.addWidget(self.save_close_btn)
 
-        # Form layout
-        form_layout = QtWidgets.QFormLayout()
-        form_layout.addRow("Association Name:", self.name_edit)
-        main_layout.addLayout(form_layout)
         main_layout.addLayout(button_row)
 
         self.setLayout(main_layout)

@@ -15,6 +15,7 @@ from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.loadingbutton import LoadingButton
 from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
 from hdsemg_pipe.widgets.LineNoiseInfoDialog import LineNoiseInfoDialog
+from hdsemg_pipe.ui_elements.theme import Styles
 
 
 class LineNoiseRemovalStepWidget(BaseStepWidget):
@@ -80,11 +81,20 @@ class LineNoiseRemovalStepWidget(BaseStepWidget):
         """Creates the buttons for line noise removal."""
         # Info button to explain methods
         self.btn_info = QPushButton("Methods Info")
+        self.btn_info.setStyleSheet(Styles.button_secondary())
         self.btn_info.clicked.connect(self.show_info_dialog)
         self.buttons.append(self.btn_info)
 
+        # Skip button
+        self.btn_skip = QPushButton("Skip This Step")
+        self.btn_skip.setStyleSheet(Styles.button_secondary())
+        self.btn_skip.setToolTip("Skip line noise removal and copy files to next step")
+        self.btn_skip.clicked.connect(self.skip_processing)
+        self.buttons.append(self.btn_skip)
+
         # Main processing button
         self.btn_remove_noise = LoadingButton("Remove Noise")
+        self.btn_remove_noise.setStyleSheet(Styles.button_primary())
         self.btn_remove_noise.clicked.connect(self.start_processing)
         self.buttons.append(self.btn_remove_noise)
 
@@ -92,6 +102,66 @@ class LineNoiseRemovalStepWidget(BaseStepWidget):
         """Show information dialog about line noise removal methods."""
         dialog = LineNoiseInfoDialog(self)
         dialog.exec_()
+
+    def skip_processing(self):
+        """Skip line noise removal and copy files directly to the next step."""
+        import shutil
+
+        if not global_state.associated_files:
+            logger.warning("No .mat files found to skip.")
+            self.warn("No files available to skip.")
+            return
+
+        # Ask for confirmation
+        reply = QMessageBox.question(
+            self,
+            "Skip Line Noise Removal",
+            f"Are you sure you want to skip line noise removal?\n\n"
+            f"{len(global_state.associated_files)} files will be copied directly to the next step.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.No:
+            return
+
+        logger.info("Skipping line noise removal - copying files directly")
+
+        # Ensure output directory exists
+        output_dir = global_state.get_line_noise_cleaned_path()
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Clear the list of cleaned files
+        global_state.line_noise_cleaned_files.clear()
+
+        try:
+            # Copy all files directly
+            for file_path in global_state.associated_files:
+                file_name = os.path.basename(file_path)
+                output_path = os.path.join(output_dir, file_name)
+
+                shutil.copy2(file_path, output_path)
+                global_state.line_noise_cleaned_files.append(output_path)
+                logger.info(f"Copied {file_name} to {output_dir}")
+
+            # Update progress
+            self.processed_files = len(global_state.line_noise_cleaned_files)
+            self.total_files = len(global_state.associated_files)
+            self.update_progress(self.processed_files, self.total_files)
+
+            # Mark step as complete
+            self.complete_step()
+
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Skipped line noise removal.\n{self.total_files} files copied to next step."
+            )
+
+        except Exception as e:
+            error_msg = f"Failed to copy files: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.error(error_msg)
 
     def start_processing(self):
         """Starts line noise removal processing and updates progress dynamically."""

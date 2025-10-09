@@ -11,6 +11,7 @@ from hdsemg_pipe.state.global_state import global_state
 from hdsemg_shared.fileio.file_io import EMGFile
 from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.ui_elements.theme import Styles
 
 class DefineRoiStepWidget(BaseStepWidget):
     def __init__(self, step_index):
@@ -21,10 +22,12 @@ class DefineRoiStepWidget(BaseStepWidget):
 
     def create_buttons(self):
         btn_skip = QPushButton("Skip")
+        btn_skip.setStyleSheet(Styles.button_secondary())
         btn_skip.clicked.connect(self.skip_step)
         self.buttons.append(btn_skip)
 
         btn_roi = QPushButton("Start")
+        btn_roi.setStyleSheet(Styles.button_primary())
         btn_roi.clicked.connect(self.start_roi)
         self.buttons.append(btn_roi)
 

@@ -9,6 +9,7 @@ from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
 from hdsemg_pipe.actions.grid_associations import AssociationDialog
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.ui_elements.theme import Styles
 
 
 def check_target_directory():
@@ -44,10 +45,12 @@ class GridAssociationWidget(BaseStepWidget):
         Create the buttons for the grid association step.
         """
         btn_skip = QPushButton("Skip")
+        btn_skip.setStyleSheet(Styles.button_secondary())
         btn_skip.clicked.connect(self.skip_step)
         self.buttons.append(btn_skip)
 
         btn_associate = QPushButton("Start")
+        btn_associate.setStyleSheet(Styles.button_primary())
         btn_associate.clicked.connect(self.start_association)
         self.buttons.append(btn_associate)
 
