@@ -40,6 +40,7 @@ def reconstruct_folder_state(folderpath):
     try:
         _original_files(folderpath)
         _associated_grid_files(folderpath)
+        _line_noise_cleaned_files(folderpath)
         _roi_files(folderpath)
         _channel_selection_files(folderpath)
         msg_box = _show_restore_success(folderpath)
@@ -145,6 +146,33 @@ def _associated_grid_files(folderpath):
 
     return associated_grids_path
 
+def _line_noise_cleaned_files(folderpath):
+    """Check if the line noise cleaned files folder exists."""
+    line_noise_cleaned_path = os.path.join(folderpath, str(FolderNames.LINE_NOISE_CLEANED.value))
+    files = os.listdir(line_noise_cleaned_path)
+
+    for file in files:
+        if file.endswith(".mat"):
+            file_path = os.path.join(line_noise_cleaned_path, file)
+            global_state.line_noise_cleaned_files.append(file_path)
+
+    line_noise_cleaned_files = global_state.line_noise_cleaned_files.copy()
+    if not line_noise_cleaned_files or len(line_noise_cleaned_files) == 0:
+        logger.warning(f"No line noise cleaned files found in: {line_noise_cleaned_path}")
+        raise FileNotFoundError(f"No line noise cleaned files found in: {line_noise_cleaned_path}")
+
+    logger.debug(f"Line noise cleaned files added to global state: {line_noise_cleaned_files}")
+
+    line_noise_cleaned_widget = global_state.get_widget("step2")
+    if line_noise_cleaned_widget:
+        line_noise_cleaned_widget.check()
+        line_noise_cleaned_widget.complete_step(processed_files=len(line_noise_cleaned_files))
+    else:
+        logger.warning("Line noise removal widget not found in global state.")
+        raise ValueError("Line noise removal widget not found in global state.")
+
+    return line_noise_cleaned_path
+
 def _roi_files(folderpath):
     """Check if the roi files folder exists."""
     roi_file_path = os.path.join(folderpath, str(FolderNames.CROPPED_SIGNAL.value))
@@ -162,7 +190,7 @@ def _roi_files(folderpath):
 
     logger.debug(f"roi added to global state: {roi_files}")
 
-    roi_file_widget = global_state.get_widget("step2")
+    roi_file_widget = global_state.get_widget("step3")
     if roi_file_widget:
         roi_file_widget.check()
         roi_file_widget.complete_step()
@@ -189,7 +217,7 @@ def _channel_selection_files(folderpath):
 
     logger.debug(f"channelselection added to global state: {channel_selection_files}")
 
-    channel_selection_file_widget = global_state.get_widget("step3")
+    channel_selection_file_widget = global_state.get_widget("step4")
     if channel_selection_file_widget:
         channel_selection_file_widget.check()
         channel_selection_file_widget.complete_step(processed_files=len(channel_selection_files))
@@ -200,7 +228,7 @@ def _channel_selection_files(folderpath):
     return channel_selection_file_path
 
 def _decomposition_results_init():
-    decomposition_widget = global_state.get_widget("step4")
+    decomposition_widget = global_state.get_widget("step5")
     if decomposition_widget:
         decomposition_widget.init_file_checking()
     else:

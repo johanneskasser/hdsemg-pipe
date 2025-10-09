@@ -14,6 +14,7 @@ from hdsemg_pipe.widgets.DecompositionStepWidget import DecompositionResultsStep
 from hdsemg_pipe.widgets.DefineRoiStepWidget import DefineRoiStepWidget
 from hdsemg_pipe.widgets.FolderContentWidget import FolderContentWidget
 from hdsemg_pipe.widgets.GridAssociationStepWidget import GridAssociationWidget
+from hdsemg_pipe.widgets.LineNoiseRemovalStepWidget import LineNoiseRemovalStepWidget
 from hdsemg_pipe.widgets.OpenFileStepWidget import OpenFileStepWidget
 from hdsemg_pipe.version import __version__
 
@@ -85,37 +86,48 @@ class MainWindow(QMainWindow):
         step2.check()
         self.settingsDialog.settingsAccepted.connect(step2.check)
 
-        step3 = DefineRoiStepWidget(3)
+        # Schritt 3: Line Noise Removal
+        step3 = LineNoiseRemovalStepWidget(3)
         global_state.register_widget(step3)
         self.steps.append(step3)
         grid_layout.addWidget(step3, 4, 0)
         step3.check()
         self.settingsDialog.settingsAccepted.connect(step3.check)
 
-        # Schritt 4: Kanal-Auswahl
-        step4 = ChannelSelectionStepWidget(4)
+        # Schritt 4: Define ROI
+        step4 = DefineRoiStepWidget(4)
         global_state.register_widget(step4)
         self.steps.append(step4)
         grid_layout.addWidget(step4, 5, 0)
         step4.check()
         self.settingsDialog.settingsAccepted.connect(step4.check)
 
-        # Schritt 4: Descomposition
-        step5 = DecompositionResultsStepWidget(4, "Decomposition Results", f"This widget watches the decomposition path for file changes. Please perform decomposition manually and this application will detect the changes and you will be able to proceed.")
+        # Schritt 5: Kanal-Auswahl
+        step5 = ChannelSelectionStepWidget(5)
         global_state.register_widget(step5)
         self.steps.append(step5)
         grid_layout.addWidget(step5, 6, 0)
         step5.check()
         self.settingsDialog.settingsAccepted.connect(step5.check)
 
+        # Schritt 6: Descomposition
+        step6 = DecompositionResultsStepWidget(6, "Decomposition Results", f"This widget watches the decomposition path for file changes. Please perform decomposition manually and this application will detect the changes and you will be able to proceed.")
+        global_state.register_widget(step6)
+        self.steps.append(step6)
+        grid_layout.addWidget(step6, 7, 0)
+        step6.check()
+        self.settingsDialog.settingsAccepted.connect(step6.check)
+
         # Connect the Steps
         step1.fileSelected.connect(step2.check)
         step1.fileSelected.connect(self.folder_content_widget.update_folder_content)
-        step1.fileSelected.connect(step5.init_file_checking)
-        step2.stepCompleted.connect(step3.check)
+        step1.fileSelected.connect(step6.init_file_checking)
+        step2.stepCompleted.connect(step3.update)
         step2.stepCompleted.connect(self.folder_content_widget.update_folder_content)
-        step3.stepCompleted.connect(step4.update)
+        step3.stepCompleted.connect(step4.check)
         step3.stepCompleted.connect(self.folder_content_widget.update_folder_content)
+        step4.stepCompleted.connect(step5.update)
+        step4.stepCompleted.connect(self.folder_content_widget.update_folder_content)
 
         # Disable all steps except the first
         for step in self.steps[1:]:

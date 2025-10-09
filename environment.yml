@@ -17,3 +17,8 @@ dependencies:
   - pip
   - pip:
       - pyqt5-tools>=5.15.9.3.3
+      - mne>=1.0.0
+      # Optional: Octave support (requires Octave to be installed separately)
+      # - oct2py>=5.0.0
+  # Note: MATLAB Engine for Python must be installed separately from MATLAB
+  # See: https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html

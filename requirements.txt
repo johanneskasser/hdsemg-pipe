@@ -8,3 +8,11 @@ requests>=2.26.0
 hdsemg-shared>=0.11.1
 hdsemg-select>=0.1.1
 pyqt5-tools>=5.15.9.3.3
+mne>=1.0.0
+
+# Optional dependencies for line noise removal methods
+# Uncomment to install Octave support (requires Octave to be installed separately)
+# oct2py>=5.0.0
+
+# Note: MATLAB Engine for Python must be installed separately from MATLAB
+# See: https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html
