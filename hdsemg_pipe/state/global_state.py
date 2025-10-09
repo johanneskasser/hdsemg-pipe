@@ -11,6 +11,7 @@ class GlobalState:
         self._widget_counter = 0
         self._original_files = []
         self.associated_files = []
+        self.line_noise_cleaned_files = []
         self.cropped_files = []
         self.channel_selection_files = []
         self.workfolder = None
@@ -26,6 +27,7 @@ class GlobalState:
         """Reset state variables to initial values."""
         self._original_files = []
         self.associated_files = []
+        self.line_noise_cleaned_files = []
         self.workfolder = None
         self._widget_counter = 0
         self.cropped_files = []
@@ -103,6 +105,12 @@ class GlobalState:
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
         path = os.path.join(self.workfolder, FolderNames.ASSOCIATED_GRIDS.value)
+        return os.path.normpath(path)
+
+    def get_line_noise_cleaned_path(self):
+        if not self.workfolder:
+            raise ValueError("Workfolder is not set.")
+        path = os.path.join(self.workfolder, FolderNames.LINE_NOISE_CLEANED.value)
         return os.path.normpath(path)
 
     def get_channel_selection_path(self):

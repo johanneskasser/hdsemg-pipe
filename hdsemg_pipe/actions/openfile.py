@@ -32,7 +32,7 @@ def open_file_or_folder(mode='file'):
             None,
             "Select a File",
             os.getcwd(),  # Set a valid initial directory
-            "MAT Files (*.mat);;OTB Files (*.otb+);;OTB4 Files (*.otb4);;All Files (*)",  # Corrected filter string
+            "MAT/OTB Files (*.mat *.otb *.otb4 *.otb+)",  # Corrected filter string
             options=options
         )
         logger.debug(f"File selected: {file_path}")
@@ -107,6 +107,8 @@ def create_sub_work_folders(workfolder_path):
     channelselection_foldername = os.path.normpath(channelselection_foldername)
     associated_grids_foldername = os.path.join(workfolder_path, FolderNames.ASSOCIATED_GRIDS.value)
     associated_grids_foldername = os.path.normpath(associated_grids_foldername)
+    line_noise_cleaned_foldername = os.path.join(workfolder_path, FolderNames.LINE_NOISE_CLEANED.value)
+    line_noise_cleaned_foldername = os.path.normpath(line_noise_cleaned_foldername)
     decomposition_foldername = os.path.join(workfolder_path, FolderNames.DECOMPOSITION.value)
     decomposition_foldername = os.path.normpath(decomposition_foldername)
     cropped_signal_foldername = os.path.join(workfolder_path, FolderNames.CROPPED_SIGNAL.value)
@@ -117,6 +119,8 @@ def create_sub_work_folders(workfolder_path):
         logger.info(f"Created original_file Folder: {original_files_foldername}")
         os.makedirs(associated_grids_foldername, exist_ok=True)
         logger.info(f"Created associated_grids folder: {associated_grids_foldername}")
+        os.makedirs(line_noise_cleaned_foldername, exist_ok=True)
+        logger.info(f"Created line_noise_cleaned folder: {line_noise_cleaned_foldername}")
         os.makedirs(decomposition_foldername, exist_ok=True)
         logger.info(f"Created decomposition folder: {decomposition_foldername}")
         os.makedirs(channelselection_foldername, exist_ok=True)

@@ -1,0 +1,14 @@
+.venv
+.idea
+
+.DS_Store
+
+__pycache__/
+**/__pycache__/
+
+*.log
+**/*.log
+
+.vscode/
+
+hdsemg_pipe/config/config.json

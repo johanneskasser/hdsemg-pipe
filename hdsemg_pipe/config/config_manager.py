@@ -67,10 +67,33 @@ class ConfigManager:
             return False
 
 
+    def is_matlab_available(self):
+        """Check if MATLAB Engine for Python is available."""
+        try:
+            import matlab.engine
+            # Try to check if MATLAB is actually accessible
+            engines = matlab.engine.find_matlab()
+            return True
+        except (ImportError, Exception):
+            return False
+
+    def is_octave_available(self):
+        """Check if Octave and oct2py are available."""
+        try:
+            import oct2py
+            # Try to initialize octave to verify it works
+            oc = oct2py.Oct2Py()
+            oc.exit()
+            return True
+        except (ImportError, Exception):
+            return False
+
     def check_installations(self):
         """Check if the configuration still exists."""
         self.set(Settings.HDSEMG_SELECT_INSTALLED, self.is_package_installed("hdsemg_select"))
         self.set(Settings.OPENHDEMG_INSTALLED, self.is_package_installed("openhdemg"))
+        self.set(Settings.MATLAB_INSTALLED, self.is_matlab_available())
+        self.set(Settings.OCTAVE_INSTALLED, self.is_octave_available())
 
 # Singleton instance
 config = ConfigManager()

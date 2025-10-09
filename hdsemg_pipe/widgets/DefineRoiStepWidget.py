@@ -32,7 +32,7 @@ class DefineRoiStepWidget(BaseStepWidget):
         logger.debug("Skipping ROI step.")
         dest = global_state.get_cropped_signal_path()
         try:
-            global_state.cropped_files = copy_files(global_state.associated_files, dest)
+            global_state.cropped_files = copy_files(global_state.line_noise_cleaned_files, dest)
             self.complete_step()
         except Exception as e:
             logger.error("Failed to copy files: %s", e)
@@ -40,7 +40,7 @@ class DefineRoiStepWidget(BaseStepWidget):
 
     def start_roi(self):
         logger.debug("Starting ROI definition.")
-        files = global_state.associated_files
+        files = global_state.line_noise_cleaned_files
         if not files:
             self.warn("No files selected for ROI definition.")
             return

@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
 from hdsemg_pipe.settings.tabs.channelselection import init as channelselectiontab_init
 from hdsemg_pipe.settings.tabs.workfolder import init_workfolder_widget
 from hdsemg_pipe.settings.tabs.openhdemg import init as init_openhdemg_widget
+from hdsemg_pipe.settings.tabs.line_noise import init as init_line_noise_widget
 from hdsemg_pipe.settings.tabs.log_setting import init as init_logging_widget
 from hdsemg_pipe._log.log_config import logger
 from PyQt5.QtCore import pyqtSignal
@@ -27,12 +28,14 @@ class SettingsDialog(QDialog):
         # Create individual tabs
         self.channel_selection_tab = QWidget()
         self.workfolder_tab = QWidget()
+        self.line_noise_tab = QWidget()
         self.openhdemg_tab = QWidget()
         self.logging_tab = QWidget()
 
         # Add tabs to the tab widget
         self.tab_widget.addTab(self.channel_selection_tab, "Channel Selection App")
         self.tab_widget.addTab(self.workfolder_tab, "Work Folder")
+        self.tab_widget.addTab(self.line_noise_tab, "Line Noise Removal")
         self.tab_widget.addTab(self.openhdemg_tab, "openhdemg")
         self.tab_widget.addTab(self.logging_tab, "Logging")
 
@@ -40,6 +43,7 @@ class SettingsDialog(QDialog):
         # Initialize content for each tab
         self.initChannelSelectionTab()
         self.initWorkfolderTab()
+        self.initLineNoiseTab()
         self.initOpenHDsEMGTab()
         self.initLoggingTab()
 
@@ -63,6 +67,11 @@ class SettingsDialog(QDialog):
         """Initialize the 'openhdemg' settings tab."""
         openhdemg_tab = init_openhdemg_widget(self)
         self.openhdemg_tab.setLayout(openhdemg_tab)
+
+    def initLineNoiseTab(self):
+        """Initialize the 'Line Noise Removal' settings tab."""
+        line_noise_tab = init_line_noise_widget(self)
+        self.line_noise_tab.setLayout(line_noise_tab)
 
     def initLoggingTab(self):
         """Initialize the 'Logging' settings tab."""
