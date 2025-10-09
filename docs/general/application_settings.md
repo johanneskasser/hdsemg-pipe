@@ -66,25 +66,48 @@ The settings dialog displays the installation status of optional dependencies:
 
 Methods that are not available (due to missing dependencies) will be disabled in the dropdown menu.
 
-#### Installation Instructions
+#### MATLAB Engine Installation Assistant
 
-**For MATLAB CleanLine (Gold Standard):**
+The application provides an installation assistant that generates the correct installation commands for your system:
+
+1. Go to **Settings → Preferences → Line Noise Removal**
+2. Scroll to the **MATLAB Engine for Python** section
+3. Click **Show Installation Instructions** button
+4. Follow the displayed instructions:
+   - **Option 1 (Recommended)**: Copy the command and run it in MATLAB
+   - **Option 2**: Copy the command and run it in Terminal/CMD
+5. Click "Copy Command" to copy the installation command to clipboard
+6. Restart the application after installation
+
+**Benefits:**
+- Automatically detects your MATLAB installation path
+- Provides copy-paste ready commands with correct paths
+- Works with all Python environments (including Windows Store Python)
+- No complex troubleshooting needed
+
+#### Manual Installation Instructions
+
+**For MATLAB Engine (if automatic installation fails):**
+
+*Option 1 - In MATLAB:*
+```matlab
+cd(fullfile(matlabroot,'extern','engines','python'))
+system('python setup.py install')
+```
+
+*Option 2 - In Terminal/CMD:*
+```bash
+cd <matlabroot>/extern/engines/python
+python setup.py install
+```
+
+**For MATLAB CleanLine Plugin (Gold Standard):**
 ```bash
 # 1. Install MATLAB (license required)
 # 2. Install EEGLAB from https://sccn.ucsd.edu/eeglab/download.php
 # 3. In EEGLAB: File → Manage EEGLAB extensions → CleanLine
-# 4. Install MATLAB Engine for Python:
-cd "matlabroot/extern/engines/python"
-python setup.py install
-# 5. Add EEGLAB to MATLAB path
-```
-
-**For MATLAB IIR (Notch only):**
-```bash
-# 1. Install MATLAB (license required)
-# 2. Install MATLAB Engine for Python:
-cd "matlabroot/extern/engines/python"
-python setup.py install
+# 4. Add EEGLAB to MATLAB path (in startup.m or manually)
+# 5. Install MATLAB Engine (see above or use automatic installation)
 ```
 
 **For Octave (Free):**

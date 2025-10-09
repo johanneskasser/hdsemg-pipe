@@ -37,22 +37,42 @@ def reconstruct_folder_state(folderpath):
 
     global_state.workfolder = folderpath
 
+    # Reconstruct each step independently to handle optional/skipped steps
+    # Original files are mandatory - fail if missing
     try:
         _original_files(folderpath)
-        _associated_grid_files(folderpath)
-        _line_noise_cleaned_files(folderpath)
-        _roi_files(folderpath)
-        _channel_selection_files(folderpath)
-        msg_box = _show_restore_success(folderpath)
-        msg_box.exec_()
-        folder_content_widget.update_folder_content()
-        return
     except FileNotFoundError as e:
-        _decomposition_results_init()
-        msg_box = _show_restore_success(folderpath)
-        msg_box.exec_()
-        folder_content_widget.update_folder_content()
-        return
+        logger.error(f"Cannot reconstruct state: {e}")
+        raise
+
+    # All subsequent steps are optional - continue even if they fail
+    try:
+        _associated_grid_files(folderpath)
+    except FileNotFoundError as e:
+        logger.info(f"Skipping grid association reconstruction: {e}")
+
+    try:
+        _line_noise_cleaned_files(folderpath)
+    except FileNotFoundError as e:
+        logger.info(f"Skipping line noise cleaned reconstruction: {e}")
+
+    try:
+        _roi_files(folderpath)
+    except FileNotFoundError as e:
+        logger.info(f"Skipping ROI reconstruction: {e}")
+
+    try:
+        _channel_selection_files(folderpath)
+    except FileNotFoundError as e:
+        logger.info(f"Skipping channel selection reconstruction: {e}")
+
+    # Always initialize decomposition results
+    _decomposition_results_init()
+
+    msg_box = _show_restore_success(folderpath)
+    msg_box.exec_()
+    folder_content_widget.update_folder_content()
+    return
 
 
 def _show_restore_success(folderpath):

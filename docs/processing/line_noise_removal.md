@@ -343,23 +343,43 @@ All methods:
 pip install mne>=1.0.0
 ```
 
-### MATLAB CleanLine
-1. Install MATLAB (license required)
-2. Install EEGLAB from [sccn.ucsd.edu](https://sccn.ucsd.edu/eeglab/download.php)
-3. In EEGLAB: `File → Manage EEGLAB extensions → CleanLine`
-4. Install MATLAB Engine:
-```bash
-cd "$(python -c 'import matlab; print(matlab.__path__[0])')/../../../extern/engines/python"
-python setup.py install
-```
-5. Add EEGLAB to MATLAB path (in startup.m or manually)
+### MATLAB Engine for Python
 
-### MATLAB Engine (for IIR method)
-```bash
-# In MATLAB
+**Installation Assistant (Recommended):**
+1. Go to **Settings → Preferences → Line Noise Removal**
+2. Scroll to **MATLAB Engine for Python** section
+3. Click **Show Installation Instructions** button
+4. Follow the displayed instructions (copy-paste ready commands)
+5. Click "Copy Command" to copy the installation command
+6. Run the command in MATLAB or Terminal/CMD
+7. Restart application after installation
+
+**Benefits:**
+- Automatically detects your MATLAB installation path
+- Provides correct commands for your system
+- Works with all Python environments
+- Simple copy-paste workflow
+
+**Manual Installation (if you prefer):**
+
+*Option 1 - In MATLAB:*
+```matlab
 cd(fullfile(matlabroot,'extern','engines','python'))
 system('python setup.py install')
 ```
+
+*Option 2 - In Terminal/CMD:*
+```bash
+cd <matlabroot>/extern/engines/python
+python setup.py install
+```
+
+### MATLAB CleanLine (EEGLAB Plugin)
+1. Install MATLAB (license required)
+2. Install EEGLAB from [sccn.ucsd.edu](https://sccn.ucsd.edu/eeglab/download.php)
+3. In EEGLAB: `File → Manage EEGLAB extensions → CleanLine`
+4. Install MATLAB Engine (see above - use automatic installation)
+5. Add EEGLAB to MATLAB path (in startup.m or manually)
 
 ### Octave
 1. Install Octave from [octave.org](https://octave.org/download)
