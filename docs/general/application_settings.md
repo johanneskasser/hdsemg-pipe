@@ -14,8 +14,100 @@ By default, the application will install the latest version of hdsemg-select fro
 ### Work Folder
 The **Work Folder** section allows you to specify the working directory of the application. This is the directory where all the data will be stored and processed. As soon as you open a file, the application will create a subdirectory in the working directory with the name of the file or folder. Detailed information can be found in the [Opening Data](../processing/opening_data.md) section.
 
+### Line Noise Removal
+The **Line Noise Removal** section allows you to configure how powerline interference (50/60 Hz) and harmonics are removed from your EMG signals. This is a new processing step introduced between Grid Association and Region of Interest definition.
+
+#### Power Line Frequency Region
+Select your geographic region to automatically configure the correct powerline frequencies:
+
+- **🇺🇸 USA/North America (60 Hz)**: Removes 60, 120, 180, 240 Hz
+- **🇪🇺 Europe/Asia (50 Hz)**: Removes 50, 100, 150, 200 Hz
+
+#### Line Noise Removal Method
+Choose from multiple filtering methods depending on your needs and available software:
+
+**Available Methods:**
+
+1. **⚡ MNE-Python: Notch Filter (FIR) - Fast**
+   - Classic FIR notch filter
+   - Very fast processing
+   - Good quality
+   - No additional software required
+
+2. **⭐ MNE-Python: Spectrum Fit (Adaptive) - Recommended**
+   - Adaptive spectrum fitting approach
+   - Excellent quality with minimal distortion
+   - Similar to CleanLine algorithm
+   - No additional software required
+   - **This is the default and recommended method**
+
+3. **🏆 MATLAB: CleanLine (EEGLAB Plugin) - Gold Standard**
+   - Original CleanLine algorithm from EEGLAB
+   - Multi-taper with statistical validation
+   - Best quality for time-varying line noise
+   - Requires: MATLAB + EEGLAB + CleanLine plugin
+   - Slowest but highest quality
+
+4. **🔬 MATLAB: IIR Notch Filter**
+   - Native MATLAB implementation
+   - Very narrow-band filtering
+   - Requires: MATLAB + MATLAB Engine for Python
+
+5. **🐙 Octave: IIR Notch Filter (Free)**
+   - MATLAB-compatible, open source
+   - Free alternative to MATLAB
+   - Requires: GNU Octave + oct2py
+
+#### Installation Status
+The settings dialog displays the installation status of optional dependencies:
+- ✓ MNE-Python: Always available (required dependency)
+- ✓/✗ MATLAB Engine: Shows if MATLAB is detected
+- ✓/✗ Octave + oct2py: Shows if Octave is detected
+
+Methods that are not available (due to missing dependencies) will be disabled in the dropdown menu.
+
+#### Installation Instructions
+
+**For MATLAB CleanLine (Gold Standard):**
+```bash
+# 1. Install MATLAB (license required)
+# 2. Install EEGLAB from https://sccn.ucsd.edu/eeglab/download.php
+# 3. In EEGLAB: File → Manage EEGLAB extensions → CleanLine
+# 4. Install MATLAB Engine for Python:
+cd "matlabroot/extern/engines/python"
+python setup.py install
+# 5. Add EEGLAB to MATLAB path
+```
+
+**For MATLAB IIR (Notch only):**
+```bash
+# 1. Install MATLAB (license required)
+# 2. Install MATLAB Engine for Python:
+cd "matlabroot/extern/engines/python"
+python setup.py install
+```
+
+**For Octave (Free):**
+```bash
+# 1. Install Octave from https://octave.org/download
+# 2. Install Python package:
+pip install oct2py
+```
+
+After installing any optional dependencies, restart the application to detect them.
+
+#### Methods Info Button
+Click the **"📖 Methods Info (Detailed Comparison)"** button to open a comprehensive dialog comparing all methods with:
+- Detailed technical descriptions
+- Advantages and disadvantages
+- Speed and quality comparisons
+- Installation guides
+- Technical implementation details
+
+For more information about the Line Noise Removal step, see [Line Noise Removal](../processing/line_noise_removal.md).
+
 ### Openhdemg Installation
-hdsemg-pipe can install the [openhdemg](https://www.giacomovalli.com/openhdemg/) open source project automatically from PyPI. If the application is running 
+hdsemg-pipe can install the [openhdemg](https://www.giacomovalli.com/openhdemg/) open source project automatically from PyPI. If the application is running
 from the sources, you can install openhdemg by going to Settings > Preferences > openhdemg > Install openhdemg. More information about the project can be found here: [Official Openhdemg Documentation](https://www.giacomovalli.com/openhdemg/quick-start/).
 
 ### Logging Level

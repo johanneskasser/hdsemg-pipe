@@ -30,8 +30,9 @@ nav:
   - Processing Steps:
       - Opening Data: processing/opening_data.md
       - Grid Association: processing/grid_association.md
+      - Line Noise Removal: processing/line_noise_removal.md
       - Crop to Region of Interest: processing/crop_to_roi.md
-      - Cannel Selection: processing/channel_selection.md
+      - Channel Selection: processing/channel_selection.md
       - Decomposition Results: processing/decomposition_results.md
   - Developer Guide: developer.md
   - Contributing: contributing.md
