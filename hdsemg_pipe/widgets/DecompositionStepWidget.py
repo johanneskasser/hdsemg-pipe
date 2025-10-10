@@ -14,6 +14,7 @@ from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.loadingbutton import LoadingButton
 from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
 from hdsemg_pipe.widgets.MappingDialog import MappingDialog
+from hdsemg_pipe.ui_elements.theme import Styles
 
 
 class DecompositionResultsStepWidget(BaseStepWidget):
@@ -39,12 +40,14 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         """Creates buttons for displaying decomposition results."""
         # Mapping button is initially disabled and will be enabled if files are detected
         self.btn_apply_mapping = QPushButton("Apply mapping")
+        self.btn_apply_mapping.setStyleSheet(Styles.button_secondary())
         self.btn_apply_mapping.setToolTip("Apply mapping of decomposition results and source files")
         self.btn_apply_mapping.clicked.connect(self.open_mapping_dialog)
         self.btn_apply_mapping.setEnabled(False)
         self.buttons.append(self.btn_apply_mapping)
 
         self.btn_show_results = LoadingButton("Show Decomposition Results")
+        self.btn_show_results.setStyleSheet(Styles.button_primary())
         self.btn_show_results.clicked.connect(self.display_results)
         self.buttons.append(self.btn_show_results)
 

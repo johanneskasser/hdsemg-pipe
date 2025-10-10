@@ -7,6 +7,7 @@ from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.loadingbutton import LoadingButton
 from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.ui_elements.theme import Styles
 
 
 class ChannelSelectionStepWidget(BaseStepWidget):
@@ -20,6 +21,7 @@ class ChannelSelectionStepWidget(BaseStepWidget):
     def create_buttons(self):
         """Creates the button for channel selection."""
         self.btn_select_channels = LoadingButton("Select Channels")
+        self.btn_select_channels.setStyleSheet(Styles.button_primary())
         self.btn_select_channels.clicked.connect(self.start_processing)
         self.buttons.append(self.btn_select_channels)
         self.main_layout.addWidget(self.btn_select_channels)
