@@ -2,7 +2,7 @@ from pathlib import Path
 from dataclasses import dataclass
 import numpy as np
 from PyQt5 import QtWidgets, QtCore
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 from matplotlib.widgets import SpanSelector
 
@@ -41,6 +41,8 @@ class CropRoiDialog(QtWidgets.QDialog):
         self.span_selector = None
         self.lower_threshold = 0
         self.upper_threshold = 0
+        self.click_mode = False  # Track if we're in click mode
+        self.first_click_pos = None  # Store position of first click
 
         self.load_files()
         self.init_ui()
@@ -92,8 +94,7 @@ class CropRoiDialog(QtWidgets.QDialog):
         """)
 
         instruction = QtWidgets.QLabel(
-            "Click and drag on the plot to select the time range you want to keep. "
-            "The selected region will be highlighted in light blue."
+            "🖱️ Drag to select region  •  🖱️ Click twice to set start/end points  •  🔍 Use toolbar to zoom/pan"
         )
         instruction.setStyleSheet(f"""
             QLabel {{
@@ -128,6 +129,30 @@ class CropRoiDialog(QtWidgets.QDialog):
         self.canvas = FigureCanvas(self.figure)
         self.ax = self.figure.add_subplot(111)
         self.ax.set_facecolor(Colors.BG_PRIMARY)
+
+        # Add matplotlib navigation toolbar for zoom/pan
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar.setStyleSheet(f"""
+            QToolBar {{
+                background-color: {Colors.BG_SECONDARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px;
+                spacing: {Spacing.XS}px;
+            }}
+            QToolButton {{
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px;
+            }}
+            QToolButton:hover {{
+                background-color: {Colors.GRAY_100};
+                border-color: {Colors.BORDER_DEFAULT};
+            }}
+        """)
+
+        plot_layout.addWidget(self.toolbar)
         plot_layout.addWidget(self.canvas)
 
         # ROI info display
@@ -266,7 +291,7 @@ class CropRoiDialog(QtWidgets.QDialog):
         self.lower_threshold = lo
         self.upper_threshold = hi
 
-        # Setup interactive span selector
+        # Setup interactive span selector for drag mode
         self.span_selector = SpanSelector(
             self.ax,
             self.on_span_select,
@@ -277,6 +302,9 @@ class CropRoiDialog(QtWidgets.QDialog):
             drag_from_anywhere=True
         )
 
+        # Connect click event for click mode
+        self.canvas.mpl_connect('button_press_event', self.on_click)
+
         self.update_plot()
         self.update_roi_info()
 
@@ -284,12 +312,50 @@ class CropRoiDialog(QtWidgets.QDialog):
         maxlen = max((gd.emgfile.data.shape[0] for gd in self.grid_items), default=0)
         return (0, maxlen - 1 if maxlen>0 else 0)
 
+    def on_click(self, event):
+        """Handle click events for two-click selection mode."""
+        # Only process clicks inside the plot area and with left mouse button
+        if event.inaxes != self.ax or event.button != 1:
+            return
+
+        # Check if we're in a toolbar mode (zoom/pan)
+        if self.toolbar.mode != '':
+            return
+
+        x_pos = int(event.xdata)
+
+        if self.first_click_pos is None:
+            # First click - set start position
+            self.first_click_pos = x_pos
+            logger.debug(f"First click at position: {x_pos}")
+
+            # Draw a vertical line at the first click position
+            self.draw_threshold_lines()
+
+        else:
+            # Second click - set end position and complete selection
+            second_pos = x_pos
+            self.lower_threshold = min(self.first_click_pos, second_pos)
+            self.upper_threshold = max(self.first_click_pos, second_pos)
+            logger.debug(f"Second click at position: {second_pos}, ROI: {self.lower_threshold}-{self.upper_threshold}")
+
+            # Reset for next selection
+            self.first_click_pos = None
+
+            # Update visualization
+            self.update_roi_info()
+            self.draw_threshold_lines()
+
     def on_span_select(self, xmin, xmax):
-        """Called when user selects a region with the span selector."""
+        """Called when user selects a region with the span selector (drag mode)."""
+        # Reset click mode when dragging
+        self.first_click_pos = None
+
         self.lower_threshold = int(xmin)
         self.upper_threshold = int(xmax)
         self.update_roi_info()
-        logger.debug(f"ROI selected: {self.lower_threshold} - {self.upper_threshold}")
+        self.draw_threshold_lines()
+        logger.debug(f"ROI selected via drag: {self.lower_threshold} - {self.upper_threshold}")
 
     def update_roi_info(self):
         """Update the ROI info labels."""
@@ -298,19 +364,77 @@ class CropRoiDialog(QtWidgets.QDialog):
         self.roi_end_label.setText(f"End: {self.upper_threshold}")
         self.roi_duration_label.setText(f"Duration: {duration} samples")
 
+    def draw_threshold_lines(self):
+        """Draw vertical lines and shaded region for the current ROI selection."""
+        # Remove old lines
+        for line in self.threshold_lines:
+            try:
+                line.remove()
+            except:
+                pass
+        self.threshold_lines.clear()
+
+        # Draw based on selection state
+        if self.first_click_pos is not None:
+            # First click made - draw single line
+            line = self.ax.axvline(
+                self.first_click_pos,
+                color=Colors.BLUE_600,
+                linestyle='--',
+                linewidth=2,
+                label='Start'
+            )
+            self.threshold_lines.append(line)
+
+        elif self.lower_threshold != 0 or self.upper_threshold != 0:
+            # Complete selection - draw both lines and shaded region
+            line1 = self.ax.axvline(
+                self.lower_threshold,
+                color=Colors.GREEN_600,
+                linestyle='-',
+                linewidth=2,
+                alpha=0.7
+            )
+            line2 = self.ax.axvline(
+                self.upper_threshold,
+                color=Colors.GREEN_600,
+                linestyle='-',
+                linewidth=2,
+                alpha=0.7
+            )
+            # Add shaded region
+            span = self.ax.axvspan(
+                self.lower_threshold,
+                self.upper_threshold,
+                alpha=0.15,
+                color=Colors.GREEN_500
+            )
+            self.threshold_lines.extend([line1, line2, span])
+
+        self.canvas.draw_idle()
+
     def reset_selection(self):
         """Reset the ROI selection to full range."""
         lo, hi = self.compute_data_xrange()
         self.lower_threshold = lo
         self.upper_threshold = hi
+        self.first_click_pos = None  # Reset click mode
         self.update_roi_info()
+
+        # Remove all threshold lines
+        for line in self.threshold_lines:
+            try:
+                line.remove()
+            except:
+                pass
+        self.threshold_lines.clear()
 
         # Remove the old span selector completely
         if self.span_selector:
             self.span_selector.set_visible(False)
             self.span_selector = None
 
-        # Redraw the plot to remove the highlight
+        # Redraw the plot to remove all highlights
         self.update_plot()
         logger.info("ROI selection reset to full range")
 
