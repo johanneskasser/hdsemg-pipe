@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import QPushButton, QDialog, QLabel, QVBoxLayout, QWidget, 
 
 from hdsemg_pipe.actions.file_utils import update_extras_in_pickle_file, update_extras_in_json_file
 from hdsemg_pipe.actions.decomposition_export import export_to_muedit_mat, is_muedit_file_exists
-from hdsemg_pipe.config.config_enums import Settings
+from hdsemg_pipe.config.config_enums import Settings, MUEditLaunchMethod
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
@@ -35,8 +35,9 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.result_files = []
 
         # Progress tracking for MUEdit workflow
-        self.original_decomp_files = []  # Files that need cleaning
-        self.edited_files = []  # Files that have been cleaned (_muedit_edited.mat)
+        self.original_decomp_files = []  # Original .json/.pkl files
+        self.muedit_files = []  # _muedit.mat files (ready for editing)
+        self.edited_files = []  # _muedit_edited.mat files (finished editing)
 
         # Perform an initial check
         self.check()
@@ -171,7 +172,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
 
         # Show summary to user
         if success_count > 0 and error_count == 0:
-            self.info(f"Successfully exported {success_count} file(s) to MUEdit format.")
+            self.success(f"Successfully exported {success_count} file(s) to MUEdit format.")
             self.btn_launch_muedit.setEnabled(True)
         elif success_count > 0 and error_count > 0:
             self.warn(f"Exported {success_count} file(s) successfully, but {error_count} file(s) failed:\n" +
@@ -180,19 +181,171 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         else:
             self.error(f"Failed to export files:\n" + "\n".join(error_messages))
 
-    def launch_muedit(self):
-        """Launches MUEdit for manual cleaning of decomposition results."""
-        logger.info("Launching MUEdit for manual cleaning...")
+    def _launch_muedit_via_matlab_engine(self):
+        """
+        Launch MUEdit using MATLAB Engine API.
+        Reuses existing MATLAB session if available, otherwise starts a new one.
+        Returns: (success: bool, message: str)
+        """
         try:
-            # Launch MUEdit - adjust command based on installation
-            # User needs to have MUEdit installed and accessible
-            subprocess.Popen(["muedit"])
-            self.info("MUEdit launched. Please manually clean the decomposition files and save them back to the decomposition_auto folder.")
-        except FileNotFoundError:
-            self.error("MUEdit is not installed or not in PATH. Please install MUEdit first.\n"
-                      "Repository: https://github.com/haripen/MUedit/tree/devHP")
+            import matlab.engine
+        except ImportError:
+            return False, "MATLAB Engine API not available (pip install matlabengine)"
+
+        try:
+            # Get MUEdit path from config
+            muedit_path = config.get(Settings.MUEDIT_PATH)
+
+            # Find running MATLAB sessions
+            engines = matlab.engine.find_matlab()
+
+            if engines:
+                logger.info(f"Found {len(engines)} running MATLAB session(s), connecting to first one...")
+                eng = matlab.engine.connect_matlab(engines[0])
+                logger.info("Connected to existing MATLAB session")
+            else:
+                logger.info("No running MATLAB session found, starting new session...")
+                eng = matlab.engine.start_matlab()
+                logger.info("Started new MATLAB session")
+
+            # Add MUEdit to path if configured
+            if muedit_path and os.path.exists(muedit_path):
+                logger.info(f"Adding MUEdit path to MATLAB: {muedit_path}")
+                eng.addpath(muedit_path, nargout=0)
+
+            # Launch MUEdit in background (non-blocking)
+            logger.info("Launching MUEdit in MATLAB session...")
+            eng.eval("muedit", nargout=0, background=True)
+
+            return True, "MUEdit launched successfully in MATLAB session"
+
         except Exception as e:
-            self.error(f"Failed to launch MUEdit: {str(e)}")
+            return False, f"Failed to launch via MATLAB Engine: {str(e)}"
+
+    def _launch_muedit_via_matlab_cli(self):
+        """
+        Launch MUEdit by starting a new MATLAB process via command line.
+        Returns: (success: bool, message: str)
+        """
+        try:
+            muedit_path = config.get(Settings.MUEDIT_PATH)
+
+            # Build MATLAB command
+            if muedit_path and os.path.exists(muedit_path):
+                matlab_cmd = f"addpath('{muedit_path}'); MUedit"
+            else:
+                matlab_cmd = "MUedit"
+
+            logger.info(f"Starting MATLAB with command: {matlab_cmd}")
+            subprocess.Popen(["matlab", "-r", matlab_cmd])
+
+            return True, "MUEdit launched via MATLAB CLI"
+
+        except FileNotFoundError:
+            return False, "MATLAB executable not found in PATH"
+        except Exception as e:
+            return False, f"Failed to launch via MATLAB CLI: {str(e)}"
+
+    def _launch_muedit_standalone(self):
+        """
+        Launch MUEdit as a standalone command.
+        Returns: (success: bool, message: str)
+        """
+        try:
+            logger.info("Launching MUEdit as standalone executable...")
+            subprocess.Popen(["muedit"])
+            return True, "MUEdit launched as standalone executable"
+        except FileNotFoundError:
+            return False, "MUEdit executable not found in PATH"
+        except Exception as e:
+            return False, f"Failed to launch standalone: {str(e)}"
+
+    def launch_muedit(self):
+        """
+        Launches MUEdit for manual cleaning of decomposition results.
+        Uses configured launch method with intelligent fallback logic.
+        """
+        logger.info("Launching MUEdit for manual cleaning...")
+
+        # Get configured launch method (default to AUTO)
+        launch_method_str = config.get(Settings.MUEDIT_LAUNCH_METHOD)
+        if launch_method_str:
+            try:
+                launch_method = MUEditLaunchMethod(launch_method_str)
+            except ValueError:
+                launch_method = MUEditLaunchMethod.AUTO
+        else:
+            launch_method = MUEditLaunchMethod.AUTO
+
+        logger.info(f"MUEdit launch method: {launch_method.value}")
+
+        # Try methods based on configuration
+        if launch_method == MUEditLaunchMethod.MATLAB_ENGINE:
+            success, message = self._launch_muedit_via_matlab_engine()
+            if success:
+                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                return
+            else:
+                self.error(message)
+                return
+
+        elif launch_method == MUEditLaunchMethod.MATLAB_CLI:
+            success, message = self._launch_muedit_via_matlab_cli()
+            if success:
+                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                return
+            else:
+                self.error(message)
+                return
+
+        elif launch_method == MUEditLaunchMethod.STANDALONE:
+            success, message = self._launch_muedit_standalone()
+            if success:
+                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                return
+            else:
+                self.error(message)
+                return
+
+        # AUTO mode: Try all methods with intelligent fallback
+        elif launch_method == MUEditLaunchMethod.AUTO:
+            # 1. Try MATLAB Engine (best option - reuses existing session)
+            success, message = self._launch_muedit_via_matlab_engine()
+            if success:
+                logger.info(f"AUTO mode: {message}")
+                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                return
+            else:
+                logger.debug(f"AUTO mode: MATLAB Engine failed - {message}")
+
+            # 2. Try MATLAB CLI (second best - starts new session)
+            success, message = self._launch_muedit_via_matlab_cli()
+            if success:
+                logger.info(f"AUTO mode: {message}")
+                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                return
+            else:
+                logger.debug(f"AUTO mode: MATLAB CLI failed - {message}")
+
+            # 3. Try standalone (last resort)
+            success, message = self._launch_muedit_standalone()
+            if success:
+                logger.info(f"AUTO mode: {message}")
+                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                return
+            else:
+                logger.debug(f"AUTO mode: Standalone failed - {message}")
+
+            # All methods failed
+            self.error(
+                "Failed to launch MUEdit using any available method.\n\n"
+                "Please ensure one of the following:\n"
+                "1. MATLAB Engine API is installed (pip install matlabengine) and MATLAB is running\n"
+                "2. MATLAB is installed and accessible via PATH\n"
+                "3. MUEdit is available as a standalone executable\n\n"
+                "Repository: https://github.com/haripen/MUedit/tree/devHP\n"
+                "Configure MUEdit path and launch method in Settings."
+            )
 
     def display_results(self):
         """Displays the decomposition results in the UI."""
@@ -229,37 +382,50 @@ class DecompositionResultsStepWidget(BaseStepWidget):
     def get_decomposition_results(self):
         """
         Retrieves the decomposition results from the decomposition_auto folder.
-        Detects original decomposition files (.json/.pkl) and tracks which have been cleaned in MUEdit.
-        Updates progress UI to show cleaning status.
+
+        File workflow:
+        1. Original files: .json or .pkl (decomposition results)
+        2. MUEdit export: *_muedit.mat (exported for manual cleaning)
+        3. Edited files: *_muedit_edited.mat (manually cleaned in MUEdit)
+
+        Progress tracking is based on _muedit.mat files being edited to _muedit_edited.mat
         """
         self.resultfiles = []
         self.error_messages = []
         self.original_decomp_files = []
+        self.muedit_files = []
         self.edited_files = []
 
         folder_content_widget = global_state.get_widget("folder_content")
         if not os.path.exists(self.expected_folder):
             self.error("The decomposition_auto folder does not exist or is not accessible from the application.")
             self.btn_apply_mapping.setEnabled(False)
+            self.btn_export_to_muedit.setEnabled(False)
             self.btn_launch_muedit.setEnabled(False)
             self.progress_container.setVisible(False)
             return None
 
-        # Scan folder for decomposition result files and edited files
+        # Scan folder for all file types
         for file in os.listdir(self.expected_folder):
             file_path = os.path.join(self.expected_folder, file)
 
-            # Check for edited files from MUEdit
+            # 1. Check for edited files from MUEdit (final result)
             if file.endswith("_muedit_edited.mat"):
-                logger.info(f"MUEdit edited file found: {file_path}")
-                self.edited_files.append(file)
-            # Check for MUEdit MAT files (not edited yet)
-            elif file.endswith("_muedit.mat") and not file.endswith("_muedit_edited.mat"):
-                logger.debug(f"MUEdit MAT file (not edited): {file_path}")
-                # These are intermediate files, don't add to main result list
-            # Check for original decomposition results
+                logger.info(f"MUEdit edited file found: {file}")
+                # Extract base name: filename_muedit_edited.mat -> filename
+                base_name = file.replace("_muedit_edited.mat", "")
+                self.edited_files.append(base_name)
+
+            # 2. Check for MUEdit MAT files (ready for editing)
+            elif file.endswith("_muedit.mat"):
+                logger.debug(f"MUEdit MAT file (for editing): {file}")
+                # Extract base name: filename_muedit.mat -> filename
+                base_name = file.replace("_muedit.mat", "")
+                self.muedit_files.append(base_name)
+
+            # 3. Check for original decomposition results
             elif file.endswith(".json") or file.endswith(".pkl"):
-                logger.info(f"Decomposition result file found: {file_path}")
+                logger.info(f"Original decomposition file found: {file}")
                 self.resultfiles.append(file_path)
                 # Extract base name for tracking (without extension)
                 base_name = os.path.splitext(file)[0]
@@ -270,16 +436,29 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             folder_content_widget.update_folder_content()
             self.btn_apply_mapping.setEnabled(True)
 
-            # Enable export button if JSON files are present
-            has_json_files = any(f.endswith('.json') for f in self.resultfiles)
-            self.btn_export_to_muedit.setEnabled(has_json_files)
+            # Enable "Export to MUEdit" button logic:
+            # Only enable if there are JSON files WITHOUT corresponding _muedit.mat files
+            json_files_needing_export = []
+            for f in self.resultfiles:
+                if f.endswith('.json'):
+                    base_name = os.path.splitext(os.path.basename(f))[0]
+                    if base_name not in self.muedit_files:
+                        json_files_needing_export.append(base_name)
 
-            # Enable MUEdit launch button if MUEdit files exist
-            has_muedit_files = any(
-                os.path.exists(f.replace('.json', '_muedit.mat'))
-                for f in self.resultfiles if f.endswith('.json')
-            )
+            should_enable_export = len(json_files_needing_export) > 0
+            self.btn_export_to_muedit.setEnabled(should_enable_export)
+
+            if should_enable_export:
+                logger.info(f"Export button enabled: {len(json_files_needing_export)} files need export")
+            else:
+                logger.info("Export button disabled: All JSON files already have _muedit.mat files")
+
+            # Enable "Open MUEdit" button if _muedit.mat files exist
+            has_muedit_files = len(self.muedit_files) > 0
             self.btn_launch_muedit.setEnabled(has_muedit_files)
+
+            if has_muedit_files:
+                logger.info(f"MUEdit launch button enabled: {len(self.muedit_files)} _muedit.mat files found")
 
             # Show and update progress UI
             self.update_progress_ui()
@@ -301,22 +480,32 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         return None
 
     def update_progress_ui(self):
-        """Updates the progress UI to show MUEdit cleaning status."""
-        if not self.original_decomp_files:
+        """
+        Updates the progress UI to show MUEdit cleaning status.
+
+        Progress tracking logic:
+        - Only tracks _muedit.mat files (the files that need manual cleaning)
+        - Shows which files have been edited (_muedit_edited.mat exists)
+        - Progress: edited_files / muedit_files
+        """
+        # Only show progress if there are _muedit.mat files to track
+        if not self.muedit_files:
             self.progress_container.setVisible(False)
             return
 
         # Show progress container
         self.progress_container.setVisible(True)
 
-        # Calculate progress
-        total_files = len(self.original_decomp_files)
+        # Calculate progress based on _muedit.mat files
+        total_muedit_files = len(self.muedit_files)
         edited_count = len(self.edited_files)
-        progress_percentage = int((edited_count / total_files) * 100) if total_files > 0 else 0
+        progress_percentage = int((edited_count / total_muedit_files) * 100) if total_muedit_files > 0 else 0
 
         # Update progress bar and label
         self.progress_bar.setValue(progress_percentage)
-        self.progress_label.setText(f"Manual Cleaning Progress: {edited_count}/{total_files} files ({progress_percentage}%)")
+        self.progress_label.setText(
+            f"Manual Cleaning Progress: {edited_count}/{total_muedit_files} files ({progress_percentage}%)"
+        )
 
         # Clear existing file status items
         for i in reversed(range(self.file_status_layout.count())):
@@ -324,18 +513,17 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             if widget:
                 widget.deleteLater()
 
-        # Create file status items
-        for base_name in self.original_decomp_files:
-            # Check if this file has been edited
-            edited_name = f"{base_name}_muedit_edited.mat"
-            is_edited = edited_name in self.edited_files
+        # Create file status items for each _muedit.mat file
+        for base_name in self.muedit_files:
+            # Check if this file has been edited (_muedit_edited.mat exists)
+            is_edited = base_name in self.edited_files
 
             # Create status label
             if is_edited:
-                status_text = f"✅ {base_name}"
+                status_text = f"✅ {base_name} (cleaned)"
                 status_color = Colors.GREEN_700
             else:
-                status_text = f"⏳ {base_name} (pending)"
+                status_text = f"⏳ {base_name} (needs cleaning)"
                 status_color = Colors.TEXT_MUTED
 
             status_label = QLabel(status_text)
@@ -349,9 +537,9 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         # Add stretch to push items to top
         self.file_status_layout.addStretch()
 
-        # Check if all files are cleaned - enable completion
-        if edited_count == total_files and total_files > 0:
-            self.info(f"All {total_files} files have been cleaned in MUEdit!")
+        # Check if all _muedit.mat files have been cleaned
+        if edited_count == total_muedit_files and total_muedit_files > 0:
+            self.success(f"All {total_muedit_files} files have been cleaned in MUEdit!")
             # Could auto-complete step here if desired
 
     def process_file_with_channel(self, file_path, channel_selection):

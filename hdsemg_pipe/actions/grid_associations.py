@@ -81,9 +81,29 @@ class AssociationDialog(QtWidgets.QDialog):
         # Populate available list
         for emg in self.emg_files:
             for grid in emg.grids:
-                item_text = f"{grid.rows}x{grid.cols} Grid ({len(grid.ref_indices)} refs) - {emg.file_name}"
+                # Build item text with muscle info if available
+                muscle_info = f" - {grid.muscle}" if grid.muscle else ""
+                item_text = f"{grid.rows}x{grid.cols} Grid ({len(grid.ref_indices)} refs){muscle_info} - {emg.file_name}"
                 item = QtWidgets.QListWidgetItem(item_text)
-                item.setData(QtCore.Qt.UserRole, grid)
+
+                # Store grid data as dictionary with all necessary info for association
+                grid_data = {
+                    'rows': grid.rows,
+                    'cols': grid.cols,
+                    'ied_mm': grid.ied_mm,
+                    'electrodes': grid.electrodes,
+                    'emg_indices': grid.emg_indices,
+                    'ref_indices': grid.ref_indices,
+                    'grid_key': grid.grid_key,
+                    'muscle': grid.muscle,  # Include muscle information
+                    'data': emg.data,
+                    'time': emg.time,
+                    'description': emg.description,
+                    'sf': emg.sampling_frequency,
+                    'file_name': emg.file_name,
+                    'file_path': emg.file_name,  # This is actually just the filename
+                }
+                item.setData(QtCore.Qt.UserRole, grid_data)
                 self.available_list.addItem(item)
 
         # Transfer buttons with icon-style
@@ -219,6 +239,9 @@ class AssociationDialog(QtWidgets.QDialog):
             self.selected_list.addItem(new_item)
             logger.info("Current selection count: %d", self.selected_list.count())
 
+            # Auto-suggest muscle name if all selected grids have the same muscle
+            self.update_name_suggestion()
+
     def remove_selected(self):
         current_row = self.selected_list.currentRow()
         if current_row >= 0:
@@ -226,6 +249,56 @@ class AssociationDialog(QtWidgets.QDialog):
             logger.debug("Removing grid from selection: %s", item.text())
             self.selected_list.takeItem(current_row)
             logger.info("Current selection count: %d", self.selected_list.count())
+
+            # Update name suggestion after removal
+            self.update_name_suggestion()
+
+    def update_name_suggestion(self):
+        """
+        Auto-suggest association name based on muscle name if all selected grids
+        have the same muscle. Only updates if the name field is empty or contains
+        a previous auto-suggestion.
+        """
+        # Only auto-suggest if there are selected grids
+        if self.selected_list.count() == 0:
+            return
+
+        # Collect all muscle names from selected grids
+        muscles = []
+        for i in range(self.selected_list.count()):
+            item = self.selected_list.item(i)
+            grid_data = item.data(QtCore.Qt.UserRole)
+            muscle = grid_data.get('muscle')
+            if muscle:
+                muscles.append(muscle)
+
+        # Only suggest if we have muscle info and all muscles are the same
+        if len(muscles) > 0 and len(set(muscles)) == 1:
+            # All selected grids have the same muscle
+            suggested_name = muscles[0]
+
+            # Only update if:
+            # 1. Field is empty, OR
+            # 2. Field contains a previous muscle name (to allow updates when adding/removing)
+            current_name = self.name_edit.text().strip()
+
+            # Check if current name is empty or looks like a previous muscle suggestion
+            # (simple heuristic: single word, capitalized, or matches a known muscle pattern)
+            is_likely_auto_suggestion = (
+                not current_name or  # Empty
+                (current_name and not ' ' in current_name and current_name[0].isupper())  # Single capitalized word
+            )
+
+            if is_likely_auto_suggestion:
+                self.name_edit.setText(suggested_name)
+                logger.debug("Auto-suggested association name: %s", suggested_name)
+        else:
+            # Mixed muscles or no muscle info - clear suggestion only if it was auto-generated
+            current_name = self.name_edit.text().strip()
+            if current_name and not ' ' in current_name and current_name[0].isupper():
+                # Looks like it might have been auto-suggested, but now it's not valid
+                # Don't clear it - let user decide
+                pass
 
     def save_association(self, close_dialog=True):
         logger.info("Starting save association process")
@@ -271,6 +344,20 @@ class AssociationDialog(QtWidgets.QDialog):
         new_rows, new_cols = compute_new_grid_size(total_emg_channels)
         logger.info("New combined EMG grid dimensions will be: %dx%d", new_rows, new_cols)
 
+        # --- Bestimme die IED für das kombinierte Grid ---
+        # Wenn alle Grids die gleiche IED haben, verwende diese
+        # Sonst verwende den kleinsten gemeinsamen Nenner (z.B. Durchschnitt)
+        ieds = [grid['ied_mm'] for grid in selected_grids]
+        if len(set(ieds)) == 1:
+            # Alle haben gleiche IED
+            combined_ied = ieds[0]
+            logger.info("All grids have same IED: %dmm", combined_ied)
+        else:
+            # Verschiedene IEDs - verwende den kleinsten oder Durchschnitt
+            combined_ied = min(ieds)  # Kleinster IED (konservativer Ansatz)
+            logger.warning("Mixed IEDs detected (%s). Using smallest IED: %dmm for combined grid",
+                         set(ieds), combined_ied)
+
         try:
             # --- Initialisiere Container für die kombinierten Daten ---
             combined_emg_data = None
@@ -283,8 +370,8 @@ class AssociationDialog(QtWidgets.QDialog):
             combined_time = base_time
             combined_sf = base_sf
 
-            # Regex zum Aktualisieren der Grid-Dimension im Beschreibungsstring
-            pattern = re.compile(r"(HD\d{2}MM)(\d{2})(\d{2})")
+            # Regex zum Aktualisieren der Grid-Dimension und IED im Beschreibungsstring
+            pattern = re.compile(r"(HD)(\d{2})(MM)(\d{2})(\d{2})")
 
             for grid in selected_grids:
                 logger.debug("Processing grid from file: %s", grid['file_name'])
@@ -295,15 +382,18 @@ class AssociationDialog(QtWidgets.QDialog):
                 logger.debug("Extracted %d EMG channels and %d reference channels from %s",
                              len(grid['emg_indices']), len(grid['ref_indices']), grid['file_name'])
 
-                # --- Erzeuge aktualisierte EMG-Beschreibungen unter Verwendung der neuen Grid-Dimension ---
+                # --- Erzeuge aktualisierte EMG-Beschreibungen mit einheitlicher IED und neuer Grid-Dimension ---
                 emg_desc_list = []
                 for idx in grid['emg_indices']:
                     desc_str = extract_description(grid, idx)
-                    new_dims = f"{new_rows:02d}{new_cols:02d}"  # z.B. "0504" für ein 5x4-Grid
-                    updated_desc = pattern.sub(r"\g<1>" + new_dims, desc_str)
+                    new_dims = f"{new_rows:02d}{new_cols:02d}"  # z.B. "1208" für ein 12x8-Grid
+                    new_ied = f"{combined_ied:02d}"  # z.B. "08" für 8mm
+                    # Ersetze HDXXMMYYZZ mit HD{new_ied}MM{new_dims}
+                    # z.B. HD08MM0408 -> HD08MM1208 oder HD10MM0408 -> HD08MM1208
+                    updated_desc = pattern.sub(rf"HD{new_ied}MM{new_dims}", desc_str)
                     emg_desc = f"{updated_desc}-{Path(grid['file_path']).stem}"
                     emg_desc_list.append(emg_desc)
-                logger.debug("Updated EMG descriptions for %s: %s", grid['file_name'], emg_desc_list)
+                logger.debug("Updated EMG descriptions for %s: %s", grid['file_name'], emg_desc_list[:3])
 
                 # --- Referenzbeschreibungen erstellen ---
                 ref_desc_list = []
@@ -368,7 +458,19 @@ class AssociationDialog(QtWidgets.QDialog):
             save_path = os.path.join(workfolder, filename)
             logger.info("Saving association '%s' to MAT file: %s", assoc_name, save_path)
 
-            assoc_emg_file = EMGFile(combined_data, combined_time, combined_description, combined_sf, assoc_name)
+            # Calculate file size (approximate, will be updated after save)
+            file_size = combined_data.nbytes + combined_time.nbytes
+
+            # Create EMGFile with all required parameters
+            assoc_emg_file = EMGFile(
+                data=combined_data,
+                time=combined_time,
+                description=combined_description,
+                sf=combined_sf,
+                file_name=filename,
+                file_size=file_size,
+                file_type="mat"
+            )
 
             assoc_emg_file.save(save_path)
 
@@ -437,7 +539,8 @@ def save_association_json(save_file_path, assoc_name, selected_grids, combined_g
             "emg_count": len(grid['emg_indices']),
             "ref_count": len(grid['ref_indices']),
             "ied_mm": grid['ied_mm'],
-            "electrodes": grid['electrodes']
+            "electrodes": grid['electrodes'],
+            "muscle": grid.get('muscle')  # Include muscle information if available
         }
         metadata["grids"].append(grid_data)
 
@@ -479,6 +582,14 @@ def extract_description(grid, idx):
             desc_str = desc_candidate.item()
         except AttributeError:
             desc_str = desc_candidate
+
+        # Convert bytes to string if necessary
+        if isinstance(desc_str, bytes):
+            desc_str = desc_str.decode('utf-8', errors='ignore')
+        # Ensure it's a string
+        elif not isinstance(desc_str, str):
+            desc_str = str(desc_str)
+
     except Exception as e:
         logger.error("Failed to extract description for index %d in file %s: %s",
                      idx, grid['file_name'], str(e))

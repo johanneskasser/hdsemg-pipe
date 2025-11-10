@@ -59,6 +59,18 @@ class DefineRoiStepWidget(BaseStepWidget):
 
         dest = global_state.get_cropped_signal_path()
 
+        # Create a mapping from EMGFile objects to their original file paths
+        # This preserves the original filenames
+        emg_to_filepath = {}
+        for idx, file_path in enumerate(self.roi_dialog.file_paths):
+            # Each file_path corresponds to the EMGFile loaded from it
+            # Find the corresponding EMGFile by checking file_name attribute
+            original_basename = os.path.basename(file_path)
+            for gd in self.roi_dialog.grid_items:
+                if gd.emgfile.file_name == original_basename:
+                    emg_to_filepath[id(gd.emgfile)] = file_path
+                    break
+
         # Group grid_items by their source EMGFile to avoid duplicate processing
         # Each EMGFile should only be processed once, even if it contains multiple grids
         processed_files = set()
@@ -75,12 +87,15 @@ class DefineRoiStepWidget(BaseStepWidget):
             # Mark this EMGFile as processed
             processed_files.add(emg_id)
 
-            # Get original filename from the source path
-            original_filename = os.path.basename(emg.filepath) if hasattr(emg, 'filepath') and emg.filepath else None
-            if not original_filename:
-                # Fallback: try to get filename from the first grid's key
-                original_filename = f"{gd.grid.grid_key.split('_')[0]}.mat"
-                logger.warning("No filepath found in EMGFile, using fallback filename: %s", original_filename)
+            # Get original filename from the mapping
+            original_file_path = emg_to_filepath.get(emg_id)
+            if original_file_path:
+                original_filename = os.path.basename(original_file_path)
+                logger.debug("Using original filename: %s", original_filename)
+            else:
+                # Fallback to file_name attribute if mapping fails
+                original_filename = emg.file_name if hasattr(emg, 'file_name') else f"{gd.grid.grid_key}.mat"
+                logger.warning("Could not find original filepath in mapping, using: %s", original_filename)
 
             out_path = os.path.join(dest, original_filename)
 
