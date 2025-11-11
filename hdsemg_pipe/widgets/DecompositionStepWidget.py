@@ -209,10 +209,15 @@ class DecompositionResultsStepWidget(BaseStepWidget):
                 eng = matlab.engine.start_matlab()
                 logger.info("Started new MATLAB session")
 
-            # Add MUEdit to path if configured
+            # Add MUEdit to path if configured and not already present
             if muedit_path and os.path.exists(muedit_path):
-                logger.info(f"Adding MUEdit path to MATLAB: {muedit_path}")
-                eng.addpath(muedit_path, nargout=0)
+                # Check if path is already in MATLAB's path
+                current_path = eng.path(nargout=1)
+                if muedit_path not in current_path:
+                    logger.info(f"Adding MUEdit path to MATLAB: {muedit_path}")
+                    eng.addpath(muedit_path, nargout=0)
+                else:
+                    logger.debug(f"MUEdit path already in MATLAB path, skipping addpath")
 
             # Launch MUEdit GUI
             logger.info("Launching MUEdit GUI in MATLAB session...")
@@ -231,9 +236,15 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         try:
             muedit_path = config.get(Settings.MUEDIT_PATH)
 
-            # Build MATLAB command
+            # Build MATLAB command - check if path exists before adding
             if muedit_path and os.path.exists(muedit_path):
-                matlab_cmd = f"addpath('{muedit_path}'); MUedit"
+                # Use contains() to check if path is already present
+                matlab_cmd = (
+                    f"if ~contains(path, '{muedit_path}'), "
+                    f"addpath('{muedit_path}'); "
+                    f"end; "
+                    f"MUedit"
+                )
             else:
                 matlab_cmd = "MUedit"
 
