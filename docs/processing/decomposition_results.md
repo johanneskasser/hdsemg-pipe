@@ -168,6 +168,9 @@ Before launching MUEdit, configure the integration in **Settings > MUEdit Config
 
 When MUEdit launches, an interactive instruction dialog guides you through the workflow.
 
+![MUedit Dialog](../img/manual_muedit_dialog.png)
+
+
 #### Dialog Features
 
 **Step-by-Step Instructions:**
