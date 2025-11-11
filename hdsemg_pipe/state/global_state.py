@@ -122,7 +122,7 @@ class GlobalState:
     def get_decomposition_path(self):
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
-        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION.value)
+        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_AUTO.value)
         return os.path.normpath(path)
 
     def get_cropped_signal_path(self):

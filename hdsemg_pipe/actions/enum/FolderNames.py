@@ -5,7 +5,7 @@ class FolderNames(Enum):
     CHANNELSELECTION = "channelselection"
     ASSOCIATED_GRIDS = "associated_grids"
     LINE_NOISE_CLEANED = "line_noise_cleaned"
-    DECOMPOSITION = "decomposition"
+    DECOMPOSITION_AUTO = "decomposition_auto"
     CROPPED_SIGNAL = "cropped_signal"
 
     @classmethod
@@ -14,7 +14,7 @@ class FolderNames(Enum):
             cls.ASSOCIATED_GRIDS.value,
             cls.LINE_NOISE_CLEANED.value,
             cls.CHANNELSELECTION.value,
-            cls.DECOMPOSITION.value,
+            cls.DECOMPOSITION_AUTO.value,
             cls.CROPPED_SIGNAL.value,
             cls.ORIGINAL_FILES.value
         ]

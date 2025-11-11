@@ -109,7 +109,7 @@ def create_sub_work_folders(workfolder_path):
     associated_grids_foldername = os.path.normpath(associated_grids_foldername)
     line_noise_cleaned_foldername = os.path.join(workfolder_path, FolderNames.LINE_NOISE_CLEANED.value)
     line_noise_cleaned_foldername = os.path.normpath(line_noise_cleaned_foldername)
-    decomposition_foldername = os.path.join(workfolder_path, FolderNames.DECOMPOSITION.value)
+    decomposition_foldername = os.path.join(workfolder_path, FolderNames.DECOMPOSITION_AUTO.value)
     decomposition_foldername = os.path.normpath(decomposition_foldername)
     cropped_signal_foldername = os.path.join(workfolder_path, FolderNames.CROPPED_SIGNAL.value)
     cropped_signal_foldername = os.path.normpath(cropped_signal_foldername)

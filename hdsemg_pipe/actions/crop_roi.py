@@ -236,9 +236,25 @@ class CropRoiDialog(QtWidgets.QDialog):
             self.checkboxes[uid] = []
 
             ref_descs = self.reference_signal_map[uid]["ref_descriptions"]
+            ref_indices = gd.grid.ref_indices  # Actual indices in the data array
+
             for idx, desc in enumerate(ref_descs):
                 cb = QtWidgets.QCheckBox(f"Ref {idx} – {desc}")
-                cb.setChecked(idx == 0)
+
+                # Determine if this checkbox should be checked by default
+                # Check if this reference signal corresponds to requested_path or performed_path
+                actual_ref_idx = ref_indices[idx] if idx < len(ref_indices) else None
+                should_check = False
+
+                if gd.grid.requested_path_idx is not None and actual_ref_idx == gd.grid.requested_path_idx:
+                    should_check = True
+                elif gd.grid.performed_path_idx is not None and actual_ref_idx == gd.grid.performed_path_idx:
+                    should_check = True
+                elif gd.grid.requested_path_idx is None and gd.grid.performed_path_idx is None and idx == 0:
+                    # Fallback: if no path indices are set, check the first one
+                    should_check = True
+
+                cb.setChecked(should_check)
                 cb.stateChanged.connect(self.update_plot)
                 cb.setStyleSheet(f"""
                     QCheckBox {{
