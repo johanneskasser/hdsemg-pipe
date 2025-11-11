@@ -10,6 +10,7 @@ from hdsemg_pipe.settings.tabs.line_noise import init as init_line_noise_widget
 from hdsemg_pipe.settings.tabs.log_setting import init as init_logging_widget
 from hdsemg_pipe.settings.tabs.muedit_settings import init as init_muedit_widget
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
 from PyQt5.QtCore import pyqtSignal
 
 class SettingsDialog(QDialog):
@@ -17,11 +18,46 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super(SettingsDialog, self).__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(400, 300)
+        self.resize(700, 500)
         self.initUI()
 
     def initUI(self):
+        """Initialize the settings dialog with modern styling."""
+        # Apply modern dialog styling
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {Colors.BG_SECONDARY};
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                background-color: {Colors.BG_PRIMARY};
+                border-radius: {BorderRadius.LG};
+                padding: {Spacing.LG}px;
+            }}
+            QTabBar::tab {{
+                background-color: {Colors.BG_SECONDARY};
+                color: {Colors.TEXT_SECONDARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-bottom: none;
+                padding: {Spacing.SM}px {Spacing.LG}px;
+                margin-right: 2px;
+                border-top-left-radius: {BorderRadius.MD};
+                border-top-right-radius: {BorderRadius.MD};
+                font-size: {Fonts.SIZE_BASE};
+            }}
+            QTabBar::tab:selected {{
+                background-color: {Colors.BG_PRIMARY};
+                color: {Colors.TEXT_PRIMARY};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+            }}
+            QTabBar::tab:hover {{
+                background-color: {Colors.GRAY_100};
+            }}
+        """)
+
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
+        main_layout.setSpacing(Spacing.LG)
 
         self.tab_widget = QTabWidget()
         main_layout.addWidget(self.tab_widget)
@@ -51,10 +87,38 @@ class SettingsDialog(QDialog):
         self.initMUEditTab()
         self.initLoggingTab()
 
-        # Add standard dialog buttons (OK and Cancel)
+        # Add standard dialog buttons (OK and Cancel) with modern styling
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
+
+        # Style the button box buttons
+        self.button_box.setStyleSheet(f"""
+            QPushButton {{
+                min-width: 80px;
+                padding: {Spacing.SM}px {Spacing.LG}px;
+                border-radius: {BorderRadius.MD};
+                font-size: {Fonts.SIZE_BASE};
+            }}
+            QPushButton[text="OK"] {{
+                background-color: {Colors.BLUE_600};
+                color: white;
+                border: none;
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+            }}
+            QPushButton[text="OK"]:hover {{
+                background-color: {Colors.BLUE_700};
+            }}
+            QPushButton[text="Cancel"] {{
+                background-color: {Colors.BG_SECONDARY};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+            }}
+            QPushButton[text="Cancel"]:hover {{
+                background-color: {Colors.GRAY_100};
+            }}
+        """)
+
         main_layout.addWidget(self.button_box)
 
     def initChannelSelectionTab(self):
