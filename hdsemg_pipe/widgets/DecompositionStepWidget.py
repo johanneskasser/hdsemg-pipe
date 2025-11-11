@@ -15,6 +15,7 @@ from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.loadingbutton import LoadingButton
 from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
 from hdsemg_pipe.widgets.MappingDialog import MappingDialog
+from hdsemg_pipe.widgets.MUEditInstructionDialog import MUEditInstructionDialog
 from hdsemg_pipe.ui_elements.theme import Styles, Colors
 
 
@@ -213,9 +214,9 @@ class DecompositionResultsStepWidget(BaseStepWidget):
                 logger.info(f"Adding MUEdit path to MATLAB: {muedit_path}")
                 eng.addpath(muedit_path, nargout=0)
 
-            # Launch MUEdit in background (non-blocking)
-            logger.info("Launching MUEdit in MATLAB session...")
-            eng.eval("muedit", nargout=0, background=True)
+            # Launch MUEdit GUI
+            logger.info("Launching MUEdit GUI in MATLAB session...")
+            eng.eval("MUedit_exported", nargout=0, background=True)
 
             return True, "MUEdit launched successfully in MATLAB session"
 
@@ -237,7 +238,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
                 matlab_cmd = "MUedit"
 
             logger.info(f"Starting MATLAB with command: {matlab_cmd}")
-            subprocess.Popen(["matlab", "-r", matlab_cmd])
+            subprocess.Popen(["matlab", "-automation", "-r", matlab_cmd])
 
             return True, "MUEdit launched via MATLAB CLI"
 
@@ -263,7 +264,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
     def launch_muedit(self):
         """
         Launches MUEdit for manual cleaning of decomposition results.
-        Uses configured launch method with intelligent fallback logic.
+        Shows instruction dialog to guide the user.
         """
         logger.info("Launching MUEdit for manual cleaning...")
 
@@ -283,7 +284,8 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         if launch_method == MUEditLaunchMethod.MATLAB_ENGINE:
             success, message = self._launch_muedit_via_matlab_engine()
             if success:
-                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                self.success(f"{message}")
+                self._show_instruction_dialog()
                 return
             else:
                 self.error(message)
@@ -292,7 +294,8 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         elif launch_method == MUEditLaunchMethod.MATLAB_CLI:
             success, message = self._launch_muedit_via_matlab_cli()
             if success:
-                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                self.success(f"{message}")
+                self._show_instruction_dialog()
                 return
             else:
                 self.error(message)
@@ -301,7 +304,8 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         elif launch_method == MUEditLaunchMethod.STANDALONE:
             success, message = self._launch_muedit_standalone()
             if success:
-                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                self.success(f"{message}")
+                self._show_instruction_dialog()
                 return
             else:
                 self.error(message)
@@ -313,7 +317,8 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             success, message = self._launch_muedit_via_matlab_engine()
             if success:
                 logger.info(f"AUTO mode: {message}")
-                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                self.success(f"{message}")
+                self._show_instruction_dialog()
                 return
             else:
                 logger.debug(f"AUTO mode: MATLAB Engine failed - {message}")
@@ -322,7 +327,8 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             success, message = self._launch_muedit_via_matlab_cli()
             if success:
                 logger.info(f"AUTO mode: {message}")
-                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                self.success(f"{message}")
+                self._show_instruction_dialog()
                 return
             else:
                 logger.debug(f"AUTO mode: MATLAB CLI failed - {message}")
@@ -331,7 +337,8 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             success, message = self._launch_muedit_standalone()
             if success:
                 logger.info(f"AUTO mode: {message}")
-                self.success(f"{message}\nPlease manually clean the decomposition files and save them back to the decomposition_auto folder.")
+                self.success(f"{message}")
+                self._show_instruction_dialog()
                 return
             else:
                 logger.debug(f"AUTO mode: Standalone failed - {message}")
@@ -346,6 +353,16 @@ class DecompositionResultsStepWidget(BaseStepWidget):
                 "Repository: https://github.com/haripen/MUedit/tree/devHP\n"
                 "Configure MUEdit path and launch method in Settings."
             )
+
+    def _show_instruction_dialog(self):
+        """Shows the instruction dialog for manual MUEdit workflow."""
+        dialog = MUEditInstructionDialog(
+            muedit_files=self.muedit_files,
+            edited_files=self.edited_files,
+            folder_path=self.expected_folder,
+            parent=self
+        )
+        dialog.exec_()
 
     def display_results(self):
         """Displays the decomposition results in the UI."""
@@ -405,31 +422,51 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             self.progress_container.setVisible(False)
             return None
 
-        # Scan folder for all file types
+        # First pass: identify muedit files and original files
+        all_mat_files = []
         for file in os.listdir(self.expected_folder):
             file_path = os.path.join(self.expected_folder, file)
 
-            # 1. Check for edited files from MUEdit (final result)
-            if file.endswith("_muedit_edited.mat"):
-                logger.info(f"MUEdit edited file found: {file}")
-                # Extract base name: filename_muedit_edited.mat -> filename
-                base_name = file.replace("_muedit_edited.mat", "")
-                self.edited_files.append(base_name)
+            # Collect all .mat files for second pass
+            if file.endswith(".mat"):
+                all_mat_files.append(file)
 
-            # 2. Check for MUEdit MAT files (ready for editing)
-            elif file.endswith("_muedit.mat"):
+            # Check for MUEdit export files (ready for editing)
+            if file.endswith("_muedit.mat"):
                 logger.debug(f"MUEdit MAT file (for editing): {file}")
                 # Extract base name: filename_muedit.mat -> filename
                 base_name = file.replace("_muedit.mat", "")
                 self.muedit_files.append(base_name)
 
-            # 3. Check for original decomposition results
+            # Check for original decomposition results
             elif file.endswith(".json") or file.endswith(".pkl"):
                 logger.info(f"Original decomposition file found: {file}")
                 self.resultfiles.append(file_path)
                 # Extract base name for tracking (without extension)
                 base_name = os.path.splitext(file)[0]
                 self.original_decomp_files.append(base_name)
+
+        # Second pass: check which muedit files have been edited
+        # Look for any .mat file that contains the base name (flexible naming)
+        for base_name in self.muedit_files:
+            # Check if any .mat file exists that:
+            # 1. Contains the base_name
+            # 2. Is NOT the original _muedit.mat file
+            # 3. Is a .mat file (edited result from MUEdit)
+
+            muedit_file = f"{base_name}_muedit.mat"
+
+            for mat_file in all_mat_files:
+                # Skip the original _muedit.mat file itself
+                if mat_file == muedit_file:
+                    continue
+
+                # Check if this .mat file contains the base name
+                # This handles files like: basename_muedit.mat_edited.mat, basename_edited.mat, etc.
+                if base_name in mat_file and mat_file.endswith(".mat"):
+                    logger.info(f"Edited file detected for {base_name}: {mat_file}")
+                    self.edited_files.append(base_name)
+                    break  # Only count once per base_name
 
         # Update UI based on files found
         if self.resultfiles:

@@ -8,6 +8,7 @@ from hdsemg_pipe.settings.tabs.workfolder import init_workfolder_widget
 from hdsemg_pipe.settings.tabs.openhdemg import init as init_openhdemg_widget
 from hdsemg_pipe.settings.tabs.line_noise import init as init_line_noise_widget
 from hdsemg_pipe.settings.tabs.log_setting import init as init_logging_widget
+from hdsemg_pipe.settings.tabs.muedit_settings import init as init_muedit_widget
 from hdsemg_pipe._log.log_config import logger
 from PyQt5.QtCore import pyqtSignal
 
@@ -30,6 +31,7 @@ class SettingsDialog(QDialog):
         self.workfolder_tab = QWidget()
         self.line_noise_tab = QWidget()
         self.openhdemg_tab = QWidget()
+        self.muedit_tab = QWidget()
         self.logging_tab = QWidget()
 
         # Add tabs to the tab widget
@@ -37,6 +39,7 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(self.workfolder_tab, "Work Folder")
         self.tab_widget.addTab(self.line_noise_tab, "Line Noise Removal")
         self.tab_widget.addTab(self.openhdemg_tab, "openhdemg")
+        self.tab_widget.addTab(self.muedit_tab, "MUEdit")
         self.tab_widget.addTab(self.logging_tab, "Logging")
 
 
@@ -45,6 +48,7 @@ class SettingsDialog(QDialog):
         self.initWorkfolderTab()
         self.initLineNoiseTab()
         self.initOpenHDsEMGTab()
+        self.initMUEditTab()
         self.initLoggingTab()
 
         # Add standard dialog buttons (OK and Cancel)
@@ -72,6 +76,11 @@ class SettingsDialog(QDialog):
         """Initialize the 'Line Noise Removal' settings tab."""
         line_noise_tab = init_line_noise_widget(self)
         self.line_noise_tab.setLayout(line_noise_tab)
+
+    def initMUEditTab(self):
+        """Initialize the 'MUEdit' settings tab."""
+        muedit_tab = init_muedit_widget(self)
+        self.muedit_tab.setLayout(muedit_tab)
 
     def initLoggingTab(self):
         """Initialize the 'Logging' settings tab."""
