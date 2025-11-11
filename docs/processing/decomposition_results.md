@@ -347,6 +347,7 @@ After completing this step:
 3. Export or save final results as needed
 
 ### Additional Resources
+- [MUEdit Export Workflow](muedit_export_workflow.md) - Detailed documentation on automatic export process
 - [MUEdit GitHub Repository](https://github.com/haripen/MUedit/tree/devHP)
 - OpenHD-EMG Documentation
 - Application logs for detailed troubleshooting

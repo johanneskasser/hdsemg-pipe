@@ -1,5 +1,6 @@
 import os
 import subprocess
+from pathlib import Path
 from PyQt5.QtCore import QThread, pyqtSignal
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
