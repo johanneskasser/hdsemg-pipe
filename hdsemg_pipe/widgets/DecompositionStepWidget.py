@@ -443,10 +443,14 @@ class DecompositionResultsStepWidget(BaseStepWidget):
                 all_mat_files.append(file)
 
             # Check for MUEdit export files (ready for editing)
-            if file.endswith("_muedit.mat"):
+            # Support both single-grid (_muedit.mat) and multi-grid (_multigrid_muedit.mat) variants
+            if file.endswith("_muedit.mat") or file.endswith("_multigrid_muedit.mat"):
                 logger.debug(f"MUEdit MAT file (for editing): {file}")
-                # Extract base name: filename_muedit.mat -> filename
-                base_name = file.replace("_muedit.mat", "")
+                # Extract base name: filename_muedit.mat -> filename or filename_multigrid_muedit.mat -> filename
+                if file.endswith("_multigrid_muedit.mat"):
+                    base_name = file.replace("_multigrid_muedit.mat", "")
+                else:
+                    base_name = file.replace("_muedit.mat", "")
                 self.muedit_files.append(base_name)
 
             # Check for original decomposition results
@@ -462,14 +466,15 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         for base_name in self.muedit_files:
             # Check if any .mat file exists that:
             # 1. Contains the base_name
-            # 2. Is NOT the original _muedit.mat file
+            # 2. Is NOT the original _muedit.mat or _multigrid_muedit.mat file
             # 3. Is a .mat file (edited result from MUEdit)
 
-            muedit_file = f"{base_name}_muedit.mat"
+            muedit_file_single = f"{base_name}_muedit.mat"
+            muedit_file_multi = f"{base_name}_multigrid_muedit.mat"
 
             for mat_file in all_mat_files:
-                # Skip the original _muedit.mat file itself
-                if mat_file == muedit_file:
+                # Skip the original _muedit.mat or _multigrid_muedit.mat file itself
+                if mat_file == muedit_file_single or mat_file == muedit_file_multi:
                     continue
 
                 # Check if this .mat file contains the base name
@@ -532,9 +537,10 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         Updates the progress UI to show MUEdit cleaning status.
 
         Progress tracking logic:
-        - Only tracks _muedit.mat files (the files that need manual cleaning)
+        - Tracks both _muedit.mat and _multigrid_muedit.mat files (files that need manual cleaning)
         - Shows which files have been edited (_muedit_edited.mat exists)
         - Progress: edited_files / muedit_files
+        - Supports both single-grid and multi-grid recordings
         """
         # Only show progress if there are _muedit.mat files to track
         if not self.muedit_files:
