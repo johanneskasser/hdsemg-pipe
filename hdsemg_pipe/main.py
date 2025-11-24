@@ -10,7 +10,10 @@ from hdsemg_pipe.actions.file_manager import start_file_processing
 from hdsemg_pipe._log.log_config import logger, setup_logging
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.ChannelSelectionStepWidget import ChannelSelectionStepWidget
-from hdsemg_pipe.widgets.DecompositionStepWidget import DecompositionResultsStepWidget
+from hdsemg_pipe.widgets.Step5_DecompositionResults import Step5_DecompositionResults
+from hdsemg_pipe.widgets.Step6_MultiGridConfig import Step6_MultiGridConfig
+from hdsemg_pipe.widgets.Step7_MUEditCleaning import Step7_MUEditCleaning
+from hdsemg_pipe.widgets.Step8_FinalResults import Step8_FinalResults
 from hdsemg_pipe.widgets.DefineRoiStepWidget import DefineRoiStepWidget
 from hdsemg_pipe.widgets.FolderContentWidget import FolderContentWidget
 from hdsemg_pipe.widgets.GridAssociationStepWidget import GridAssociationWidget
@@ -110,18 +113,57 @@ class MainWindow(QMainWindow):
         step5.check()
         self.settingsDialog.settingsAccepted.connect(step5.check)
 
-        # Schritt 6: Descomposition
-        step6 = DecompositionResultsStepWidget(6, "Decomposition Results", f"This widget watches the decomposition path for file changes. Please perform decomposition manually and this application will detect the changes and you will be able to proceed.")
+        # Schritt 6: Decomposition Results (Wait for decomposition files)
+        step6 = Step5_DecompositionResults(
+            6,
+            "Decomposition Results",
+            "Waiting for decomposition results. Run your decomposition algorithm and save results to the decomposition folder."
+        )
         global_state.register_widget(step6)
         self.steps.append(step6)
         grid_layout.addWidget(step6, 7, 0)
         step6.check()
         self.settingsDialog.settingsAccepted.connect(step6.check)
 
+        # Schritt 7: Multi-Grid Configuration
+        step7 = Step6_MultiGridConfig(
+            7,
+            "Multi-Grid Configuration",
+            "Configure multi-grid groups for MUEdit's duplicate detection (optional). Export files to MUEdit format."
+        )
+        global_state.register_widget(step7)
+        self.steps.append(step7)
+        grid_layout.addWidget(step7, 8, 0)
+        step7.check()
+        self.settingsDialog.settingsAccepted.connect(step7.check)
+
+        # Schritt 8: MUEdit Manual Cleaning
+        step8 = Step7_MUEditCleaning(
+            8,
+            "MUEdit Manual Cleaning",
+            "Launch MUEdit for manual cleaning and quality control of motor unit decomposition results."
+        )
+        global_state.register_widget(step8)
+        self.steps.append(step8)
+        grid_layout.addWidget(step8, 9, 0)
+        step8.check()
+        self.settingsDialog.settingsAccepted.connect(step8.check)
+
+        # Schritt 9: Final Results
+        step9 = Step8_FinalResults(
+            9,
+            "Final Results",
+            "Convert edited MUEdit files back to JSON format and view cleaned results in OpenHD-EMG."
+        )
+        global_state.register_widget(step9)
+        self.steps.append(step9)
+        grid_layout.addWidget(step9, 10, 0)
+        step9.check()
+        self.settingsDialog.settingsAccepted.connect(step9.check)
+
         # Connect the Steps
         step1.fileSelected.connect(step2.check)
         step1.fileSelected.connect(self.folder_content_widget.update_folder_content)
-        step1.fileSelected.connect(step6.init_file_checking)
         step2.stepCompleted.connect(step3.update)
         step2.stepCompleted.connect(self.folder_content_widget.update_folder_content)
         step3.stepCompleted.connect(step4.check)

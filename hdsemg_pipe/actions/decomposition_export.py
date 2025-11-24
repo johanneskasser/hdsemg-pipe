@@ -394,6 +394,217 @@ def get_muedit_filepath(json_filepath, multi_grid=False):
         return str(json_filepath).replace(".json", "_muedit.mat")
 
 
+def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
+    """
+    Export multiple OpenHD-EMG JSON files as a single multi-grid MUEdit MAT file.
+
+    This function combines decomposition results from multiple grids (recorded from
+    the same muscle with common motor units) into a single MUEdit MAT file. This
+    enables MUEdit's cross-grid duplicate detection and common input analysis.
+
+    Args:
+        json_filepaths (list): List of paths to OpenHD-EMG JSON files (one per grid)
+        group_name (str): Name for this multi-grid group (used in output filename)
+        output_dir (str or Path, optional): Output directory. If None, uses the
+            directory of the first JSON file.
+
+    Returns:
+        str: Path to the created multi-grid MUEdit MAT file, or None if export failed.
+
+    Raises:
+        ImportError: If openhdemg library is not available.
+        FileNotFoundError: If any JSON file doesn't exist.
+        ValueError: If JSON files have incompatible structure (different sampling rates, etc.)
+
+    Example:
+        >>> export_multi_grid_to_muedit(
+        ...     ['biceps_grid1.json', 'biceps_grid2.json'],
+        ...     'Biceps'
+        ... )
+        'Biceps_multigrid_muedit.mat'
+    """
+    if not OPENHDEMG_AVAILABLE:
+        raise ImportError("openhdemg library is required for this function")
+
+    if not json_filepaths:
+        raise ValueError("No JSON files provided")
+
+    json_paths = [Path(f) for f in json_filepaths]
+    ngrid = len(json_paths)
+
+    logger.info(f"Combining {ngrid} JSON files into multi-grid MUEdit format for group '{group_name}'...")
+
+    # Verify all files exist
+    for json_path in json_paths:
+        if not json_path.exists():
+            raise FileNotFoundError(f"JSON file not found: {json_path}")
+
+    try:
+        # Load all JSON files
+        json_data_list = []
+        grid_metadata_list = []
+
+        for json_path in json_paths:
+            logger.debug(f"Loading {json_path.name}...")
+            json_data = emg.emg_from_json(str(json_path))
+            json_data_list.append(json_data)
+
+            # Extract grid metadata
+            grid_meta = extract_grid_metadata_from_extras(json_data["EXTRAS"])
+            grid_metadata_list.append(grid_meta['grids'][0])  # Each file has one grid
+
+        # Validate compatibility
+        fsamp_ref = json_data_list[0]["FSAMP"]
+        n_samples_ref = json_data_list[0]["RAW_SIGNAL"].shape[0]
+
+        for idx, json_data in enumerate(json_data_list[1:], start=1):
+            if json_data["FSAMP"] != fsamp_ref:
+                raise ValueError(f"Incompatible sampling rates: Grid 0 has {fsamp_ref} Hz, "
+                               f"Grid {idx} has {json_data['FSAMP']} Hz")
+
+            if json_data["RAW_SIGNAL"].shape[0] != n_samples_ref:
+                raise ValueError(f"Incompatible signal lengths: Grid 0 has {n_samples_ref} samples, "
+                               f"Grid {idx} has {json_data['RAW_SIGNAL'].shape[0]} samples")
+
+        logger.info(f"All grids compatible: {fsamp_ref} Hz, {n_samples_ref} samples")
+
+        # Determine output path
+        if output_dir is None:
+            output_dir = json_paths[0].parent
+        else:
+            output_dir = Path(output_dir)
+
+        # Create sanitized filename from group name
+        safe_group_name = "".join(c for c in group_name if c.isalnum() or c in (' ', '_', '-')).strip()
+        safe_group_name = safe_group_name.replace(' ', '_')
+        mat_save_filepath = output_dir / f"{safe_group_name}_multigrid_muedit.mat"
+
+        # Allocate MUEdit structure
+        dict_for_muedit = allocate_muedit_file_structure()
+
+        # Concatenate signal data from all grids
+        all_signals = []
+        total_channels = 0
+
+        for idx, json_data in enumerate(json_data_list):
+            signal = json_data["RAW_SIGNAL"].to_numpy()
+            all_signals.append(signal.T)  # Transpose to (channels x samples)
+            total_channels += signal.shape[1]
+            logger.debug(f"Grid {idx}: {signal.shape[1]} channels")
+
+        concatenated_signal = np.vstack(all_signals)  # Stack vertically: (total_channels x samples)
+
+        # Populate basic signal data
+        dict_for_muedit["signal"]["data"] = concatenated_signal
+        dict_for_muedit["signal"]["fsamp"] = fsamp_ref
+        dict_for_muedit["signal"]["nChan"] = total_channels
+        dict_for_muedit["signal"]["ngrid"] = ngrid
+
+        # Build grid names and muscle arrays
+        gridnames = [grid['gridname'] for grid in grid_metadata_list]
+        muscles = [grid['muscle'] for grid in grid_metadata_list]
+
+        dict_for_muedit["signal"]["gridname"] = np.array([gridnames], dtype=object)
+        dict_for_muedit["signal"]["muscle"] = np.array([muscles], dtype=object)
+
+        # Build Pulsetrain (1 x ngrid cell array)
+        # Each cell contains the pulse trains for MUs in that grid
+        pulsetrain_cell = np.empty((1, ngrid), dtype=object)
+
+        max_mu_count = 0  # Track maximum MU count across all grids for Dischargetimes
+
+        for grid_idx, json_data in enumerate(json_data_list):
+            ipts = json_data["IPTS"].to_numpy(dtype=np.float64, copy=True).T  # (nMU x time)
+            if ipts.size > 0:
+                pulsetrain_cell[0, grid_idx] = ipts / ipts.max()  # Normalize
+            else:
+                pulsetrain_cell[0, grid_idx] = np.empty((0, n_samples_ref), dtype=np.float64)
+
+            mu_count = json_data["IPTS"].shape[1]
+            max_mu_count = max(max_mu_count, mu_count)
+            logger.debug(f"Grid {grid_idx}: {mu_count} motor units")
+
+        dict_for_muedit["signal"]["Pulsetrain"] = pulsetrain_cell
+
+        # Build Dischargetimes (ngrid x maxMU cell array)
+        # Each grid gets a row, each MU gets a column
+        discharges_cell = np.empty((ngrid, max_mu_count), dtype=object)
+
+        for grid_idx, json_data in enumerate(json_data_list):
+            n_mu_in_grid = json_data["IPTS"].shape[1]
+
+            for mu_idx in range(max_mu_count):
+                if mu_idx < n_mu_in_grid:
+                    # This MU exists in this grid
+                    seq = json_data["MUPULSES"][mu_idx] + 1  # +1 for 1-indexed MATLAB
+                    arr = np.asarray(seq, dtype=np.float64).reshape(1, -1)
+                    discharges_cell[grid_idx, mu_idx] = arr
+                else:
+                    # This MU doesn't exist in this grid (padding)
+                    discharges_cell[grid_idx, mu_idx] = np.empty((1, 0), dtype=np.float64)
+
+        dict_for_muedit["signal"]["Dischargetimes"] = discharges_cell
+
+        # Build IED array (1 x ngrid)
+        ied_array = np.array([grid['ied_mm'] for grid in grid_metadata_list])
+        dict_for_muedit['signal']['IED'] = ied_array
+
+        # Set reference signals
+        # Use first grid's reference signal (assuming all grids recorded same task)
+        dict_for_muedit['signal']['target'] = np.transpose(json_data_list[0]["REF_SIGNAL"])
+        dict_for_muedit['signal']['path'] = np.transpose(json_data_list[0]["REF_SIGNAL"])
+
+        # Set emgtype (1 x ngrid, all surface EMG = 1)
+        dict_for_muedit['signal']['emgtype'] = np.ones((1, ngrid))
+
+        # Build EMGmask (1 x ngrid cell array)
+        bad_channel_bool = np.empty((1, ngrid), dtype=object)
+
+        for grid_idx, grid_meta in enumerate(grid_metadata_list):
+            grid_ch_count = grid_meta['emg_count']
+            bad_channel_bool[0, grid_idx] = np.asarray(np.zeros((grid_ch_count, 1)))
+
+        dict_for_muedit['signal']['EMGmask'] = bad_channel_bool
+
+        # Build coordinates (1 x ngrid cell array)
+        coordinates_cell = np.empty((1, ngrid), dtype=object)
+
+        for grid_idx, grid_meta in enumerate(grid_metadata_list):
+            rows = grid_meta['rows']
+            cols = grid_meta['cols']
+            grid_ch_count = grid_meta['emg_count']
+
+            coords = np.zeros((grid_ch_count, 2))
+            idx = 0
+            for r in range(1, rows + 1):  # 1-based indexing for MATLAB
+                for c in range(1, cols + 1):
+                    if idx < grid_ch_count:
+                        coords[idx] = [r, c]
+                        idx += 1
+
+            coordinates_cell[0, grid_idx] = coords
+
+        dict_for_muedit['signal']['coordinates'] = coordinates_cell
+
+        # Set parameters
+        dict_for_muedit['parameters']['pathname'] = str(output_dir)
+        dict_for_muedit['parameters']['filename'] = f"{group_name} (multi-grid, {ngrid} grids)"
+
+        # Save to MAT file
+        sio.savemat(str(mat_save_filepath), dict_for_muedit, do_compression=True, long_field_names=True)
+
+        logger.info(f"Successfully created multi-grid MUEdit file: {mat_save_filepath.name}")
+        logger.info(f"  - {ngrid} grids combined")
+        logger.info(f"  - {total_channels} total channels")
+        logger.info(f"  - {max_mu_count} max motor units per grid")
+
+        return str(mat_save_filepath)
+
+    except Exception as e:
+        logger.error(f"Failed to create multi-grid MUEdit file for group '{group_name}': {str(e)}")
+        raise ValueError(f"Multi-grid export failed: {str(e)}") from e
+
+
 def _is_valid_ref(ref):
     """
     Check if an HDF5 reference is valid (non-null).

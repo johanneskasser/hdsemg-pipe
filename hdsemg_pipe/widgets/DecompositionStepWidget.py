@@ -7,7 +7,7 @@ from PyQt5.QtCore import pyqtSignal, QFileSystemWatcher
 from PyQt5.QtWidgets import QPushButton, QDialog, QLabel, QVBoxLayout, QWidget, QProgressBar, QScrollArea
 
 from hdsemg_pipe.actions.file_utils import update_extras_in_pickle_file, update_extras_in_json_file
-from hdsemg_pipe.actions.decomposition_export import export_to_muedit_mat, is_muedit_file_exists
+from hdsemg_pipe.actions.decomposition_export import export_to_muedit_mat, is_muedit_file_exists, export_multi_grid_to_muedit
 from hdsemg_pipe.config.config_enums import Settings, MUEditLaunchMethod
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe._log.log_config import logger
@@ -15,6 +15,7 @@ from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.loadingbutton import LoadingButton
 from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
 from hdsemg_pipe.widgets.MappingDialog import MappingDialog
+from hdsemg_pipe.widgets.GridGroupingDialog import GridGroupingDialog
 from hdsemg_pipe.widgets.MUEditInstructionDialog import MUEditInstructionDialog
 from hdsemg_pipe.ui_elements.theme import Styles, Colors
 
@@ -40,6 +41,9 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.muedit_files = []  # _muedit.mat files (ready for editing)
         self.edited_files = []  # _muedit_edited.mat files (finished editing)
         self.exported_files = []  # Files exported to decomposition_results folder
+
+        # Multi-grid groupings: {group_name: [file1, file2, ...]}
+        self.grid_groupings = {}
 
         # Export worker
         self.export_worker = None
@@ -115,6 +119,14 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.btn_apply_mapping.setEnabled(False)
         self.buttons.append(self.btn_apply_mapping)
 
+        # Button to configure multi-grid groups
+        self.btn_configure_groups = QPushButton("Configure Multi-Grid Groups")
+        self.btn_configure_groups.setStyleSheet(Styles.button_secondary())
+        self.btn_configure_groups.setToolTip("Group grids from the same muscle for MUEdit's duplicate detection")
+        self.btn_configure_groups.clicked.connect(self.open_grid_grouping_dialog)
+        self.btn_configure_groups.setEnabled(False)
+        self.buttons.append(self.btn_configure_groups)
+
         # Button to export JSON files to MUEdit format
         self.btn_export_to_muedit = QPushButton("Export to MUEdit")
         self.btn_export_to_muedit.setStyleSheet(Styles.button_secondary())
@@ -138,8 +150,35 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.btn_show_results.setEnabled(False)  # Disabled until exported files exist
         self.buttons.append(self.btn_show_results)
 
+    def open_grid_grouping_dialog(self):
+        """Open dialog to configure multi-grid groups."""
+        # Filter for JSON files only
+        json_files = [f for f in self.resultfiles if f.endswith('.json')]
+
+        if not json_files:
+            self.warn("No JSON files found to group.")
+            return
+
+        if len(json_files) < 2:
+            self.info("Only one JSON file available. Multi-grid grouping requires at least 2 files.")
+            return
+
+        # Open dialog
+        dialog = GridGroupingDialog(json_files, self.grid_groupings, self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.grid_groupings = dialog.get_groupings()
+
+            # Update UI to show groupings are configured
+            if self.grid_groupings:
+                group_count = len(self.grid_groupings)
+                total_grids_in_groups = sum(len(grids) for grids in self.grid_groupings.values())
+                self.success(f"Configured {group_count} multi-grid group(s) with {total_grids_in_groups} grid(s) total.")
+                logger.info(f"Grid groupings: {self.grid_groupings}")
+            else:
+                self.info("No multi-grid groups configured. All files will be exported as single grids.")
+
     def export_json_to_muedit(self):
-        """Export all OpenHD-EMG JSON files to MUEdit MAT format."""
+        """Export all OpenHD-EMG JSON files to MUEdit MAT format, using configured groupings."""
         if not self.resultfiles:
             self.warn("No decomposition files found to export.")
             return
@@ -151,22 +190,65 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             return
 
         logger.info(f"Exporting {len(json_files)} JSON file(s) to MUEdit format...")
+        logger.info(f"Configured multi-grid groups: {list(self.grid_groupings.keys())}")
+
         success_count = 0
         error_count = 0
         error_messages = []
 
-        for json_file in json_files:
+        # Track which files are in groups (to avoid exporting them individually)
+        files_in_groups = set()
+        for group_files in self.grid_groupings.values():
+            files_in_groups.update(group_files)
+
+        # First, export multi-grid groups
+        for group_name, group_file_names in self.grid_groupings.items():
+            try:
+                # Get full paths for files in this group
+                group_file_paths = []
+                for filename in group_file_names:
+                    # Find matching file
+                    matching_files = [f for f in json_files if os.path.basename(f) == filename]
+                    if matching_files:
+                        group_file_paths.append(matching_files[0])
+                    else:
+                        logger.warning(f"File {filename} in group '{group_name}' not found, skipping...")
+
+                if len(group_file_paths) < 2:
+                    logger.warning(f"Group '{group_name}' has less than 2 files, skipping multi-grid export...")
+                    # Remove from files_in_groups so they'll be exported individually
+                    for filename in group_file_names:
+                        files_in_groups.discard(filename)
+                    continue
+
+                logger.info(f"Exporting multi-grid group '{group_name}' with {len(group_file_paths)} grids...")
+                muedit_file = export_multi_grid_to_muedit(group_file_paths, group_name)
+
+                if muedit_file:
+                    success_count += len(group_file_paths)  # Count each grid as success
+                    logger.info(f"Successfully exported multi-grid: {os.path.basename(muedit_file)}")
+
+            except Exception as e:
+                error_count += len(group_file_names)
+                error_msg = f"Failed to export multi-grid group '{group_name}': {str(e)}"
+                error_messages.append(error_msg)
+                logger.error(error_msg)
+
+        # Then, export remaining single-grid files
+        single_grid_files = [f for f in json_files if os.path.basename(f) not in files_in_groups]
+
+        for json_file in single_grid_files:
             try:
                 # Check if MUEdit file already exists
                 if is_muedit_file_exists(json_file):
                     logger.info(f"MUEdit file already exists for {os.path.basename(json_file)}, skipping...")
                     continue
 
-                # Export to MUEdit format
+                # Export to MUEdit format (single grid)
                 muedit_file = export_to_muedit_mat(json_file)
                 if muedit_file:
                     success_count += 1
-                    logger.info(f"Successfully exported: {os.path.basename(muedit_file)}")
+                    logger.info(f"Successfully exported single-grid: {os.path.basename(muedit_file)}")
             except Exception as e:
                 error_count += 1
                 error_msg = f"Failed to export {os.path.basename(json_file)}: {str(e)}"
@@ -177,8 +259,16 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.get_decomposition_results()
 
         # Show summary to user
+        multi_grid_count = len(self.grid_groupings)
+        single_grid_count = len(single_grid_files)
+
         if success_count > 0 and error_count == 0:
-            self.success(f"Successfully exported {success_count} file(s) to MUEdit format.")
+            summary = f"Successfully exported {len(json_files)} file(s) to MUEdit format.\n"
+            if multi_grid_count > 0:
+                summary += f"• {multi_grid_count} multi-grid group(s)\n"
+            if single_grid_count > 0:
+                summary += f"• {single_grid_count} single-grid file(s)"
+            self.success(summary)
             self.btn_launch_muedit.setEnabled(True)
         elif success_count > 0 and error_count > 0:
             self.warn(f"Exported {success_count} file(s) successfully, but {error_count} file(s) failed:\n" +
@@ -453,6 +543,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         if not os.path.exists(self.expected_folder):
             self.error("The decomposition_auto folder does not exist or is not accessible from the application.")
             self.btn_apply_mapping.setEnabled(False)
+            self.btn_configure_groups.setEnabled(False)
             self.btn_export_to_muedit.setEnabled(False)
             self.btn_launch_muedit.setEnabled(False)
             self.progress_container.setVisible(False)
@@ -526,10 +617,19 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             should_enable_export = len(json_files_needing_export) > 0
             self.btn_export_to_muedit.setEnabled(should_enable_export)
 
+            # Enable multi-grid configuration if there are 2+ JSON files
+            has_multiple_json = len(json_files) >= 2
+            self.btn_configure_groups.setEnabled(has_multiple_json)
+
             if should_enable_export:
                 logger.info(f"Export button enabled: {len(json_files_needing_export)} files need export")
             else:
                 logger.info("Export button disabled: All JSON files already have _muedit.mat files")
+
+            if has_multiple_json:
+                logger.info(f"Multi-grid configuration enabled: {len(json_files)} JSON files available")
+            else:
+                logger.info("Multi-grid configuration disabled: Need at least 2 JSON files")
 
             # Enable "Open MUEdit" button if _muedit.mat files exist
             has_muedit_files = len(self.muedit_files) > 0
@@ -582,6 +682,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             self.process_mapped_files()
         else:
             self.btn_apply_mapping.setEnabled(False)
+            self.btn_configure_groups.setEnabled(False)
             self.btn_export_to_muedit.setEnabled(False)
             self.btn_launch_muedit.setEnabled(False)
             self.btn_show_results.setEnabled(False)

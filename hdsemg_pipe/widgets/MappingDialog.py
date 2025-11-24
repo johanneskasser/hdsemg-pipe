@@ -194,3 +194,7 @@ class MappingDialog(QDialog):
 
         self.decomp_list.takeItem(self.decomp_list.row(decomp_item))
         self.chan_list.takeItem(self.chan_list.row(chan_item))
+
+    def get_mapping(self):
+        """Return the current mapping dictionary."""
+        return self.mapping
