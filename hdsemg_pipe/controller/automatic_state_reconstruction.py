@@ -97,16 +97,26 @@ def _check_folder_existence(folderpath):
 def _check_pipe_folder_structure(folderpath):
     """Check if the folder structure is valid for the application."""
     logger.debug(f"Checking folder structure for: {folderpath}")
-    # Define the expected subfolders
+    # Define the expected subfolders (decomposition_results is optional for backwards compatibility)
     expected_subfolders = FolderNames.list_values()
+    optional_folders = [FolderNames.DECOMPOSITION_RESULTS.value]
 
     # Check if each expected subfolder exists
     for subfolder in expected_subfolders:
         subfolder_path = os.path.join(folderpath, subfolder)
         logger.debug(f"Checking for subfolder: {subfolder_path}")
         if not os.path.exists(subfolder_path):
-            logger.warning(f"Missing expected subfolder: {subfolder_path}")
-            raise FileNotFoundError(f"Missing expected subfolder: {subfolder_path}")
+            if subfolder in optional_folders:
+                logger.info(f"Optional subfolder not found (will be created): {subfolder_path}")
+                # Create optional folders if they don't exist
+                try:
+                    os.makedirs(subfolder_path, exist_ok=True)
+                    logger.info(f"Created optional subfolder: {subfolder_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to create optional subfolder {subfolder_path}: {e}")
+            else:
+                logger.warning(f"Missing expected subfolder: {subfolder_path}")
+                raise FileNotFoundError(f"Missing expected subfolder: {subfolder_path}")
 
     logger.info(f"Folder structure is valid for: {folderpath}")
 

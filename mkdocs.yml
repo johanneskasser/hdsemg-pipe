@@ -34,6 +34,7 @@ nav:
       - Crop to Region of Interest: processing/crop_to_roi.md
       - Channel Selection: processing/channel_selection.md
       - Decomposition Results: processing/decomposition_results.md
+      - MUEdit Export Workflow: processing/muedit_export_workflow.md
   - Developer Guide: developer.md
   - Contributing: contributing.md
 

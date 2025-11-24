@@ -392,3 +392,159 @@ def get_muedit_filepath(json_filepath, multi_grid=False):
         return str(json_filepath).replace(".json", "_multigrid_muedit.mat")
     else:
         return str(json_filepath).replace(".json", "_muedit.mat")
+
+
+def _is_valid_ref(ref):
+    """
+    Check if an HDF5 reference is valid (non-null).
+
+    Args:
+        ref: HDF5 reference object
+
+    Returns:
+        bool: True if reference is valid, False otherwise
+    """
+    import h5py as _h5py
+    return isinstance(ref, _h5py.Reference) and bool(ref)
+
+
+def _cell_row_read(f, ds):
+    """
+    Read a MATLAB 1xN (or Nx1) cell array dataset into a Python list of arrays.
+    Assumes v7.3 (HDF5). Elements are object references.
+
+    Args:
+        f: Open h5py.File object
+        ds: HDF5 dataset containing cell array
+
+    Returns:
+        list: List of numpy arrays or None for empty cells
+    """
+    obj = ds[()]
+    if obj.ndim != 2:
+        raise ValueError(f"Expected 2-D cell array, got {obj.ndim}D.")
+
+    # Normalize to a row
+    if obj.shape[0] == 1:
+        refs = [obj[0, j] for j in range(obj.shape[1])]
+    elif obj.shape[1] == 1:
+        refs = [obj[i, 0] for i in range(obj.shape[0])]
+    else:
+        # Still handle as row-major
+        refs = [obj[0, j] for j in range(obj.shape[1])]
+
+    out = []
+    for r in refs:
+        if _is_valid_ref(r):
+            arr = np.array(f[r])
+            out.append(arr)
+        else:
+            out.append(None)
+    return out
+
+
+def apply_muedit_edits_to_json(json_in_path, mat_edited_path, json_out_path):
+    """
+    Update an OpenHD-EMG JSON with MU edits made in a MUEdit-exported MAT file (v7.3/HDF5).
+
+    This function reads the edited motor unit data from a MUEdit MAT file and updates
+    the original OpenHD-EMG JSON with the cleaned results.
+
+    Fields updated in the output JSON:
+      - 'IPTS': Pulse trains from signal.Pulsetrain (saved as DataFrame, shape time x nMU)
+      - 'MUPULSES': Discharge times from signal.Dischargetimes (converted 1-based -> 0-based)
+      - 'BINARY_MUS_FIRING': Binary firing matrix derived from MUPULSES
+      - 'ACCURACY': SIL values from edition.silval
+      - 'NUMBER_OF_MUS': Number of motor units
+      - 'FILENAME': Path to the edited MAT file
+
+    Args:
+        json_in_path (str or Path): Path to the original OpenHD-EMG JSON file
+        mat_edited_path (str or Path): Path to the edited MUEdit MAT file (v7.3 format)
+        json_out_path (str or Path): Path where the updated JSON should be saved
+
+    Raises:
+        ImportError: If openhdemg or h5py libraries are not available
+        KeyError: If required fields are not found in the MAT file
+        ValueError: If data structure validation fails
+
+    Example:
+        >>> apply_muedit_edits_to_json(
+        ...     'original.json',
+        ...     'edited_muedit.mat',
+        ...     'cleaned_result.json'
+        ... )
+        Updated JSON written to: cleaned_result.json
+    """
+    if not OPENHDEMG_AVAILABLE:
+        raise ImportError("openhdemg library is required for this function")
+
+    try:
+        import h5py
+    except ImportError:
+        raise ImportError("h5py library is required for reading MATLAB v7.3 files (pip install h5py)")
+
+    json_in_path = Path(json_in_path)
+    mat_edited_path = Path(mat_edited_path)
+    json_out_path = Path(json_out_path)
+
+    logger.info(f"Converting edited MUEdit file to OpenHD-EMG format...")
+    logger.debug(f"Input JSON: {json_in_path.name}")
+    logger.debug(f"Edited MAT: {mat_edited_path.name}")
+    logger.debug(f"Output JSON: {json_out_path.name}")
+
+    # Load original OpenHD-EMG JSON
+    json_dict = emg.emg_from_json(str(json_in_path))
+
+    # Read edited MUEdit MAT (v7.3) using h5py
+    with h5py.File(str(mat_edited_path), 'r') as f:
+        if 'edition' not in f:
+            raise KeyError(f"'edition' group not found in {mat_edited_path.name}. "
+                          "The MAT file may not be a valid MUEdit edited file.")
+        edit = f['edition']
+
+        # SIL: 1 x ngrid cell, each double
+        if 'silval' not in edit:
+            raise KeyError("edition.silval not found in edited MAT.")
+        silval = _cell_row_read(f, edit['silval'])
+
+        # Pulsetrain: 1 x ngrid cell; each cell: (nMU_g x n_samples)
+        if 'Pulsetrainclean' not in edit:
+            raise KeyError("edition.Pulsetrainclean not found in edited MAT.")
+        pulsetrain_cells = _cell_row_read(f, edit['Pulsetrainclean'])
+
+        # Dischargetimes: ngrid x maxMU cell; each cell: (1 x nDischarges) or (nDischarges,)
+        top = edit['Distimeclean'][()]           # object array, shape (1,1)
+        inner_ref = top.flat[0]                  # the only reference
+        inner_cell_ds = f[inner_ref]             # dataset: the 1×nMU cell
+
+        # Now read that inner row cell into a Python list of arrays (length = nMU)
+        disc_nested = _cell_row_read(f, inner_cell_ds)
+
+    # JSON expects IPTS as DataFrame (time x nMU)
+    IPTS_df = pd.DataFrame(pulsetrain_cells[0])
+
+    # Build MUPULSES (0-based) from Dischargetimes
+    MUPULSES_list = []
+    for mu_timing in disc_nested:
+        MUPULSES_list.append(np.squeeze(np.asarray(mu_timing, dtype='int32')) - 1)
+
+    # Update the edited fields in the new JSON
+    json_dict['IPTS'] = IPTS_df
+    json_dict['MUPULSES'] = MUPULSES_list
+
+    # Create binary firing matrix
+    nMU = min(IPTS_df.shape)
+    spikeMat = np.zeros((nMU, max(IPTS_df.shape)))
+    for i in range(nMU):
+        spikeMat[i, MUPULSES_list[i]] = 1
+    json_dict['BINARY_MUS_FIRING'] = pd.DataFrame(spikeMat.T)
+    json_dict['FILENAME'] = str(mat_edited_path)
+    json_dict['ACCURACY'] = pd.DataFrame(np.squeeze(np.array(silval)))
+    json_dict['NUMBER_OF_MUS'] = nMU
+
+    # Save updated JSON in OpenHD-EMG format
+    emg.save_json_emgfile(json_dict, str(json_out_path), compresslevel=4)
+    logger.info(f"Successfully converted to OpenHD-EMG format: {json_out_path.name}")
+
+    return str(json_out_path)

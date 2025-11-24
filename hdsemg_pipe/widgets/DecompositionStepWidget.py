@@ -39,6 +39,10 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.original_decomp_files = []  # Original .json/.pkl files
         self.muedit_files = []  # _muedit.mat files (ready for editing)
         self.edited_files = []  # _muedit_edited.mat files (finished editing)
+        self.exported_files = []  # Files exported to decomposition_results folder
+
+        # Export worker
+        self.export_worker = None
 
         # Perform an initial check
         self.check()
@@ -129,8 +133,9 @@ class DecompositionResultsStepWidget(BaseStepWidget):
 
         self.btn_show_results = LoadingButton("Show Decomposition Results")
         self.btn_show_results.setStyleSheet(Styles.button_primary())
-        self.btn_show_results.setToolTip("Open OpenHD-EMG to view decomposition results")
+        self.btn_show_results.setToolTip("Open OpenHD-EMG to view cleaned decomposition results from decomposition_results folder")
         self.btn_show_results.clicked.connect(self.display_results)
+        self.btn_show_results.setEnabled(False)  # Disabled until exported files exist
         self.buttons.append(self.btn_show_results)
 
     def export_json_to_muedit(self):
@@ -376,11 +381,27 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         dialog.exec_()
 
     def display_results(self):
-        """Displays the decomposition results in the UI."""
-        results_path = self.get_decomposition_results()
-        self.btn_show_results.start_loading()
-        if not results_path:
+        """Displays the cleaned decomposition results from decomposition_results folder in OpenHD-EMG."""
+        # Use decomposition_results folder instead of decomposition_auto
+        try:
+            results_path = global_state.get_decomposition_results_path()
+            if not os.path.exists(results_path):
+                self.warn("No exported results found. Please complete manual cleaning workflow first.")
+                return
+
+            # Check if there are any exported JSON files
+            exported_json_files = [f for f in os.listdir(results_path) if f.endswith('.json')]
+            if not exported_json_files:
+                self.warn("No exported JSON files found in decomposition_results folder.")
+                return
+
+            logger.info(f"Opening {len(exported_json_files)} exported result(s) from: {results_path}")
+
+        except Exception as e:
+            self.error(f"Failed to access decomposition results: {str(e)}")
             return
+
+        self.btn_show_results.start_loading()
         self.start_openhdemg(self.btn_show_results.stop_loading)
         self.resultsDisplayed.emit(results_path)
         self.complete_step()  # Mark step as complete
@@ -392,7 +413,9 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             return
 
         logger.info(f"Starting openhdemg!")
-        command = ["openhdemg", "-m", "openhdemg.gui.openhdemg_gui"]
+        # Use current Python interpreter to run openhdemg module
+        import sys
+        command = [sys.executable, "-m", "openhdemg.gui.openhdemg_gui"]
         proc = subprocess.Popen(command)
 
         # Starten eines Threads, der nach einer kurzen Zeit prüft, ob der Prozess noch läuft.
@@ -415,14 +438,16 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         1. Original files: .json or .pkl (decomposition results)
         2. MUEdit export: *_muedit.mat (exported for manual cleaning)
         3. Edited files: *_muedit_edited.mat (manually cleaned in MUEdit)
+        4. Exported files: cleaned results in decomposition_results/ folder
 
-        Progress tracking is based on _muedit.mat files being edited to _muedit_edited.mat
+        Progress tracking is based on _muedit.mat files being edited and exported
         """
         self.resultfiles = []
         self.error_messages = []
         self.original_decomp_files = []
         self.muedit_files = []
         self.edited_files = []
+        self.exported_files = []
 
         folder_content_widget = global_state.get_widget("folder_content")
         if not os.path.exists(self.expected_folder):
@@ -513,6 +538,43 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             if has_muedit_files:
                 logger.info(f"MUEdit launch button enabled: {len(self.muedit_files)} _muedit.mat files found")
 
+            # Check for exported files in decomposition_results folder
+            try:
+                results_folder = global_state.get_decomposition_results_path()
+                if os.path.exists(results_folder):
+                    exported_files_on_disk = []
+                    for file in os.listdir(results_folder):
+                        if file.endswith('.json'):
+                            # Extract base name from exported file
+                            base_name = os.path.splitext(file)[0]
+                            exported_files_on_disk.append(base_name)
+                            # Check if this matches any of our muedit files
+                            if base_name in self.muedit_files and base_name not in self.exported_files:
+                                self.exported_files.append(base_name)
+                                logger.debug(f"Exported file detected: {base_name}")
+
+                    # Auto-delete sync: Remove exported files if their edited source was deleted
+                    for base_name in exported_files_on_disk:
+                        if base_name not in self.edited_files:
+                            # Edited file was deleted, delete the exported file too
+                            export_file_path = os.path.join(results_folder, f"{base_name}.json")
+                            try:
+                                os.remove(export_file_path)
+                                logger.info(f"Auto-deleted exported file (source was removed): {base_name}.json")
+                                if base_name in self.exported_files:
+                                    self.exported_files.remove(base_name)
+                            except Exception as e:
+                                logger.warning(f"Failed to auto-delete {base_name}.json: {e}")
+            except Exception as e:
+                logger.warning(f"Could not check exported files: {e}")
+
+            # Enable "Show Decomposition Results" button only if exported files exist
+            has_exported_files = len(self.exported_files) > 0
+            self.btn_show_results.setEnabled(has_exported_files)
+
+            if has_exported_files:
+                logger.info(f"Show Results button enabled: {len(self.exported_files)} exported file(s) found")
+
             # Show and update progress UI
             self.update_progress_ui()
 
@@ -522,6 +584,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             self.btn_apply_mapping.setEnabled(False)
             self.btn_export_to_muedit.setEnabled(False)
             self.btn_launch_muedit.setEnabled(False)
+            self.btn_show_results.setEnabled(False)
             self.progress_container.setVisible(False)
 
         if self.resultfiles and not self.error_messages:
@@ -541,6 +604,9 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         - Shows which files have been edited (_muedit_edited.mat exists)
         - Progress: edited_files / muedit_files
         - Supports both single-grid and multi-grid recordings
+        - Tracks _muedit.mat files through 3 stages: pending → edited → exported
+        - Shows which files have been edited and exported
+        - Progress: exported_files / muedit_files
         """
         # Only show progress if there are _muedit.mat files to track
         if not self.muedit_files:
@@ -550,15 +616,16 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         # Show progress container
         self.progress_container.setVisible(True)
 
-        # Calculate progress based on _muedit.mat files
+        # Calculate progress based on exported files (final stage)
         total_muedit_files = len(self.muedit_files)
         edited_count = len(self.edited_files)
-        progress_percentage = int((edited_count / total_muedit_files) * 100) if total_muedit_files > 0 else 0
+        exported_count = len(self.exported_files)
+        progress_percentage = int((exported_count / total_muedit_files) * 100) if total_muedit_files > 0 else 0
 
         # Update progress bar and label
         self.progress_bar.setValue(progress_percentage)
         self.progress_label.setText(
-            f"Manual Cleaning Progress: {edited_count}/{total_muedit_files} files ({progress_percentage}%)"
+            f"Manual Cleaning Workflow: {exported_count}/{total_muedit_files} exported ({progress_percentage}%)"
         )
 
         # Clear existing file status items
@@ -567,20 +634,26 @@ class DecompositionResultsStepWidget(BaseStepWidget):
             if widget:
                 widget.deleteLater()
 
-        # Create file status items for each _muedit.mat file
+        # Create file status items for each _muedit.mat file (3-column status)
         for base_name in self.muedit_files:
-            # Check if this file has been edited (_muedit_edited.mat exists)
             is_edited = base_name in self.edited_files
+            is_exported = base_name in self.exported_files
 
-            # Create status label
-            if is_edited:
-                status_text = f"✅ {base_name} (cleaned)"
+            # Determine status icon and text
+            if is_exported:
+                status_icon = "📦"
+                status_text = "exported"
+                status_color = Colors.BLUE_700
+            elif is_edited:
+                status_icon = "✅"
+                status_text = "edited"
                 status_color = Colors.GREEN_700
             else:
-                status_text = f"⏳ {base_name} (needs cleaning)"
+                status_icon = "⏳"
+                status_text = "pending"
                 status_color = Colors.TEXT_MUTED
 
-            status_label = QLabel(status_text)
+            status_label = QLabel(f"{status_icon} {base_name} ({status_text})")
             status_label.setStyleSheet(f"""
                 color: {status_color};
                 padding: 4px;
@@ -591,10 +664,91 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         # Add stretch to push items to top
         self.file_status_layout.addStretch()
 
-        # Check if all _muedit.mat files have been cleaned
-        if edited_count == total_muedit_files and total_muedit_files > 0:
-            self.success(f"All {total_muedit_files} files have been cleaned in MUEdit!")
+        # Auto-export any edited files that haven't been exported yet
+        if edited_count > exported_count:
+            self.auto_export_edited_files()
+
+        # Check completion stages
+        if exported_count == total_muedit_files and total_muedit_files > 0:
+            self.success(f"All {total_muedit_files} files have been exported!")
             # Could auto-complete step here if desired
+
+    def auto_export_edited_files(self):
+        """
+        Automatically export edited MUEdit files to OpenHD-EMG JSON format.
+        This is triggered when new edited files are detected or when all files are edited.
+        """
+        # Don't start new export if one is already running
+        if self.export_worker and self.export_worker.isRunning():
+            logger.debug("Export already in progress, skipping auto-export")
+            return
+
+        # Find files that are edited but not yet exported
+        files_to_export = []
+        for base_name in self.edited_files:
+            if base_name not in self.exported_files:
+                # Find the original JSON file
+                original_json = None
+                for f in self.resultfiles:
+                    if f.endswith('.json') and os.path.splitext(os.path.basename(f))[0] == base_name:
+                        original_json = f
+                        break
+
+                if not original_json:
+                    logger.warning(f"Could not find original JSON for {base_name}, skipping export")
+                    continue
+
+                # Find the edited MAT file
+                edited_mat = None
+                decomp_folder = global_state.get_decomposition_path()
+                for file in os.listdir(decomp_folder):
+                    if file.endswith('.mat') and base_name in file and file != f"{base_name}_muedit.mat":
+                        edited_mat = os.path.join(decomp_folder, file)
+                        break
+
+                if not edited_mat:
+                    logger.warning(f"Could not find edited MAT file for {base_name}, skipping export")
+                    continue
+
+                # Output path in decomposition_results folder
+                results_folder = global_state.get_decomposition_results_path()
+                os.makedirs(results_folder, exist_ok=True)
+                output_json = os.path.join(results_folder, f"{base_name}.json")
+
+                files_to_export.append((base_name, original_json, edited_mat, output_json))
+
+        if not files_to_export:
+            logger.debug("No files to export")
+            return
+
+        logger.info(f"Auto-exporting {len(files_to_export)} edited file(s)...")
+
+        # Create and start worker thread
+        from hdsemg_pipe.actions.muedit_export_worker import MUEditExportWorker
+
+        self.export_worker = MUEditExportWorker(files_to_export)
+        self.export_worker.finished.connect(self._on_export_success)
+        self.export_worker.error.connect(self._on_export_error)
+        self.export_worker.start()
+
+    def _on_export_success(self, base_name, output_path):
+        """Handle successful export of a file."""
+        logger.info(f"Export completed: {base_name}")
+        if base_name not in self.exported_files:
+            self.exported_files.append(base_name)
+
+        # Enable "Show Decomposition Results" button when at least one file is exported
+        if len(self.exported_files) > 0:
+            self.btn_show_results.setEnabled(True)
+            logger.info(f"Show Results button enabled: {len(self.exported_files)} exported file(s)")
+
+        # Refresh UI
+        self.update_progress_ui()
+
+    def _on_export_error(self, base_name, error_msg):
+        """Handle export error."""
+        logger.error(f"Export failed for {base_name}: {error_msg}")
+        self.warn(f"Failed to export {base_name}: {error_msg}")
 
     def process_file_with_channel(self, file_path, channel_selection):
         """
