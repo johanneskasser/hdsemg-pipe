@@ -1,4 +1,4 @@
-"""Worker thread for exporting MUEdit edited files to OpenHD-EMG format."""
+"""Worker thread for exporting MUEdit edited files to openhdemg format."""
 
 from PyQt5.QtCore import QThread, pyqtSignal
 from hdsemg_pipe._log.log_config import logger
@@ -6,7 +6,7 @@ from hdsemg_pipe._log.log_config import logger
 
 class MUEditExportWorker(QThread):
     """
-    Worker thread for exporting MUEdit edited MAT files to OpenHD-EMG JSON format.
+    Worker thread for exporting MUEdit edited MAT files to openhdemg JSON format.
 
     Processes edited MUEdit files asynchronously to avoid blocking the UI.
     """

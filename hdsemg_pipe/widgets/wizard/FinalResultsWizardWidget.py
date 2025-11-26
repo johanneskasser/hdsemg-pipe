@@ -1,5 +1,5 @@
 """
-Step 8: Final Results
+Step 9: Final Results (Wizard Version)
 
 This step converts edited MUEdit files back to JSON format and displays results.
 """
@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import QPushButton, QLabel, QVBoxLayout, QFrame, QProgressB
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
-from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.actions.decomposition_export import apply_muedit_edits_to_json
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius, Fonts
 
@@ -51,7 +51,7 @@ class JSONConversionWorker(QThread):
                     # Then remove the MUEdit suffixes to get the base name for JSON lookup
                     base_name = base_name.replace('_muedit', '').replace('_multigrid_muedit', '')
 
-                    # Try to find corresponding JSON    
+                    # Try to find corresponding JSON
                     json_candidates = [
                         os.path.join(self.decomp_folder, f"{base_name}.json"),
                         # For multi-grid, we need to find the first JSON file that was in the group
@@ -96,9 +96,9 @@ class JSONConversionWorker(QThread):
             self.error.emit(f"Conversion worker failed: {str(e)}")
 
 
-class Step8_FinalResults(BaseStepWidget):
+class FinalResultsWizardWidget(WizardStepWidget):
     """
-    Step 8: Convert edited files and show final results.
+    Step 9: Convert edited files and show final results.
 
     This step:
     - Converts edited MUEdit files back to JSON
@@ -107,8 +107,13 @@ class Step8_FinalResults(BaseStepWidget):
     - Completes when all files are converted
     """
 
-    def __init__(self, step_index, step_name, tooltip, parent=None):
-        super().__init__(step_index, step_name, tooltip, parent)
+    def __init__(self, parent=None):
+        # Hardcoded step configuration
+        step_index = 9
+        step_name = "Final Results"
+        description = "Convert edited MUEdit files back to JSON format and view cleaned results in openhdemg."
+
+        super().__init__(step_index, step_name, description, parent)
 
         self.decomp_folder = None
         self.results_folder = None
@@ -118,7 +123,7 @@ class Step8_FinalResults(BaseStepWidget):
 
         # Create status UI
         self.create_status_ui()
-        self.col_additional.addWidget(self.status_container)
+        self.content_layout.addWidget(self.status_container)
 
         # Perform initial check
         self.check()

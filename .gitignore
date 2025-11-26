@@ -16,3 +16,4 @@ hdsemg_pipe/config/config.json
 uv.lock
 .python-version
 hdsemg_pipe/resources_rc.py
+CLAUDE.md

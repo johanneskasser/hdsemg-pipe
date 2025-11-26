@@ -130,7 +130,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         # Button to export JSON files to MUEdit format
         self.btn_export_to_muedit = QPushButton("Export to MUEdit")
         self.btn_export_to_muedit.setStyleSheet(Styles.button_secondary())
-        self.btn_export_to_muedit.setToolTip("Convert OpenHD-EMG JSON files to MUEdit MAT format")
+        self.btn_export_to_muedit.setToolTip("Convert openhdemg JSON files to MUEdit MAT format")
         self.btn_export_to_muedit.clicked.connect(self.export_json_to_muedit)
         self.btn_export_to_muedit.setEnabled(False)
         self.buttons.append(self.btn_export_to_muedit)
@@ -145,7 +145,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
 
         self.btn_show_results = LoadingButton("Show Decomposition Results")
         self.btn_show_results.setStyleSheet(Styles.button_primary())
-        self.btn_show_results.setToolTip("Open OpenHD-EMG to view cleaned decomposition results from decomposition_results folder")
+        self.btn_show_results.setToolTip("Open openhdemg to view cleaned decomposition results from decomposition_results folder")
         self.btn_show_results.clicked.connect(self.display_results)
         self.btn_show_results.setEnabled(False)  # Disabled until exported files exist
         self.buttons.append(self.btn_show_results)
@@ -178,7 +178,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
                 self.info("No multi-grid groups configured. All files will be exported as single grids.")
 
     def export_json_to_muedit(self):
-        """Export all OpenHD-EMG JSON files to MUEdit MAT format, using configured groupings."""
+        """Export all openhdemg JSON files to MUEdit MAT format, using configured groupings."""
         if not self.resultfiles:
             self.warn("No decomposition files found to export.")
             return
@@ -471,7 +471,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         dialog.exec_()
 
     def display_results(self):
-        """Displays the cleaned decomposition results from decomposition_results folder in OpenHD-EMG."""
+        """Displays the cleaned decomposition results from decomposition_results folder in openhdemg."""
         # Use decomposition_results folder instead of decomposition_auto
         try:
             results_path = global_state.get_decomposition_results_path()
@@ -497,9 +497,9 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         self.complete_step()  # Mark step as complete
 
     def start_openhdemg(self, on_started_callback=None):
-        """Starts the OpenHD-EMG application and optionally calls a callback when it appears to be running."""
+        """Starts the openhdemg application and optionally calls a callback when it appears to be running."""
         if not config.get(Settings.OPENHDEMG_INSTALLED) or None:
-            self.warn("OpenHD-EMG virtual environment path is not set or invalid. Please set it in Settings first.")
+            self.warn("openhdemg virtual environment path is not set or invalid. Please set it in Settings first.")
             return
 
         logger.info(f"Starting openhdemg!")
@@ -512,11 +512,11 @@ class DecompositionResultsStepWidget(BaseStepWidget):
         def poll_process():
             time.sleep(2)
             if proc.poll() is None:
-                logger.debug("OpenHD-EMG has started.")
+                logger.debug("openhdemg has started.")
                 if on_started_callback:
                     on_started_callback()
             else:
-                logger.error("OpenHD-EMG terminated unexpectedly.")
+                logger.error("openhdemg terminated unexpectedly.")
 
         threading.Thread(target=poll_process, daemon=True).start()
 
@@ -776,7 +776,7 @@ class DecompositionResultsStepWidget(BaseStepWidget):
 
     def auto_export_edited_files(self):
         """
-        Automatically export edited MUEdit files to OpenHD-EMG JSON format.
+        Automatically export edited MUEdit files to openhdemg JSON format.
         This is triggered when new edited files are detected or when all files are edited.
         """
         # Don't start new export if one is already running

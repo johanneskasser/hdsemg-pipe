@@ -21,13 +21,13 @@ def is_openhdemg_installed():
 
 
 def init(parent):
-    """Initialize the OpenHD-EMG settings tab with modern styling."""
+    """Initialize the openhdemg settings tab with modern styling."""
     layout = QVBoxLayout()
     layout.setSpacing(Spacing.LG)
     layout.setContentsMargins(0, 0, 0, 0)
 
     # Header section
-    header = QLabel("OpenHD-EMG Integration")
+    header = QLabel("openhdemg Integration")
     header.setStyleSheet(f"""
         QLabel {{
             color: {Colors.TEXT_PRIMARY};
@@ -53,7 +53,7 @@ def init(parent):
 
     info_label = QLabel(
         '<b>What is openhdemg?</b><br>'
-        'OpenHD-EMG is an open-source Python library for analyzing High-Density Electromyography (HD-EMG) '
+        'openhdemg is an open-source Python library for analyzing High-Density Electromyography (HD-EMG) '
         'recordings. It provides tools for motor unit decomposition, signal processing, and visualization.'
     )
     info_label.setWordWrap(True)
