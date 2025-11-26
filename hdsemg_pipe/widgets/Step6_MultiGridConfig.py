@@ -5,6 +5,7 @@ This step allows configuration of multi-grid groups and exports
 decomposition results to MUEdit format.
 """
 import os
+import json
 from pathlib import Path
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QPushButton, QLabel, QVBoxLayout, QFrame, QProgressBar, QDialog
@@ -213,10 +214,13 @@ class Step6_MultiGridConfig(BaseStepWidget):
         if not os.path.exists(self.expected_folder):
             return
 
+        # State persistence files that should be excluded from export
+        state_files = {'decomposition_mapping.json', 'multigrid_groupings.json'}
+
         self.json_files = [
             os.path.join(self.expected_folder, f)
             for f in os.listdir(self.expected_folder)
-            if f.endswith('.json')
+            if f.endswith('.json') and f not in state_files
         ]
 
         # Update UI
@@ -287,8 +291,16 @@ class Step6_MultiGridConfig(BaseStepWidget):
         self.btn_configure_groups.setEnabled(len(self.json_files) >= 2)
         self.btn_export.setEnabled(True)
 
+        # Filter out errors related to state files (these are already filtered in scan now, but handle legacy errors)
+        state_files = {'decomposition_mapping.json', 'multigrid_groupings.json'}
+        non_state_errors = [
+            msg for msg in error_messages
+            if not any(state_file in msg for state_file in state_files)
+        ]
+        actual_error_count = len(non_state_errors)
+
         # Show summary
-        if success_count > 0 and error_count == 0:
+        if success_count > 0 and actual_error_count == 0:
             multi_grid_count = len(self.grid_groupings)
             summary = f"Successfully exported {success_count} file(s) to MUEdit format."
             if multi_grid_count > 0:
@@ -297,11 +309,21 @@ class Step6_MultiGridConfig(BaseStepWidget):
             self.success(summary)
             self.status_label.setText(f"✓ Export complete: {success_count} file(s) exported")
 
+            # Save state to JSON
+            self.save_groupings_to_json()
+
             # Mark step as completed
             self.complete_step()
 
-        elif success_count > 0 and error_count > 0:
-            self.warn(f"Exported {success_count} file(s), but {error_count} failed:\n" + "\n".join(error_messages))
+        elif success_count > 0 and actual_error_count > 0:
+            # Some real files failed, but check if all required files actually exist
+            if self.is_completed():
+                # All required files exist despite some errors, mark as complete
+                self.success(f"Export completed with warnings. All required files exist.")
+                self.save_groupings_to_json()
+                self.complete_step()
+            else:
+                self.warn(f"Exported {success_count} file(s), but {actual_error_count} failed:\n" + "\n".join(non_state_errors))
         else:
             self.error(f"Export failed:\n" + "\n".join(error_messages))
 
@@ -348,3 +370,52 @@ class Step6_MultiGridConfig(BaseStepWidget):
                 return False
 
         return True
+
+    def save_groupings_to_json(self):
+        """Save the multi-grid groupings to a JSON file for state persistence."""
+        decomp_auto_folder = os.path.join(global_state.workfolder, "decomposition_auto")
+
+        # Ensure folder exists
+        if not os.path.exists(decomp_auto_folder):
+            os.makedirs(decomp_auto_folder)
+            logger.info(f"Created decomposition_auto folder: {decomp_auto_folder}")
+
+        groupings_file = os.path.join(decomp_auto_folder, "multigrid_groupings.json")
+
+        try:
+            with open(groupings_file, 'w') as f:
+                json.dump(self.grid_groupings, f, indent=2)
+            logger.info(f"Saved multi-grid groupings to {groupings_file}: {self.grid_groupings}")
+        except Exception as e:
+            logger.error(f"Failed to save multi-grid groupings: {e}")
+            self.error(f"Failed to save groupings: {e}")
+
+    def load_groupings_from_json(self):
+        """Load the multi-grid groupings from JSON file for state reconstruction."""
+        decomp_auto_folder = os.path.join(global_state.workfolder, "decomposition_auto")
+        groupings_file = os.path.join(decomp_auto_folder, "multigrid_groupings.json")
+
+        if os.path.exists(groupings_file):
+            try:
+                with open(groupings_file, 'r') as f:
+                    self.grid_groupings = json.load(f)
+                logger.info(f"Loaded multi-grid groupings from {groupings_file}: {self.grid_groupings}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load multi-grid groupings: {e}")
+                return False
+
+        return False
+
+    def init_file_checking(self):
+        """Initialize file checking for state reconstruction."""
+        self.expected_folder = global_state.get_decomposition_path()
+
+        # Scan for JSON files
+        self.scan_json_files()
+
+        # Load groupings from JSON for state reconstruction
+        if self.load_groupings_from_json():
+            logger.info(f"State reconstructed from JSON: groupings loaded")
+
+        logger.info(f"File checking initialized for folder: {self.expected_folder}")

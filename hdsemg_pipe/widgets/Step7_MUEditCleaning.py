@@ -6,7 +6,7 @@ and monitors progress.
 """
 import os
 import subprocess
-from PyQt5.QtCore import QFileSystemWatcher
+from PyQt5.QtCore import QFileSystemWatcher, QTimer
 from PyQt5.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QFrame, QScrollArea,
     QWidget, QProgressBar
@@ -39,10 +39,16 @@ class Step7_MUEditCleaning(BaseStepWidget):
         self.expected_folder = None
         self.muedit_files = []
         self.edited_files = []
+        self.last_file_count = 0
 
         # Initialize file system watcher
         self.watcher = QFileSystemWatcher(self)
         self.watcher.directoryChanged.connect(self.scan_muedit_files)
+
+        # Add polling timer for reliable file detection (QFileSystemWatcher can miss events on Windows)
+        self.poll_timer = QTimer(self)
+        self.poll_timer.timeout.connect(self.scan_muedit_files)
+        self.poll_timer.setInterval(2000)  # Check every 2 seconds
 
         # Create status UI
         self.create_status_ui()
@@ -119,6 +125,11 @@ class Step7_MUEditCleaning(BaseStepWidget):
             if self.expected_folder not in self.watcher.directories():
                 self.watcher.addPath(self.expected_folder)
 
+            # Start polling timer for reliable file detection
+            if not self.poll_timer.isActive():
+                self.poll_timer.start()
+                logger.info("Started MUEdit file polling timer (2s interval)")
+
         # Always scan files to show status, even if step is not yet activated
         self.scan_muedit_files()
 
@@ -143,16 +154,16 @@ class Step7_MUEditCleaning(BaseStepWidget):
                 muedit_files.append(full_path)
 
                 # Check if edited version exists
-                edited_variants = [
-                    file.replace('_muedit.mat', '_muedit_edited.mat'),
-                    file.replace('_multigrid_muedit.mat', '_multigrid_muedit_edited.mat')
-                ]
+                # MUEdit creates files by appending "_edited.mat" to the entire filename
+                # e.g., "file_muedit.mat" -> "file_muedit.mat_edited.mat"
+                edited_path = os.path.join(self.expected_folder, file + '_edited.mat')
+                if os.path.exists(edited_path):
+                    edited_files.append(edited_path)
 
-                for edited_variant in edited_variants:
-                    edited_path = os.path.join(self.expected_folder, edited_variant)
-                    if os.path.exists(edited_path):
-                        edited_files.append(edited_path)
-                        break
+        # Check if file count changed (for logging)
+        file_count = len(muedit_files) + len(edited_files)
+        file_count_changed = file_count != self.last_file_count
+        self.last_file_count = file_count
 
         self.muedit_files = muedit_files
         self.edited_files = edited_files
@@ -162,6 +173,10 @@ class Step7_MUEditCleaning(BaseStepWidget):
 
         # Enable button if files exist
         self.btn_launch_muedit.setEnabled(len(muedit_files) > 0)
+
+        # Only log when file count changes to avoid spam
+        if file_count_changed:
+            logger.info(f"MUEdit files: {len(muedit_files)}, Edited files: {len(edited_files)}")
 
     def update_progress_ui(self):
         """Update progress UI with current status."""
@@ -361,3 +376,19 @@ class Step7_MUEditCleaning(BaseStepWidget):
         edited = len(self.edited_files)
 
         return total > 0 and edited >= total
+
+    def init_file_checking(self):
+        """Initialize file checking for state reconstruction."""
+        self.expected_folder = global_state.get_decomposition_path()
+
+        if os.path.exists(self.expected_folder):
+            if self.expected_folder not in self.watcher.directories():
+                self.watcher.addPath(self.expected_folder)
+
+            # Start polling timer for reliable file detection
+            if not self.poll_timer.isActive():
+                self.poll_timer.start()
+
+        # Scan for files
+        self.scan_muedit_files()
+        logger.info(f"File checking initialized for folder: {self.expected_folder}")

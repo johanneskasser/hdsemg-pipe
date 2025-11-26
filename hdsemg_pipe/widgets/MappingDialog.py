@@ -27,7 +27,9 @@ class MappingDialog(QDialog):
         layout.setSpacing(16)
 
         # Header
-        header_label = QLabel("Map each decomposition file to its corresponding channel selection file")
+        header_label = QLabel("Map decomposition files to their corresponding channel selection file.\n"
+                              "You can map multiple decomposition files to the same channel selection file "
+                              "(since channel files can contain multiple grids).")
         header_label.setStyleSheet(f"font-size: 14px; color: {Colors.TEXT_SECONDARY}; padding: 8px 0;")
         header_label.setWordWrap(True)
         layout.addWidget(header_label)
@@ -38,12 +40,12 @@ class MappingDialog(QDialog):
 
         # Decomposition files column
         decomp_column = QVBoxLayout()
-        decomp_label = QLabel("Decomposition Files")
+        decomp_label = QLabel("Decomposition Files (multi-select with Ctrl/Shift)")
         decomp_label.setStyleSheet(f"font-weight: bold; color: {Colors.TEXT_PRIMARY}; padding: 4px;")
         decomp_column.addWidget(decomp_label)
 
         self.decomp_list = QListWidget()
-        self.decomp_list.setSelectionMode(QListWidget.SingleSelection)
+        self.decomp_list.setSelectionMode(QListWidget.ExtendedSelection)  # Allow multiple selection
         self.decomp_list.setMinimumWidth(280)
         self.decomp_list.setStyleSheet(f"""
             QListWidget {{
@@ -157,43 +159,51 @@ class MappingDialog(QDialog):
         else:
             QMessageBox.warning(self, "Error", "Decomposition folder does not exist.")
 
-        # Load channel selection files if not already mapped
-        mapped_channel_files = set(self.mapping.values())
+        # Load ALL channel selection files (they can be reused for multiple decomposition files)
         if os.path.exists(self.channel_selection_folder):
             for file in os.listdir(self.channel_selection_folder):
-                if file not in mapped_channel_files and file.endswith(".mat"):
+                if file.endswith(".mat"):
                     self.chan_list.addItem(file)
         else:
             QMessageBox.warning(self, "Error", "Channel Selection folder does not exist.")
 
     def addMapping(self):
-        decomp_item = self.decomp_list.currentItem()
+        decomp_items = self.decomp_list.selectedItems()  # Get all selected items
         chan_item = self.chan_list.currentItem()
 
-        if not decomp_item or not chan_item:
-            QMessageBox.warning(self, "Warning", "Please select one file from each list.")
+        if not decomp_items or not chan_item:
+            QMessageBox.warning(self, "Warning", "Please select at least one decomposition file and one channel selection file.")
             return
 
-        decomp_file = decomp_item.text()
         chan_file = chan_item.text()
 
-        # Prevent redundant mappings
-        if decomp_file in self.mapping:
-            QMessageBox.warning(self, "Warning", "This decomposition file is already mapped.")
-            return
-        if chan_file in self.mapping.values():
-            QMessageBox.warning(self, "Warning", "This channel selection file is already mapped.")
-            return
+        # Add mapping for each selected decomposition file
+        mapped_files = []
+        for decomp_item in decomp_items:
+            decomp_file = decomp_item.text()
 
-        self.mapping[decomp_file] = chan_file
+            # Prevent redundant mappings for the same decomposition file
+            if decomp_file in self.mapping:
+                QMessageBox.warning(self, "Warning", f"Decomposition file '{decomp_file}' is already mapped.")
+                continue
 
-        row = self.mapping_table.rowCount()
-        self.mapping_table.insertRow(row)
-        self.mapping_table.setItem(row, 0, QTableWidgetItem(decomp_file))
-        self.mapping_table.setItem(row, 1, QTableWidgetItem(chan_file))
+            self.mapping[decomp_file] = chan_file
 
-        self.decomp_list.takeItem(self.decomp_list.row(decomp_item))
-        self.chan_list.takeItem(self.chan_list.row(chan_item))
+            row = self.mapping_table.rowCount()
+            self.mapping_table.insertRow(row)
+            self.mapping_table.setItem(row, 0, QTableWidgetItem(decomp_file))
+            self.mapping_table.setItem(row, 1, QTableWidgetItem(chan_file))
+
+            mapped_files.append(decomp_file)
+
+        # Remove mapped decomposition items from the list
+        for decomp_item in decomp_items:
+            if decomp_item.text() in mapped_files:
+                self.decomp_list.takeItem(self.decomp_list.row(decomp_item))
+
+        # Only remove channel file from list if ALL decomposition files are now mapped to it
+        # (Allow same channel file to be mapped to multiple decomp files)
+        # Note: We don't remove the channel file anymore since it can be reused
 
     def get_mapping(self):
         """Return the current mapping dictionary."""

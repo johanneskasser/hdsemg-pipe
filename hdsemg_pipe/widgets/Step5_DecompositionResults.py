@@ -5,7 +5,8 @@ This step monitors the decomposition folder for results and allows mapping
 of decomposition files to their source channel selection files.
 """
 import os
-from PyQt5.QtCore import QFileSystemWatcher
+import json
+from PyQt5.QtCore import QFileSystemWatcher, QTimer
 from PyQt5.QtWidgets import QPushButton, QLabel, QVBoxLayout, QFrame
 
 from hdsemg_pipe._log.log_config import logger
@@ -33,10 +34,16 @@ class Step5_DecompositionResults(BaseStepWidget):
         self.decomp_mapping = None
         self.resultfiles = []
         self.error_messages = []
+        self.last_file_count = 0
 
         # Initialize file system watcher
         self.watcher = QFileSystemWatcher(self)
         self.watcher.directoryChanged.connect(self.scan_decomposition_folder)
+
+        # Add polling timer for reliable file detection (QFileSystemWatcher can miss events on Windows)
+        self.poll_timer = QTimer(self)
+        self.poll_timer.timeout.connect(self.scan_decomposition_folder)
+        self.poll_timer.setInterval(2000)  # Check every 2 seconds
 
         # Create status UI
         self.create_status_ui()
@@ -65,6 +72,13 @@ class Step5_DecompositionResults(BaseStepWidget):
 
     def create_buttons(self):
         """Create buttons for this step."""
+        self.btn_skip = QPushButton("Skip")
+        self.btn_skip.setStyleSheet(Styles.button_secondary())
+        self.btn_skip.setToolTip("Skip mapping and continue without associating files")
+        self.btn_skip.clicked.connect(self.skip_mapping)
+        self.btn_skip.setEnabled(False)
+        self.buttons.append(self.btn_skip)
+
         self.btn_apply_mapping = QPushButton("Apply Mapping")
         self.btn_apply_mapping.setStyleSheet(Styles.button_primary())
         self.btn_apply_mapping.setToolTip("Map decomposition results to their source channel selection files")
@@ -87,6 +101,11 @@ class Step5_DecompositionResults(BaseStepWidget):
                 self.watcher.addPath(self.expected_folder)
                 logger.info(f"Monitoring decomposition folder: {self.expected_folder}")
 
+            # Start polling timer for reliable file detection
+            if not self.poll_timer.isActive():
+                self.poll_timer.start()
+                logger.info("Started file polling timer (2s interval)")
+
         # Always scan folder to show files, even if step is not yet activated
         self.scan_decomposition_folder()
 
@@ -103,12 +122,20 @@ class Step5_DecompositionResults(BaseStepWidget):
             self.btn_apply_mapping.setEnabled(False)
             return
 
-        # Find JSON and PKL files
+        # State persistence files that should be excluded from results
+        state_files = {'decomposition_mapping.json', 'multigrid_groupings.json'}
+
+        # Find JSON and PKL files (excluding state persistence files)
         files = []
         for file in os.listdir(self.expected_folder):
-            if file.endswith('.json') or file.endswith('.pkl'):
+            if (file.endswith('.json') or file.endswith('.pkl')) and file not in state_files:
                 full_path = os.path.join(self.expected_folder, file)
                 files.append(full_path)
+
+        # Check if file count changed
+        file_count = len(files)
+        file_count_changed = file_count != self.last_file_count
+        self.last_file_count = file_count
 
         self.resultfiles = files
 
@@ -128,6 +155,7 @@ class Step5_DecompositionResults(BaseStepWidget):
                 }}
             """)
             self.btn_apply_mapping.setEnabled(True)
+            self.btn_skip.setEnabled(True)
         else:
             self.file_counter_label.setText("Monitoring for decomposition files...")
             self.file_counter_label.setStyleSheet(f"""
@@ -138,8 +166,11 @@ class Step5_DecompositionResults(BaseStepWidget):
                 }}
             """)
             self.btn_apply_mapping.setEnabled(False)
+            self.btn_skip.setEnabled(False)
 
-        logger.info(f"Decomposition folder scan: {len(files)} file(s) found")
+        # Only log when file count changes to avoid spam
+        if file_count_changed:
+            logger.info(f"Decomposition folder scan: {len(files)} file(s) found")
 
     def init_file_checking(self):
         """Initialize file checking for state reconstruction."""
@@ -147,8 +178,36 @@ class Step5_DecompositionResults(BaseStepWidget):
         if os.path.exists(self.expected_folder):
             if self.expected_folder not in self.watcher.directories():
                 self.watcher.addPath(self.expected_folder)
+
+            # Start polling timer for reliable file detection
+            if not self.poll_timer.isActive():
+                self.poll_timer.start()
+
         self.scan_decomposition_folder()
+
+        # Load mapping from JSON for state reconstruction
+        if self.load_mapping_from_json():
+            logger.info(f"State reconstructed from JSON: mapping loaded")
+
         logger.info(f"File checking initialized for folder: {self.expected_folder}")
+
+    def skip_mapping(self):
+        """Skip the mapping step and continue without file association."""
+        if not self.resultfiles:
+            self.warn("No decomposition files found.")
+            return
+
+        logger.info("Mapping step skipped by user")
+        self.success("Mapping skipped. Continuing without file association.")
+
+        # Set mapping to empty dict to indicate skip (different from None = not configured)
+        self.decomp_mapping = {}
+
+        # Save state to JSON
+        self.save_mapping_to_json()
+
+        # Mark step as completed
+        self.complete_step()
 
     def open_mapping_dialog(self):
         """Open the mapping dialog to associate decomposition files with sources."""
@@ -169,6 +228,9 @@ class Step5_DecompositionResults(BaseStepWidget):
                 self.success(f"Mapping applied successfully: {mapped_count} file(s) mapped.")
                 logger.info(f"Decomposition mapping: {self.decomp_mapping}")
 
+                # Save state to JSON
+                self.save_mapping_to_json()
+
                 # Mark step as completed
                 self.complete_step()
             else:
@@ -178,8 +240,44 @@ class Step5_DecompositionResults(BaseStepWidget):
         """Check if this step is completed."""
         # Step is completed when:
         # 1. JSON files exist
-        # 2. Mapping has been applied
+        # 2. Mapping has been applied OR skipped (empty dict means skipped, None means not configured)
         has_json_files = any(f.endswith('.json') for f in self.resultfiles)
-        has_mapping = self.decomp_mapping is not None and len(self.decomp_mapping) > 0
+        has_mapping_or_skipped = self.decomp_mapping is not None  # Both {} (skipped) and {k:v} (mapped) are valid
 
-        return has_json_files and has_mapping
+        return has_json_files and has_mapping_or_skipped
+
+    def save_mapping_to_json(self):
+        """Save the decomposition mapping to a JSON file for state persistence."""
+        decomp_auto_folder = os.path.join(global_state.workfolder, "decomposition_auto")
+
+        # Ensure folder exists
+        if not os.path.exists(decomp_auto_folder):
+            os.makedirs(decomp_auto_folder)
+            logger.info(f"Created decomposition_auto folder: {decomp_auto_folder}")
+
+        mapping_file = os.path.join(decomp_auto_folder, "decomposition_mapping.json")
+
+        try:
+            with open(mapping_file, 'w') as f:
+                json.dump(self.decomp_mapping, f, indent=2)
+            logger.info(f"Saved decomposition mapping to {mapping_file}: {self.decomp_mapping}")
+        except Exception as e:
+            logger.error(f"Failed to save decomposition mapping: {e}")
+            self.error(f"Failed to save mapping: {e}")
+
+    def load_mapping_from_json(self):
+        """Load the decomposition mapping from JSON file for state reconstruction."""
+        decomp_auto_folder = os.path.join(global_state.workfolder, "decomposition_auto")
+        mapping_file = os.path.join(decomp_auto_folder, "decomposition_mapping.json")
+
+        if os.path.exists(mapping_file):
+            try:
+                with open(mapping_file, 'r') as f:
+                    self.decomp_mapping = json.load(f)
+                logger.info(f"Loaded decomposition mapping from {mapping_file}: {self.decomp_mapping}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to load decomposition mapping: {e}")
+                return False
+
+        return False

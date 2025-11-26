@@ -44,10 +44,14 @@ class JSONConversionWorker(QThread):
                     self.progress.emit(idx, total, f"Converting {filename}...")
 
                     # Find original JSON file
-                    # edited_mat could be: "file_muedit_edited.mat" or "Group_multigrid_muedit_edited.mat"
-                    base_name = filename.replace('_muedit_edited.mat', '').replace('_multigrid_muedit_edited.mat', '')
+                    # edited_mat is like: "file_muedit.mat_edited.mat" or "Group_multigrid_muedit.mat_edited.mat"
+                    # Remove the "_edited.mat" suffix to get the original MAT filename
+                    base_name = filename.replace('.mat_edited.mat', '')
 
-                    # Try to find corresponding JSON
+                    # Then remove the MUEdit suffixes to get the base name for JSON lookup
+                    base_name = base_name.replace('_muedit', '').replace('_multigrid_muedit', '')
+
+                    # Try to find corresponding JSON    
                     json_candidates = [
                         os.path.join(self.decomp_folder, f"{base_name}.json"),
                         # For multi-grid, we need to find the first JSON file that was in the group
@@ -190,7 +194,7 @@ class Step8_FinalResults(BaseStepWidget):
         self.scan_files()
 
         # Check if previous step is completed
-        if not self.is_previous_step_completed():
+        if not global_state.is_widget_completed(f"step{self.step_index - 1}"):
             return False
 
         return True
@@ -201,9 +205,11 @@ class Step8_FinalResults(BaseStepWidget):
             return
 
         # Find edited MUEdit files
+        # MUEdit creates files by appending "_edited.mat" to the entire filename
+        # e.g., "file_muedit.mat" -> "file_muedit.mat_edited.mat"
         self.edited_files = []
         for file in os.listdir(self.decomp_folder):
-            if file.endswith('_muedit_edited.mat') or file.endswith('_multigrid_muedit_edited.mat'):
+            if file.endswith('.mat_edited.mat'):
                 full_path = os.path.join(self.decomp_folder, file)
                 self.edited_files.append(full_path)
 
@@ -321,3 +327,17 @@ class Step8_FinalResults(BaseStepWidget):
         """Check if this step is completed."""
         # Step is completed when JSON files exist in results folder
         return len(self.exported_files) > 0
+
+    def init_file_checking(self):
+        """Initialize file checking for state reconstruction."""
+        self.decomp_folder = global_state.get_decomposition_path()
+        self.results_folder = global_state.get_decomposition_results_path()
+
+        # Create results folder if needed
+        if not os.path.exists(self.results_folder):
+            os.makedirs(self.results_folder)
+            logger.info(f"Created results folder: {self.results_folder}")
+
+        # Scan for files
+        self.scan_files()
+        logger.info(f"File checking initialized for folders: {self.decomp_folder}, {self.results_folder}")

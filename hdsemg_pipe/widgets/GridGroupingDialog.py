@@ -59,7 +59,7 @@ class GridGroup(QGroupBox):
 
         self.name_input = QLineEdit(self.group_name)
         self.name_input.setPlaceholderText("e.g., Biceps, Triceps, VL, VM...")
-        self.name_input.setStyleSheet(Styles.input())
+        self.name_input.setStyleSheet(Styles.input_field())
         self.name_input.textChanged.connect(self.on_name_changed)
         header_layout.addWidget(self.name_input, 1)
 
@@ -188,6 +188,10 @@ class GridGroupingDialog(QDialog):
         self.resize(1000, 700)
         self.init_ui()
         self.load_existing_groupings()
+
+        # Add a default group if none exist (for better UX)
+        if not self.groups:
+            self.add_group()
 
     def init_ui(self):
         """Initialize the dialog UI."""

@@ -170,6 +170,14 @@ class MainWindow(QMainWindow):
         step3.stepCompleted.connect(self.folder_content_widget.update_folder_content)
         step4.stepCompleted.connect(step5.update)
         step4.stepCompleted.connect(self.folder_content_widget.update_folder_content)
+        step5.stepCompleted.connect(step6.check)
+        step5.stepCompleted.connect(self.folder_content_widget.update_folder_content)
+        step6.stepCompleted.connect(step7.check)
+        step6.stepCompleted.connect(self.folder_content_widget.update_folder_content)
+        step7.stepCompleted.connect(step8.check)
+        step7.stepCompleted.connect(self.folder_content_widget.update_folder_content)
+        step8.stepCompleted.connect(step9.check)
+        step8.stepCompleted.connect(self.folder_content_widget.update_folder_content)
 
         # Disable all steps except the first
         for step in self.steps[1:]:
