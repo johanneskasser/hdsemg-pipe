@@ -66,8 +66,29 @@ def reconstruct_folder_state(folderpath):
     except FileNotFoundError as e:
         logger.info(f"Skipping channel selection reconstruction: {e}")
 
-    # Always initialize decomposition results
-    _decomposition_results_init()
+    # Always initialize decomposition results (Step 5)
+    try:
+        _decomposition_results_init()
+    except Exception as e:
+        logger.info(f"Skipping decomposition results reconstruction: {e}")
+
+    # Try to reconstruct multi-grid configuration (Step 6)
+    try:
+        _multigrid_config()
+    except Exception as e:
+        logger.info(f"Skipping multi-grid configuration reconstruction: {e}")
+
+    # Try to reconstruct MUEdit cleaning (Step 7)
+    try:
+        _muedit_cleaning()
+    except Exception as e:
+        logger.info(f"Skipping MUEdit cleaning reconstruction: {e}")
+
+    # Try to reconstruct final results (Step 8)
+    try:
+        _final_results()
+    except Exception as e:
+        logger.info(f"Skipping final results reconstruction: {e}")
 
     msg_box = _show_restore_success(folderpath)
     msg_box.exec_()
@@ -97,16 +118,26 @@ def _check_folder_existence(folderpath):
 def _check_pipe_folder_structure(folderpath):
     """Check if the folder structure is valid for the application."""
     logger.debug(f"Checking folder structure for: {folderpath}")
-    # Define the expected subfolders
+    # Define the expected subfolders (decomposition_results is optional for backwards compatibility)
     expected_subfolders = FolderNames.list_values()
+    optional_folders = [FolderNames.DECOMPOSITION_RESULTS.value]
 
     # Check if each expected subfolder exists
     for subfolder in expected_subfolders:
         subfolder_path = os.path.join(folderpath, subfolder)
         logger.debug(f"Checking for subfolder: {subfolder_path}")
         if not os.path.exists(subfolder_path):
-            logger.warning(f"Missing expected subfolder: {subfolder_path}")
-            raise FileNotFoundError(f"Missing expected subfolder: {subfolder_path}")
+            if subfolder in optional_folders:
+                logger.info(f"Optional subfolder not found (will be created): {subfolder_path}")
+                # Create optional folders if they don't exist
+                try:
+                    os.makedirs(subfolder_path, exist_ok=True)
+                    logger.info(f"Created optional subfolder: {subfolder_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to create optional subfolder {subfolder_path}: {e}")
+            else:
+                logger.warning(f"Missing expected subfolder: {subfolder_path}")
+                raise FileNotFoundError(f"Missing expected subfolder: {subfolder_path}")
 
     logger.info(f"Folder structure is valid for: {folderpath}")
 
@@ -248,12 +279,60 @@ def _channel_selection_files(folderpath):
     return channel_selection_file_path
 
 def _decomposition_results_init():
+    """Initialize Step 5: Decomposition Results monitoring and load mapping state."""
     decomposition_widget = global_state.get_widget("step5")
     if decomposition_widget:
         decomposition_widget.init_file_checking()
+
+        # Check if mapping was completed (JSON file exists and files present)
+        if decomposition_widget.decomp_mapping is not None and decomposition_widget.resultfiles:
+            logger.info("Step 5 state reconstructed: mapping loaded and files found")
+            decomposition_widget.complete_step()
     else:
         logger.warning("decomposition widget not found in global state.")
         raise ValueError("decomposition widget not found in global state.")
+
+def _multigrid_config():
+    """Reconstruct Step 6: Multi-Grid Configuration from JSON state."""
+    multigrid_widget = global_state.get_widget("step6")
+    if multigrid_widget:
+        multigrid_widget.init_file_checking()
+
+        # Check if step was completed (groupings JSON exists and MUEdit files present)
+        if multigrid_widget.grid_groupings is not None and multigrid_widget.is_completed():
+            logger.info("Step 6 state reconstructed: groupings loaded and MUEdit files found")
+            multigrid_widget.complete_step()
+    else:
+        logger.warning("Multi-grid configuration widget not found in global state.")
+        raise ValueError("Multi-grid configuration widget not found in global state.")
+
+def _muedit_cleaning():
+    """Reconstruct Step 7: MUEdit Cleaning state."""
+    muedit_cleaning_widget = global_state.get_widget("step7")
+    if muedit_cleaning_widget:
+        muedit_cleaning_widget.init_file_checking()
+
+        # Check if edited files exist
+        if muedit_cleaning_widget.is_completed():
+            logger.info("Step 7 state reconstructed: edited MUEdit files found")
+            muedit_cleaning_widget.complete_step()
+    else:
+        logger.warning("MUEdit cleaning widget not found in global state.")
+        raise ValueError("MUEdit cleaning widget not found in global state.")
+
+def _final_results():
+    """Reconstruct Step 8: Final Results state."""
+    final_results_widget = global_state.get_widget("step8")
+    if final_results_widget:
+        final_results_widget.init_file_checking()
+
+        # Check if cleaned JSON files exist in decomposition_results folder
+        if final_results_widget.is_completed():
+            logger.info("Step 8 state reconstructed: cleaned JSON files found in decomposition_results")
+            final_results_widget.complete_step()
+    else:
+        logger.warning("Final results widget not found in global state.")
+        raise ValueError("Final results widget not found in global state.")
 
 
 

@@ -12,6 +12,7 @@ dependencies:
   - pandas>=1.3
   - pytorch>=1.10        # "torch" on PyPI
   - requests>=2.26
+  -
 
   # make sure pip itself is present
   - pip

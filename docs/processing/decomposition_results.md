@@ -116,7 +116,7 @@ The pipeline automatically detects which format your files are in.
 If you have OpenHD-EMG JSON files:
 
 1. Click **"Export to MUEdit"** button
-2. The system converts each `.json` file to `*_muedit.mat` format
+2. The system converts each `.json` file to `*_muedit.mat` or `*_multigrid_muedit.mat` format
 3. Export progress is displayed with success/error counts
 4. Files already exported are automatically skipped
 
@@ -126,10 +126,43 @@ If you have OpenHD-EMG JSON files:
 - Discharge times are converted to 1-indexed MATLAB format
 - Grid information and metadata are preserved
 - Files are saved with MATLAB compression
+- **Multi-grid recordings**: Automatically detected and exported with proper grid metadata
 
 **Button behavior:**
-- Enabled when JSON files without corresponding `*_muedit.mat` files are detected
+- Enabled when JSON files without corresponding `*_muedit.mat` or `*_multigrid_muedit.mat` files are detected
 - Disabled when all JSON files already have MUEdit exports
+
+#### Multi-Grid Support (New in v0.1.0+)
+
+The export function now supports **multi-grid recordings** with automatic detection:
+
+**Single-Grid Export:**
+- Files with one electrode grid are exported as `filename_muedit.mat`
+- Uses traditional single-grid structure
+
+**Multi-Grid Export:**
+- Files with multiple electrode grids are automatically detected from EXTRAS field
+- Exported as `filename_multigrid_muedit.mat`
+- Includes grid-specific metadata for each electrode array:
+  - Grid names and muscle labels
+  - Inter-electrode distances (IED) per grid
+  - Channel coordinates per grid
+  - EMG channel masks per grid
+- **Enables MUEdit's cross-grid duplicate detection**: Identify and merge duplicate motor units detected by multiple grids
+
+**How Multi-Grid Detection Works:**
+1. The system reads the EXTRAS field from the decomposition JSON
+2. Extracts grid information from the grid association step
+3. Populates MUEdit structure with per-grid metadata
+4. Creates proper cell arrays for coordinates, IED, EMGmask, etc.
+
+**Benefits:**
+- Leverages MUEdit's native multi-grid capabilities
+- Enables cross-grid duplicate motor unit detection
+- Preserves spatial relationships between grids
+- More accurate decomposition results for multi-grid recordings
+
+**Note:** Currently, all motor units are assigned to the first grid in the export. Future versions will support per-grid MU assignment when decomposition algorithms provide this information.
 
 ### Stage 2: Launch MUEdit
 
@@ -302,7 +335,9 @@ The system uses several important paths:
 5. **Export Issues**
    - **"No JSON files found"**: Only `.json` files can be exported to MUEdit format
    - **"openhdemg library not available"**: Install OpenHD-EMG via Settings
-   - **Export button disabled**: All JSON files already have `*_muedit.mat` exports
+   - **Export button disabled**: All JSON files already have `*_muedit.mat` or `*_multigrid_muedit.mat` exports
+   - **Multi-grid detection issues**: Check that EXTRAS field contains proper grid metadata from grid association step
+   - **"No 'grids' list found in EXTRAS"**: The decomposition file may not have been created from a grid-associated file
 
 6. **Progress Tracking Issues**
    - **Files not detected after saving**: Check file naming contains the base filename
@@ -347,6 +382,7 @@ After completing this step:
 3. Export or save final results as needed
 
 ### Additional Resources
+- [MUEdit Export Workflow](muedit_export_workflow.md) - Detailed documentation on automatic export process
 - [MUEdit GitHub Repository](https://github.com/haripen/MUedit/tree/devHP)
 - OpenHD-EMG Documentation
 - Application logs for detailed troubleshooting

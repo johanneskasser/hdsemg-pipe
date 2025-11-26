@@ -43,12 +43,12 @@ This method uses Conda to manage the core dependencies while installing hdsemg-p
    ```bash
    wget https://raw.githubusercontent.com/johanneskasser/hdsemg-pipe/main/environment-pypi.yml
    ```
-   Or download `environment-pypi.yml` directly from the repository.
+   Or download `environment.yml` directly from the repository.
 
 2. **Create and activate Conda environment**
    ```bash
-   conda env create -f environment-pypi.yml
-   conda activate hdsemg-preprocessing
+   conda env create -f environment.yml
+   conda activate hdsemg-pipe
    ```
 
 The environment will automatically install hdsemg-pipe and all its dependencies.

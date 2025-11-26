@@ -12,3 +12,7 @@ __pycache__/
 .vscode/
 
 hdsemg_pipe/config/config.json
+/config/config.json
+uv.lock
+.python-version
+hdsemg_pipe/resources_rc.py
