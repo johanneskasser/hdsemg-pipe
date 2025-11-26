@@ -173,19 +173,23 @@ class ToastManager:
         if not self.parent_widget:
             return
 
-        # Get global position of parent widget
-        parent_global_pos = self.parent_widget.mapToGlobal(self.parent_widget.rect().topRight())
-        toast_height = 80  # Approximate height
+        try:
+            # Get global position of parent widget
+            parent_global_pos = self.parent_widget.mapToGlobal(self.parent_widget.rect().topRight())
+            toast_height = 80  # Approximate height
 
-        # Calculate vertical offset based on existing toasts
-        offset = len(self.toasts) - 1
-        y_pos = parent_global_pos.y() + Spacing.XXL + (offset * (toast_height + Spacing.MD))
+            # Calculate vertical offset based on existing toasts
+            offset = len(self.toasts) - 1
+            y_pos = parent_global_pos.y() + Spacing.XXL + (offset * (toast_height + Spacing.MD))
 
-        # Position at top-right with margin from right edge
-        toast.adjustSize()
-        x_pos = parent_global_pos.x() - toast.width() - Spacing.XXL
+            # Position at top-right with margin from right edge
+            toast.adjustSize()
+            x_pos = parent_global_pos.x() - toast.width() - Spacing.XXL
 
-        toast.move(x_pos, y_pos)
+            toast.move(x_pos, y_pos)
+        except RuntimeError:
+            # Parent widget has been deleted (app closing) - ignore
+            pass
 
     def _remove_toast(self, toast):
         """Remove toast from the list."""
@@ -201,14 +205,18 @@ class ToastManager:
         if not self.parent_widget:
             return
 
-        # Get global position of parent widget
-        parent_global_pos = self.parent_widget.mapToGlobal(self.parent_widget.rect().topRight())
-        toast_height = 80
+        try:
+            # Get global position of parent widget
+            parent_global_pos = self.parent_widget.mapToGlobal(self.parent_widget.rect().topRight())
+            toast_height = 80
 
-        y_pos = parent_global_pos.y() + Spacing.XXL + (index * (toast_height + Spacing.MD))
-        x_pos = parent_global_pos.x() - toast.width() - Spacing.XXL
+            y_pos = parent_global_pos.y() + Spacing.XXL + (index * (toast_height + Spacing.MD))
+            x_pos = parent_global_pos.x() - toast.width() - Spacing.XXL
 
-        toast.move(x_pos, y_pos)
+            toast.move(x_pos, y_pos)
+        except RuntimeError:
+            # Parent widget has been deleted (app closing) - ignore
+            pass
 
 
 # Global toast manager instance
