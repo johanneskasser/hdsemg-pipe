@@ -1,9 +1,18 @@
 [project]
 name = "hdsemg-pipe"
-version = "0.1.0"
-description = "Add your description here"
+dynamic = ["version"]
+description = "hdsemg-pipe package"
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [
+    {name = "Johannes Kasser", email = "johanneskasser@outlook.de"}
+]
+license = "MIT"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "h5py>=3.15.1",
     "hdsemg-select>=0.2.0",
@@ -19,3 +28,10 @@ dependencies = [
     "scipy>=1.7.0",
     "torch>=1.10.0",
 ]
+
+[project.scripts]
+hdsemg-pipe = "hdsemg_pipe.main:main"
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
