@@ -1,5 +1,5 @@
 """
-Step 5: Decomposition Results
+Step 6: Decomposition Results (Wizard Version)
 
 This step monitors the decomposition folder for results and allows mapping
 of decomposition files to their source channel selection files.
@@ -11,14 +11,14 @@ from PyQt5.QtWidgets import QPushButton, QLabel, QVBoxLayout, QFrame
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
-from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.MappingDialog import MappingDialog
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, Fonts
 
 
-class Step5_DecompositionResults(BaseStepWidget):
+class DecompositionResultsWizardWidget(WizardStepWidget):
     """
-    Step 5: Wait for decomposition results and apply mapping.
+    Step 6: Wait for decomposition results and apply mapping.
 
     This step:
     - Monitors the decomposition folder with FileSystemWatcher
@@ -27,8 +27,13 @@ class Step5_DecompositionResults(BaseStepWidget):
     - Completes when mapping is applied and JSON files exist
     """
 
-    def __init__(self, step_index, step_name, tooltip, parent=None):
-        super().__init__(step_index, step_name, tooltip, parent)
+    def __init__(self, parent=None):
+        # Hardcoded step configuration
+        step_index = 6
+        step_name = "Decomposition Results"
+        description = "Waiting for decomposition results. Run your decomposition algorithm and save results to the decomposition folder."
+
+        super().__init__(step_index, step_name, description, parent)
 
         self.expected_folder = None
         self.decomp_mapping = None
@@ -47,7 +52,7 @@ class Step5_DecompositionResults(BaseStepWidget):
 
         # Create status UI
         self.create_status_ui()
-        self.col_additional.addWidget(self.status_container)
+        self.content_layout.addWidget(self.status_container)
 
         # Perform initial check
         self.check()

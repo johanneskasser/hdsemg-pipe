@@ -12,7 +12,7 @@ Before you begin, make sure you have installed hdsemg-pipe and its dependencies 
 2. Configure the application settings (Settings -> Preferences):
    - Set the work folder path where your data will be processed
    - Configure the Channel Selection App path
-   - Set the OpenHD-EMG virtual environment path
+   - Set the openhdemg virtual environment path
    
 See [Application Settings](application_settings.md) for detailed configuration instructions.
 
@@ -55,7 +55,7 @@ The hdsemg-pipe application guides you through five main steps to process your H
 ### 5. Decomposition Results
 - Map decomposition results to channel selections
 - Review the mappings
-- Launch OpenHD-EMG to visualize results
+- Launch openhdemg to visualize results
 
 [Learn more about Decomposition Results](../processing/decomposition_results.md)
 

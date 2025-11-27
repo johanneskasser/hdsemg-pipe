@@ -9,15 +9,19 @@ from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_shared.fileio.file_io import EMGFile
-from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.ui_elements.theme import Styles
 
-class DefineRoiStepWidget(BaseStepWidget):
-    def __init__(self, step_index):
-        super().__init__(step_index,
-                         "Crop to Region of Interest (ROI)",
-                         "Define the region of interest for analysis.")
+
+class DefineRoiWizardWidget(WizardStepWidget):
+    def __init__(self):
+        """Wizard step for defining region of interest (ROI)."""
+        super().__init__(
+            step_index=4,
+            step_name="Crop to Region of Interest (ROI)",
+            description="Define the region of interest for analysis. You can skip this step to use the entire signal."
+        )
         self.roi_dialog = None
 
     def create_buttons(self):

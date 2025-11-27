@@ -120,7 +120,7 @@ hdsemg-pipe requires two external applications:
    - Installation: [hdsemg-select repository](https://github.com/johanneskasser/hdsemg-select.git)
    - Path configuration in settings after installation
 
-2. **OpenHD-EMG**
+2. **openhdemg**
    - Required for visualizing Decomposition results
    - Installation: [openhdemg repository](https://github.com/GiacomoValliPhD/openhdemg)
    - Path to virtual environment configuration in settings
@@ -147,7 +147,7 @@ hdsemg-pipe requires two external applications:
    - Look for compilation errors
 3. **Check external applications**
    - Test hdsemg-select App path
-   - Check OpenHD-EMG environment
+   - Check openhdemg environment
 
 ## Troubleshooting
 

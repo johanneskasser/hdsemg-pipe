@@ -53,14 +53,14 @@ def allocate_muedit_file_structure():
 
 def extract_grid_metadata_from_extras(extras_field):
     """
-    Extract grid metadata from the EXTRAS field of an OpenHD-EMG JSON file.
+    Extract grid metadata from the EXTRAS field of an openhdemg JSON file.
 
     The EXTRAS field can contain structured grid information from the grid association
     and channel selection steps. This function parses that information to extract
     grid count and per-grid metadata.
 
     Args:
-        extras_field: The EXTRAS field from OpenHD-EMG (pandas Series or DataFrame)
+        extras_field: The EXTRAS field from openhdemg (pandas Series or DataFrame)
 
     Returns:
         dict: Dictionary containing:
@@ -151,15 +151,15 @@ def extract_grid_metadata_from_extras(extras_field):
 
 def export_to_muedit_mat(json_load_filepath, ngrid=None):
     """
-    Export OpenHD-EMG JSON decomposition results to MUEdit MAT format.
+    Export openhdemg JSON decomposition results to MUEdit MAT format.
 
-    This function converts decomposition results from OpenHD-EMG JSON format into
+    This function converts decomposition results from openhdemg JSON format into
     a MATLAB .mat file that can be opened in MUEdit for manual cleaning of motor units.
     Supports both single-grid and multi-grid recordings. For multi-grid data, all grids
     are exported in a single MAT file to enable MUEdit's cross-grid duplicate detection.
 
     Args:
-        json_load_filepath (str or Path): Path to the OpenHD-EMG JSON file.
+        json_load_filepath (str or Path): Path to the openhdemg JSON file.
         ngrid (int, optional): Number of electrode grids. If None (default), the number
             of grids is auto-detected from the EXTRAS field. Explicit values override
             auto-detection.
@@ -193,7 +193,7 @@ def export_to_muedit_mat(json_load_filepath, ngrid=None):
     logger.info(f"Converting {json_path.name} to MUEdit format...")
 
     try:
-        # Load OpenHD-EMG JSON file
+        # Load openhdemg JSON file
         json_from_openhdemg = emg.emg_from_json(str(json_path))
 
         # Extract grid metadata from EXTRAS field
@@ -396,14 +396,14 @@ def get_muedit_filepath(json_filepath, multi_grid=False):
 
 def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
     """
-    Export multiple OpenHD-EMG JSON files as a single multi-grid MUEdit MAT file.
+    Export multiple openhdemg JSON files as a single multi-grid MUEdit MAT file.
 
     This function combines decomposition results from multiple grids (recorded from
     the same muscle with common motor units) into a single MUEdit MAT file. This
     enables MUEdit's cross-grid duplicate detection and common input analysis.
 
     Args:
-        json_filepaths (list): List of paths to OpenHD-EMG JSON files (one per grid)
+        json_filepaths (list): List of paths to openhdemg JSON files (one per grid)
         group_name (str): Name for this multi-grid group (used in output filename)
         output_dir (str or Path, optional): Output directory. If None, uses the
             directory of the first JSON file.
@@ -656,10 +656,10 @@ def _cell_row_read(f, ds):
 
 def apply_muedit_edits_to_json(json_in_path, mat_edited_path, json_out_path):
     """
-    Update an OpenHD-EMG JSON with MU edits made in a MUEdit-exported MAT file (v7.3/HDF5).
+    Update an openhdemg JSON with MU edits made in a MUEdit-exported MAT file (v7.3/HDF5).
 
     This function reads the edited motor unit data from a MUEdit MAT file and updates
-    the original OpenHD-EMG JSON with the cleaned results.
+    the original openhdemg JSON with the cleaned results.
 
     Fields updated in the output JSON:
       - 'IPTS': Pulse trains from signal.Pulsetrain (saved as DataFrame, shape time x nMU)
@@ -670,7 +670,7 @@ def apply_muedit_edits_to_json(json_in_path, mat_edited_path, json_out_path):
       - 'FILENAME': Path to the edited MAT file
 
     Args:
-        json_in_path (str or Path): Path to the original OpenHD-EMG JSON file
+        json_in_path (str or Path): Path to the original openhdemg JSON file
         mat_edited_path (str or Path): Path to the edited MUEdit MAT file (v7.3 format)
         json_out_path (str or Path): Path where the updated JSON should be saved
 
@@ -699,12 +699,12 @@ def apply_muedit_edits_to_json(json_in_path, mat_edited_path, json_out_path):
     mat_edited_path = Path(mat_edited_path)
     json_out_path = Path(json_out_path)
 
-    logger.info(f"Converting edited MUEdit file to OpenHD-EMG format...")
+    logger.info(f"Converting edited MUEdit file to openhdemg format...")
     logger.debug(f"Input JSON: {json_in_path.name}")
     logger.debug(f"Edited MAT: {mat_edited_path.name}")
     logger.debug(f"Output JSON: {json_out_path.name}")
 
-    # Load original OpenHD-EMG JSON
+    # Load original openhdemg JSON
     json_dict = emg.emg_from_json(str(json_in_path))
 
     # Read edited MUEdit MAT (v7.3) using h5py
@@ -754,8 +754,8 @@ def apply_muedit_edits_to_json(json_in_path, mat_edited_path, json_out_path):
     json_dict['ACCURACY'] = pd.DataFrame(np.squeeze(np.array(silval)))
     json_dict['NUMBER_OF_MUS'] = nMU
 
-    # Save updated JSON in OpenHD-EMG format
+    # Save updated JSON in openhdemg format
     emg.save_json_emgfile(json_dict, str(json_out_path), compresslevel=4)
-    logger.info(f"Successfully converted to OpenHD-EMG format: {json_out_path.name}")
+    logger.info(f"Successfully converted to openhdemg format: {json_out_path.name}")
 
     return str(json_out_path)

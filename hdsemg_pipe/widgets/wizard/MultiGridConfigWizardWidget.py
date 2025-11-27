@@ -1,5 +1,5 @@
 """
-Step 6: Multi-Grid Configuration
+Step 7: Multi-Grid Configuration (Wizard Version)
 
 This step allows configuration of multi-grid groups and exports
 decomposition results to MUEdit format.
@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import QPushButton, QLabel, QVBoxLayout, QFrame, QProgressB
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
-from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.GridGroupingDialog import GridGroupingDialog
 from hdsemg_pipe.actions.decomposition_export import (
     export_to_muedit_mat, export_multi_grid_to_muedit, is_muedit_file_exists
@@ -113,9 +113,9 @@ class MUEditExportWorker(QThread):
             self.error.emit(f"Export worker failed: {str(e)}")
 
 
-class Step6_MultiGridConfig(BaseStepWidget):
+class MultiGridConfigWizardWidget(WizardStepWidget):
     """
-    Step 6: Configure multi-grid groups and export to MUEdit.
+    Step 7: Configure multi-grid groups and export to MUEdit.
 
     This step:
     - Shows all JSON decomposition files
@@ -124,8 +124,13 @@ class Step6_MultiGridConfig(BaseStepWidget):
     - Completes when all exports are done
     """
 
-    def __init__(self, step_index, step_name, tooltip, parent=None):
-        super().__init__(step_index, step_name, tooltip, parent)
+    def __init__(self, parent=None):
+        # Hardcoded step configuration
+        step_index = 7
+        step_name = "Multi-Grid Configuration"
+        description = "Configure multi-grid groups for MUEdit's duplicate detection (optional). Export files to MUEdit format."
+
+        super().__init__(step_index, step_name, description, parent)
 
         self.expected_folder = None
         self.json_files = []
@@ -134,7 +139,7 @@ class Step6_MultiGridConfig(BaseStepWidget):
 
         # Create status UI
         self.create_status_ui()
-        self.col_additional.addWidget(self.status_container)
+        self.content_layout.addWidget(self.status_container)
 
         # Perform initial check
         self.check()

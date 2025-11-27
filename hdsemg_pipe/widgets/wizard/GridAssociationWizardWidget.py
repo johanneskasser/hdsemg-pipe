@@ -1,11 +1,11 @@
 import os
 
-from PyQt5.QtWidgets import QPushButton, QDialog, QLabel
+from PyQt5.QtWidgets import QPushButton, QDialog
 
 from hdsemg_pipe.actions.file_utils import copy_files
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.state.global_state import global_state
-from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.actions.grid_associations import AssociationDialog
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe._log.log_config import logger
@@ -13,51 +13,38 @@ from hdsemg_pipe.ui_elements.theme import Styles
 
 
 def check_target_directory():
-    """
-    Check if the target directory for associated grids exists and is not empty.
-
-    Returns:
-        bool: True if the directory exists and contains files, False otherwise.
-    """
+    """Check if the target directory for associated grids exists and is not empty."""
     dest_folder = global_state.get_associated_grids_path()
     return os.path.isdir(dest_folder) and any(os.listdir(dest_folder))
 
 
-class GridAssociationWidget(BaseStepWidget):
-    """
-    Widget for managing grid associations in the application.
+class GridAssociationWizardWidget(WizardStepWidget):
+    """Wizard widget for managing grid associations."""
 
-    Attributes:
-        info_label (QLabel): Label displaying information to the user.
-    """
-
-    def __init__(self, step_index):
-        """
-        Initialize the GridAssociationWidget.
-
-        Args:
-            step_index (int): The index of the step in the workflow.
-        """
-        super().__init__(step_index, "Grid Association", "Create Grid Associations from the current File Pool.")
+    def __init__(self, parent=None):
+        super().__init__(
+            step_index=2,
+            step_name="Grid Association",
+            description="Create grid associations from the current file pool. You can skip this step if your files don't require grid associations.",
+            parent=parent
+        )
 
     def create_buttons(self):
-        """
-        Create the buttons for the grid association step.
-        """
+        """Create the buttons for the grid association step."""
         btn_skip = QPushButton("Skip")
         btn_skip.setStyleSheet(Styles.button_secondary())
+        btn_skip.setToolTip("Skip grid associations and copy files directly")
         btn_skip.clicked.connect(self.skip_step)
         self.buttons.append(btn_skip)
 
-        btn_associate = QPushButton("Start")
+        btn_associate = QPushButton("Start Association")
         btn_associate.setStyleSheet(Styles.button_primary())
+        btn_associate.setToolTip("Open grid association dialog")
         btn_associate.clicked.connect(self.start_association)
         self.buttons.append(btn_associate)
 
     def skip_step(self):
-        """
-        Skip the grid association step by copying files to the destination folder.
-        """
+        """Skip the grid association step by copying files to the destination folder."""
         dest_folder = global_state.get_associated_grids_path()
         files = global_state.get_original_files()
         try:
@@ -70,9 +57,7 @@ class GridAssociationWidget(BaseStepWidget):
             return
 
     def start_association(self):
-        """
-        Start the grid association process by opening the AssociationDialog.
-        """
+        """Start the grid association process by opening the AssociationDialog."""
         files = global_state.get_original_files()
         dialog = AssociationDialog(files)
         if dialog.exec_() == QDialog.Accepted:
@@ -85,11 +70,7 @@ class GridAssociationWidget(BaseStepWidget):
             self.error("Failed to complete step. Please consult logs for further information.")
 
     def check(self):
-        """
-        Check if the workfolder basepath is set in the configuration.
-
-        If the basepath is not set, disable the action buttons and show a warning.
-        """
+        """Check if the workfolder basepath is set in the configuration."""
         if config.get(Settings.WORKFOLDER_PATH) is None:
             self.warn("Workfolder Basepath is not set. Please set it in the Settings first to enable this step.")
             self.setActionButtonsEnabled(False)

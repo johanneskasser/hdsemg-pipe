@@ -164,10 +164,10 @@ def build_extras(channelselectionpath):
 
 def load_openhdemg_json(json_file):
     """
-    Loads an OpenHD-EMG JSON file and converts necessary fields to their correct data formats.
+    Loads an openhdemg JSON file and converts necessary fields to their correct data formats.
     And decompresses the file using gzip.
 
-    :param json_file: Path to the OpenHD-EMG JSON file
+    :param json_file: Path to the openhdemg JSON file
     :return: Dictionary containing the decomposed HD-EMG data
     :raises FileNotFoundError: If the JSON file does not exist
     """

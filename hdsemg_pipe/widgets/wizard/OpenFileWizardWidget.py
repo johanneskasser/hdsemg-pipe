@@ -1,17 +1,26 @@
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QPushButton, QVBoxLayout, QMessageBox
+from PyQt5.QtWidgets import QPushButton, QMessageBox
 
 from hdsemg_pipe.actions.openfile import open_file_or_folder
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
-from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.ui_elements.theme import Styles
-
 from hdsemg_pipe._log.log_config import logger
 
 
-class OpenFileStepWidget(BaseStepWidget):
+class OpenFileWizardWidget(WizardStepWidget):
+    """Wizard-style widget for opening files or folders."""
+
     fileSelected = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(
+            step_index=1,
+            step_name="Open File(s)",
+            description="Select the file containing your data. You can select a single file or a folder containing multiple files.",
+            parent=parent
+        )
 
     def create_buttons(self):
         """Create buttons for opening a file or folder."""
@@ -27,22 +36,21 @@ class OpenFileStepWidget(BaseStepWidget):
         btn_open_folder.clicked.connect(lambda: self.select_file_or_folder("folder"))
         self.buttons.append(btn_open_folder)
 
-
     def select_file_or_folder(self, mode):
-        """Datei oder Ordner auswählen und global speichern."""
+        """Select file or folder and save globally."""
         try:
             selected_path = open_file_or_folder(mode)
             if not selected_path:
-                return  # Nutzer hat Abbrechen gedrückt
-            self.complete_step()  # Schritt als abgeschlossen markieren
+                return  # User pressed cancel
+            self.complete_step()  # Mark step as completed
             self.fileSelected.emit(selected_path)
         except Exception as e:
             logger.error(f"Error selecting file or folder: {str(e)}", exc_info=True)
             error_message = f"Error selecting file or folder:\n{str(e)}"
             QMessageBox.warning(self, "Error", error_message)
 
-
     def check(self):
+        """Check if workfolder path is set."""
         if config.get(Settings.WORKFOLDER_PATH) is None:
             self.warn("Workfolder path is not set. Please set it in settings first.")
             self.setActionButtonsEnabled(enabled=False, override=True)

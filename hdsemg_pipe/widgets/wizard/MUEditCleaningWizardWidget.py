@@ -1,5 +1,5 @@
 """
-Step 7: MUEdit Manual Cleaning
+Step 8: MUEdit Manual Cleaning (Wizard Version)
 
 This step launches MUEdit for manual cleaning of decomposition results
 and monitors progress.
@@ -14,16 +14,16 @@ from PyQt5.QtWidgets import (
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
-from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.MUEditInstructionDialog import MUEditInstructionDialog
 from hdsemg_pipe.config.config_enums import Settings, MUEditLaunchMethod
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius, Fonts
 
 
-class Step7_MUEditCleaning(BaseStepWidget):
+class MUEditCleaningWizardWidget(WizardStepWidget):
     """
-    Step 7: Manual cleaning with MUEdit.
+    Step 8: Manual cleaning with MUEdit.
 
     This step:
     - Launches MUEdit for manual cleaning
@@ -33,8 +33,13 @@ class Step7_MUEditCleaning(BaseStepWidget):
     - Completes when all files are edited
     """
 
-    def __init__(self, step_index, step_name, tooltip, parent=None):
-        super().__init__(step_index, step_name, tooltip, parent)
+    def __init__(self, parent=None):
+        # Hardcoded step configuration
+        step_index = 8
+        step_name = "MUEdit Manual Cleaning"
+        description = "Launch MUEdit for manual cleaning and quality control of motor unit decomposition results."
+
+        super().__init__(step_index, step_name, description, parent)
 
         self.expected_folder = None
         self.muedit_files = []
@@ -52,7 +57,7 @@ class Step7_MUEditCleaning(BaseStepWidget):
 
         # Create status UI
         self.create_status_ui()
-        self.col_additional.addWidget(self.status_container)
+        self.content_layout.addWidget(self.status_container)
 
         # Perform initial check
         self.check()

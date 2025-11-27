@@ -8,21 +8,21 @@ This step provides three main workflows:
 
 1. **File Mapping**: Associate decomposition results with their source channel selection files
 2. **Manual Cleaning**: Export results to MUEdit format for manual inspection and editing
-3. **Visualization**: View processed results in OpenHD-EMG
+3. **Visualization**: View processed results in openhdemg
 
 ## Interface Components
 
 ### Main Buttons
 
 - **Apply Mapping**: Opens a dialog to create mappings between decomposition and channel selection files
-- **Export to MUEdit**: Converts OpenHD-EMG JSON files to MUEdit MAT format
+- **Export to MUEdit**: Converts openhdemg JSON files to MUEdit MAT format
 - **Open MUEdit**: Launches MUEdit for manual cleaning of decomposition results
-- **Show Decomposition Results**: Launches OpenHD-EMG to visualize the processed results
+- **Show Decomposition Results**: Launches openhdemg to visualize the processed results
 
 ### File Watcher
 
 The system automatically monitors the decomposition folder for:
-- `.json` files (OpenHD-EMG decomposition results)
+- `.json` files (openhdemg decomposition results)
 - `.pkl` files (pickle format decomposition results)
 - `*_muedit.mat` files (exported for manual cleaning)
 - Edited result files (saved from MUEdit)
@@ -96,7 +96,7 @@ The application provides integrated support for manual quality control of decomp
 
 The manual cleaning workflow consists of three stages:
 
-1. **Export**: Convert OpenHD-EMG JSON files to MUEdit MAT format
+1. **Export**: Convert openhdemg JSON files to MUEdit MAT format
 2. **Edit**: Manually inspect and clean results in MUEdit
 3. **Track**: Monitor progress as files are processed
 
@@ -106,14 +106,14 @@ The manual cleaning workflow consists of three stages:
 
 The application expects decomposition results in one of the following formats:
 
-- **OpenHD-EMG JSON format** (`.json`): Standard output from OpenHD-EMG decomposition
+- **openhdemg JSON format** (`.json`): Standard output from openhdemg decomposition
 - **MUEdit MAT format** (`*_muedit.mat`): Ready for loading into MUEdit
 
 The pipeline automatically detects which format your files are in.
 
 #### Exporting JSON Files
 
-If you have OpenHD-EMG JSON files:
+If you have openhdemg JSON files:
 
 1. Click **"Export to MUEdit"** button
 2. The system converts each `.json` file to `*_muedit.mat` or `*_multigrid_muedit.mat` format
@@ -248,17 +248,17 @@ When all files are cleaned:
 
 ## Result Visualization
 
-### OpenHD-EMG Integration
+### openhdemg Integration
 
 To view results:
 1. Click "Show Decomposition Results"
-2. The system launches OpenHD-EMG application
+2. The system launches openhdemg application
 3. Results are automatically loaded
 4. The button shows a loading animation during startup
 
 ### Requirements
 
-- OpenHD-EMG virtual environment must be configured in Settings
+- openhdemg virtual environment must be configured in Settings
 - The path must be valid and accessible
 - Python environment must include required dependencies
 
@@ -268,7 +268,7 @@ To view results:
 
 In the application settings:
 ```
-Settings > OpenHD-EMG Virtual Environment Path
+Settings > openhdemg Virtual Environment Path
 ```
 
 ### File Paths
@@ -276,14 +276,14 @@ Settings > OpenHD-EMG Virtual Environment Path
 The system uses several important paths:
 - Decomposition results folder
 - Channel selection folder
-- OpenHD-EMG virtual environment
+- openhdemg virtual environment
 
 ## Best Practices
 
 1. **Before Processing**
    - Ensure all decomposition results are available
    - Verify channel selection files are in place
-   - Check OpenHD-EMG configuration
+   - Check openhdemg configuration
    - Configure MUEdit settings if planning manual workflow
 
 2. **During Mapping**
@@ -301,7 +301,7 @@ The system uses several important paths:
 
 4. **Viewing Results**
    - Wait for processing to complete
-   - Ensure OpenHD-EMG launches successfully
+   - Ensure openhdemg launches successfully
    - Check for any error messages
 
 ## Troubleshooting
@@ -313,7 +313,7 @@ The system uses several important paths:
    - Check channel selection files are available
    - Ensure file permissions are correct
 
-2. **OpenHD-EMG Issues**
+2. **openhdemg Issues**
    - Verify virtual environment path
    - Check Python dependencies
    - Monitor application logs
@@ -334,7 +334,7 @@ The system uses several important paths:
 
 5. **Export Issues**
    - **"No JSON files found"**: Only `.json` files can be exported to MUEdit format
-   - **"openhdemg library not available"**: Install OpenHD-EMG via Settings
+   - **"openhdemg library not available"**: Install openhdemg via Settings
    - **Export button disabled**: All JSON files already have `*_muedit.mat` or `*_multigrid_muedit.mat` exports
    - **Multi-grid detection issues**: Check that EXTRAS field contains proper grid metadata from grid association step
    - **"No 'grids' list found in EXTRAS"**: The decomposition file may not have been created from a grid-associated file
@@ -348,7 +348,7 @@ The system uses several important paths:
 
 Common error messages and solutions:
 
-- "OpenHD-EMG virtual environment path is not set"
+- "openhdemg virtual environment path is not set"
   - Configure the path in Settings
   - Verify the environment exists
 
@@ -374,15 +374,15 @@ After completing this step:
 1. Verify all files are exported to MUEdit format
 2. Complete manual cleaning of all files in MUEdit
 3. Confirm all files show ✅ status in the progress dialog
-4. View cleaned results in OpenHD-EMG
+4. View cleaned results in openhdemg
 
 ### If Using Direct Visualization:
 1. Verify all mappings are processed
-2. Check results in OpenHD-EMG
+2. Check results in openhdemg
 3. Export or save final results as needed
 
 ### Additional Resources
 - [MUEdit Export Workflow](muedit_export_workflow.md) - Detailed documentation on automatic export process
 - [MUEdit GitHub Repository](https://github.com/haripen/MUedit/tree/devHP)
-- OpenHD-EMG Documentation
+- openhdemg Documentation
 - Application logs for detailed troubleshooting

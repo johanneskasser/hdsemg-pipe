@@ -13,33 +13,31 @@ from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.loadingbutton import LoadingButton
-from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.LineNoiseInfoDialog import LineNoiseInfoDialog
 from hdsemg_pipe.ui_elements.theme import Styles
 
 
-class LineNoiseRemovalStepWidget(BaseStepWidget):
-    def __init__(self, step_index):
-        """Step for removing line noise from HD-sEMG data."""
-        super().__init__(step_index, "Line Noise Removal", "Remove power line noise (50/60 Hz) from EMG signals.")
+class LineNoiseRemovalWizardWidget(WizardStepWidget):
+    def __init__(self):
+        """Wizard step for removing line noise from HD-sEMG data."""
+        super().__init__(
+            step_index=3,
+            step_name="Line Noise Removal",
+            description="Remove power line noise (50/60 Hz) from EMG signals. You can skip this step if your data is already clean."
+        )
         self.processed_files = 0
         self.total_files = 0
         self.current_worker = None
 
-        # Setup additional info area with method display and progress
-        self.setup_additional_info()
+        # Add method display and progress to content area
+        self.setup_method_and_progress()
 
         # Update initial display
         self.update_method_display()
 
-    def setup_additional_info(self):
-        """Setup the additional information area with method and progress display."""
-        # Clear the default layout
-        while self.col_additional.count():
-            child = self.col_additional.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
+    def setup_method_and_progress(self):
+        """Setup the method and progress display in the content area."""
         # Create a vertical layout for method and progress info
         info_layout = QVBoxLayout()
         info_layout.setContentsMargins(0, 0, 0, 0)
@@ -74,8 +72,8 @@ class LineNoiseRemovalStepWidget(BaseStepWidget):
 
         info_layout.addLayout(progress_container)
 
-        # Add to the column
-        self.col_additional.addLayout(info_layout)
+        # Add to the content layout (instead of col_additional)
+        self.content_layout.addLayout(info_layout)
 
     def create_buttons(self):
         """Creates the buttons for line noise removal."""

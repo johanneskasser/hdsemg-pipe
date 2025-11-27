@@ -1,10 +1,10 @@
 # MUEdit Export Workflow
 
-The MUEdit Export Workflow provides an automated pipeline for converting manually cleaned motor unit decomposition results back to OpenHD-EMG JSON format for final analysis and visualization.
+The MUEdit Export Workflow provides an automated pipeline for converting manually cleaned motor unit decomposition results back to openhdemg JSON format for final analysis and visualization.
 
 ## Overview
 
-After manually cleaning decomposition results in MUEdit, the application automatically exports the edited files to a standardized OpenHD-EMG JSON format in the `decomposition_results/` folder.
+After manually cleaning decomposition results in MUEdit, the application automatically exports the edited files to a standardized openhdemg JSON format in the `decomposition_results/` folder.
 
 **Workflow Summary:**
 ```
@@ -16,13 +16,13 @@ Original JSON → MUEdit MAT → Manual Cleaning → Edited MAT → Auto-Export 
 The export workflow uses the following folders:
 
 - **`decomposition_auto/`** - Contains original decomposition results and MUEdit files
-  - `*.json` - Original OpenHD-EMG decomposition results
+  - `*.json` - Original openhdemg decomposition results
   - `*_muedit.mat` - Files exported for manual cleaning in MUEdit
   - `*_edited.mat` (or similar) - Files saved after manual cleaning
 
 - **`decomposition_results/`** - Contains final cleaned results (**NEW**)
-  - `*.json` - Cleaned decomposition results in OpenHD-EMG format
-  - Ready for visualization in OpenHD-EMG
+  - `*.json` - Cleaned decomposition results in openhdemg format
+  - Ready for visualization in openhdemg
   - Used by "Show Decomposition Results" button
 
 ## Automatic Export Process
@@ -126,9 +126,9 @@ with h5py.File(mat_edited_path, 'r') as f:
 - Converts to Python lists/arrays
 
 **Output Format:**
-- OpenHD-EMG JSON format
+- openhdemg JSON format
 - Compression level: 4
-- Compatible with OpenHD-EMG GUI
+- Compatible with openhdemg GUI
 - Preserves all original metadata
 
 ## Auto-Delete Synchronization
@@ -172,7 +172,7 @@ The UI tracks files through three stages:
    - File: `*_edited.mat` (or similar) exists
    - Ready for export
 
-3. **📦 Exported** - Converted to OpenHD-EMG format
+3. **📦 Exported** - Converted to openhdemg format
    - File: `*.json` exists in `decomposition_results/`
    - Ready for visualization
 
@@ -211,8 +211,8 @@ The "Show Decomposition Results" button is dynamically enabled based on exported
 
 **Enabled (After Export):**
 - At least one file exported successfully
-- Opens OpenHD-EMG with cleaned results
-- Tooltip: "Open OpenHD-EMG to view cleaned decomposition results from decomposition_results folder"
+- Opens openhdemg with cleaned results
+- Tooltip: "Open openhdemg to view cleaned decomposition results from decomposition_results folder"
 
 ### Button Logic
 
@@ -231,7 +231,7 @@ if len(self.exported_files) == 0:
 - Button disabled if all exported files are deleted
 - No manual refresh needed
 
-### OpenHD-EMG Launch
+### openhdemg Launch
 
 When the button is clicked:
 
@@ -247,7 +247,7 @@ When the button is clicked:
 
 3. **Loading State:**
    - Button shows loading animation
-   - Callback stops loading when OpenHD-EMG starts
+   - Callback stops loading when openhdemg starts
 
 ## Error Handling
 
@@ -378,7 +378,7 @@ if self.export_worker and self.export_worker.isRunning():
 
 1. **Verify exports** before deleting edited MAT files
 2. **Check progress UI** shows all files as 📦 exported
-3. **Use "Show Results" button** to validate in OpenHD-EMG
+3. **Use "Show Results" button** to validate in openhdemg
 4. **Keep original JSON files** in `decomposition_auto/` (required for re-export)
 
 ### Troubleshooting
@@ -428,7 +428,7 @@ if self.export_worker and self.export_worker.isRunning():
 
 5. View results
    → Click "Show Decomposition Results"
-   → OpenHD-EMG opens with decomposition_results/ folder
+   → openhdemg opens with decomposition_results/ folder
    → Load rec1.json for analysis
    → Workflow complete!
 ```
@@ -447,7 +447,7 @@ if self.export_worker and self.export_worker.isRunning():
 ### Dependencies
 
 - **h5py** - Reading MATLAB v7.3 (HDF5) files
-- **openhdemg** - OpenHD-EMG library for JSON format
+- **openhdemg** - openhdemg library for JSON format
 - **numpy** - Array operations
 - **pandas** - DataFrame handling
 
@@ -455,7 +455,7 @@ if self.export_worker and self.export_worker.isRunning():
 
 No additional configuration required. The workflow uses existing settings:
 
-- `OPENHDEMG_INSTALLED` - Checks if OpenHD-EMG available
+- `OPENHDEMG_INSTALLED` - Checks if openhdemg available
 - `MUEDIT_PATH` - MUEdit installation path (for manual cleaning)
 - `WORKFOLDER_PATH` - Project workfolder
 
@@ -463,4 +463,4 @@ No additional configuration required. The workflow uses existing settings:
 
 - [Decomposition Results](decomposition_results.md) - Overview of decomposition results step
 - [MUEdit Manual Cleaning](decomposition_results.md#manual-cleaning-workflow-muedit) - Manual cleaning workflow
-- [OpenHD-EMG Integration](decomposition_results.md#result-visualization) - Visualization in OpenHD-EMG
+- [openhdemg Integration](decomposition_results.md#result-visualization) - Visualization in openhdemg

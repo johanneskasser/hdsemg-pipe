@@ -6,14 +6,18 @@ from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.loadingbutton import LoadingButton
-from hdsemg_pipe.widgets.BaseStepWidget import BaseStepWidget
+from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.ui_elements.theme import Styles
 
 
-class ChannelSelectionStepWidget(BaseStepWidget):
-    def __init__(self, step_index):
-        """Step 2: Channel selection from the loaded .mat files."""
-        super().__init__(step_index, "Channel Selection", "Select the channels to be processed.")
+class ChannelSelectionWizardWidget(WizardStepWidget):
+    def __init__(self):
+        """Step 5: Channel selection from the loaded .mat files."""
+        super().__init__(
+            step_index=5,
+            step_name="Channel Selection",
+            description="Select the channels to be processed using the hdsemg-select tool."
+        )
         self.processed_files = 0
         self.total_files = 0
         self.additional_information_label.setText("0/0")
@@ -24,7 +28,6 @@ class ChannelSelectionStepWidget(BaseStepWidget):
         self.btn_select_channels.setStyleSheet(Styles.button_primary())
         self.btn_select_channels.clicked.connect(self.start_processing)
         self.buttons.append(self.btn_select_channels)
-        self.main_layout.addWidget(self.btn_select_channels)
 
     def start_processing(self):
         """Starts file processing and updates progress dynamically."""

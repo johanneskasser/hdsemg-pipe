@@ -52,4 +52,4 @@ In order to install hdsemg-pipe, follow the instructions in the [installation gu
 - 📁 File management and preprocessing
 - 🔗 Grid association and ROI definition
 - 🎚️ Channel selection and decomposition result visualization
-- ⚡️ Integration with external tools like OpenHD-EMG
+- ⚡️ Integration with external tools like openhdemg

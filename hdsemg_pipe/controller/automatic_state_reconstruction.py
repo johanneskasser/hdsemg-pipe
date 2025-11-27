@@ -93,7 +93,20 @@ def reconstruct_folder_state(folderpath):
     msg_box = _show_restore_success(folderpath)
     msg_box.exec_()
     folder_content_widget.update_folder_content()
-    return
+
+    # Navigate wizard to the last completed step + 1 (or last step if all complete)
+    last_completed_step = _get_last_completed_step()
+    logger.info(f"Last completed step: {last_completed_step}")
+
+    return last_completed_step
+
+
+def _get_last_completed_step():
+    """Get the index of the last completed step."""
+    for step_index in range(8, -1, -1):  # Check from step 8 down to 0
+        if global_state.is_widget_completed(f"step{step_index}"):
+            return step_index
+    return 0  # No steps completed, return first step
 
 
 def _show_restore_success(folderpath):
