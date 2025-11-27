@@ -1,0 +1,2315 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Python application for cleaning and preparing high-density surface electromyography (HDsEMG) data.">
+      
+      
+        <meta name="author" content="Johannes Kasser">
+      
+      
+        <link rel="canonical" href="https://johanneskasser.github.io/hdsemg-pipe/0.2.0/processing/muedit_export_workflow/">
+      
+      
+        <link rel="prev" href="../decomposition_results/">
+      
+      
+        <link rel="next" href="../../developer/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+    
+    
+      
+        <title>MUEdit Export Workflow - hdsemg-pipe</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.618322db.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#muedit-export-workflow" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="hdsemg-pipe" class="md-header__button md-logo" aria-label="hdsemg-pipe" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            hdsemg-pipe
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              MUEdit Export Workflow
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/johanneskasser/hdsemg-pipe" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    hdsemg-pipe
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="hdsemg-pipe" class="md-nav__button md-logo" aria-label="hdsemg-pipe" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    hdsemg-pipe
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/johanneskasser/hdsemg-pipe" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    hdsemg-pipe
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    General Documentation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    General Documentation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../general/getting_started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../general/dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../general/application_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Application Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Processing Steps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Processing Steps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../opening_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Opening Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grid_association/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Grid Association
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../line_noise_removal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Line Noise Removal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../crop_to_roi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Crop to Region of Interest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channel_selection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channel Selection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../decomposition_results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decomposition Results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MUEdit Export Workflow
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MUEdit Export Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#folder-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Folder Structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-export-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic Export Process
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic Export Process">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#trigger-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trigger Conditions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#export-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-naming-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Naming Convention
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export Implementation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Export Implementation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Conversion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#technical-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Technical Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-delete-synchronization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Delete Synchronization
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Auto-Delete Synchronization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#delete-sync-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delete Sync Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benefits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benefits
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#progress-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Progress Tracking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Progress Tracking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-stage-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three-Stage Status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#progress-bar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Progress Bar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-status-display" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Status Display
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#show-decomposition-results-button" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Show Decomposition Results Button
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Show Decomposition Results Button">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#button-states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Button States
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#button-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Button Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openhdemg-launch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        openhdemg Launch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Error Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#export-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export Errors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-error-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Error Messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#state-reconstruction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Reconstruction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="State Reconstruction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#folder-creation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Folder Creation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance Considerations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Performance Considerations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#background-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Background Processing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-watching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Watching
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Best Practices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#during-manual-cleaning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        During Manual Cleaning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#after-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        After Export
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Example Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#complete-export-workflow-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Complete Export Workflow Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#technical-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Technical Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Technical Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#files-modified" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files Modified
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#folder-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Folder Structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-export-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic Export Process
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic Export Process">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#trigger-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trigger Conditions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#export-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-naming-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Naming Convention
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export Implementation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Export Implementation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Conversion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#technical-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Technical Details
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-delete-synchronization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Delete Synchronization
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Auto-Delete Synchronization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#delete-sync-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delete Sync Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#benefits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benefits
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#progress-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Progress Tracking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Progress Tracking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-stage-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three-Stage Status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#progress-bar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Progress Bar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-status-display" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Status Display
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#show-decomposition-results-button" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Show Decomposition Results Button
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Show Decomposition Results Button">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#button-states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Button States
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#button-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Button Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openhdemg-launch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        openhdemg Launch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Error Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#export-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export Errors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-error-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Error Messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#state-reconstruction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Reconstruction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="State Reconstruction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#folder-creation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Folder Creation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance Considerations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Performance Considerations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#background-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Background Processing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-watching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Watching
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Best Practices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#during-manual-cleaning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        During Manual Cleaning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#after-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        After Export
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Example Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#complete-export-workflow-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Complete Export Workflow Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#technical-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Technical Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Technical Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#files-modified" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files Modified
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="muedit-export-workflow">MUEdit Export Workflow<a class="headerlink" href="#muedit-export-workflow" title="Permanent link">&para;</a></h1>
+<p>The MUEdit Export Workflow provides an automated pipeline for converting manually cleaned motor unit decomposition results back to openhdemg JSON format for final analysis and visualization.</p>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>After manually cleaning decomposition results in MUEdit, the application automatically exports the edited files to a standardized openhdemg JSON format in the <code>decomposition_results/</code> folder.</p>
+<p><strong>Workflow Summary:</strong></p>
+<div class="codehilite"><pre><span></span><code>Original JSON → MUEdit MAT → Manual Cleaning → Edited MAT → Auto-Export → Cleaned JSON
+</code></pre></div>
+
+<h2 id="folder-structure">Folder Structure<a class="headerlink" href="#folder-structure" title="Permanent link">&para;</a></h2>
+<p>The export workflow uses the following folders:</p>
+<ul>
+<li><strong><code>decomposition_auto/</code></strong> - Contains original decomposition results and MUEdit files</li>
+<li><code>*.json</code> - Original openhdemg decomposition results</li>
+<li><code>*_muedit.mat</code> - Files exported for manual cleaning in MUEdit</li>
+<li>
+<p><code>*_edited.mat</code> (or similar) - Files saved after manual cleaning</p>
+</li>
+<li>
+<p><strong><code>decomposition_results/</code></strong> - Contains final cleaned results (<strong>NEW</strong>)</p>
+</li>
+<li><code>*.json</code> - Cleaned decomposition results in openhdemg format</li>
+<li>Ready for visualization in openhdemg</li>
+<li>Used by "Show Decomposition Results" button</li>
+</ul>
+<h2 id="automatic-export-process">Automatic Export Process<a class="headerlink" href="#automatic-export-process" title="Permanent link">&para;</a></h2>
+<h3 id="trigger-conditions">Trigger Conditions<a class="headerlink" href="#trigger-conditions" title="Permanent link">&para;</a></h3>
+<p>The export process is triggered automatically when:</p>
+<ol>
+<li>An edited MUEdit file is detected in <code>decomposition_auto/</code></li>
+<li>The file watcher detects changes every 2 seconds</li>
+<li>The file has not already been exported</li>
+</ol>
+<h3 id="export-logic">Export Logic<a class="headerlink" href="#export-logic" title="Permanent link">&para;</a></h3>
+<p><strong>File Detection:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Checks for edited files</span>
+<span class="k">for</span> <span class="n">base_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">muedit_files</span><span class="p">:</span>
+    <span class="c1"># Find original JSON</span>
+    <span class="c1"># Find edited MAT file (flexible naming)</span>
+    <span class="c1"># Create export task</span>
+</code></pre></div>
+
+<p><strong>Export Execution:</strong>
+- Runs in background thread (<code>MUEditExportWorker</code>)
+- Does not block the UI
+- Processes multiple files sequentially
+- Emits progress signals for UI updates</p>
+<h3 id="file-naming-convention">File Naming Convention<a class="headerlink" href="#file-naming-convention" title="Permanent link">&para;</a></h3>
+<p>The export process uses flexible file naming to detect edited files:</p>
+<p><strong>Input Files:</strong>
+- Original: <code>filename.json</code> (in <code>decomposition_auto/</code>)
+- MUEdit export: <code>filename_muedit.mat</code> (in <code>decomposition_auto/</code>)
+- Edited: <code>filename_*.mat</code> (in <code>decomposition_auto/</code>, any .mat file containing base name)</p>
+<p><strong>Output File:</strong>
+- Exported: <code>filename.json</code> (in <code>decomposition_results/</code>)</p>
+<p><strong>Example:</strong></p>
+<div class="codehilite"><pre><span></span><code>decomposition_auto/
+├── recording1.json                    (original)
+├── recording1_muedit.mat              (for editing)
+└── recording1_edited.mat              (after manual cleaning)
+    ↓ Auto-Export
+decomposition_results/
+└── recording1.json                    (cleaned, ready for analysis)
+</code></pre></div>
+
+<h2 id="export-implementation">Export Implementation<a class="headerlink" href="#export-implementation" title="Permanent link">&para;</a></h2>
+<h3 id="data-conversion">Data Conversion<a class="headerlink" href="#data-conversion" title="Permanent link">&para;</a></h3>
+<p>The export function <code>apply_muedit_edits_to_json()</code> performs the following conversions:</p>
+<p><strong>1. Pulse Trains (IPTS)</strong>
+- Extracted from <code>edition.Pulsetrainclean</code> in edited MAT file
+- Converted to pandas DataFrame (time × nMU)
+- Normalized values preserved</p>
+<p><strong>2. Discharge Times (MUPULSES)</strong>
+- Extracted from <code>edition.Distimeclean</code> (nested cell array)
+- Converted from 1-based (MATLAB) to 0-based (Python) indexing
+- Stored as list of numpy int32 arrays</p>
+<p><strong>3. Binary Firing Matrix</strong>
+- Generated from MUPULSES
+- Shape: (n_samples × nMU)
+- Binary values: 1 = spike, 0 = no spike</p>
+<p><strong>4. Accuracy (SIL Values)</strong>
+- Extracted from <code>edition.silval</code>
+- Stored as pandas DataFrame
+- Represents signal-to-interference-level for each motor unit</p>
+<p><strong>5. Metadata</strong>
+- <code>FILENAME</code>: Path to edited MAT file
+- <code>NUMBER_OF_MUS</code>: Number of motor units
+- All other fields from original JSON preserved</p>
+<h3 id="technical-details">Technical Details<a class="headerlink" href="#technical-details" title="Permanent link">&para;</a></h3>
+<p><strong>HDF5/MATLAB v7.3 Support:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">h5py</span>
+
+<span class="c1"># Read MATLAB v7.3 file</span>
+<span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="n">mat_edited_path</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+    <span class="n">edit</span> <span class="o">=</span> <span class="n">f</span><span class="p">[</span><span class="s1">&#39;edition&#39;</span><span class="p">]</span>
+    <span class="n">pulsetrain_cells</span> <span class="o">=</span> <span class="n">_cell_row_read</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">edit</span><span class="p">[</span><span class="s1">&#39;Pulsetrainclean&#39;</span><span class="p">])</span>
+    <span class="n">disc_nested</span> <span class="o">=</span> <span class="n">_cell_row_read</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">edit</span><span class="p">[</span><span class="s1">&#39;Distimeclean&#39;</span><span class="p">])</span>
+    <span class="n">silval</span> <span class="o">=</span> <span class="n">_cell_row_read</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">edit</span><span class="p">[</span><span class="s1">&#39;silval&#39;</span><span class="p">])</span>
+</code></pre></div>
+
+<p><strong>Cell Array Reading:</strong>
+- Custom <code>_cell_row_read()</code> function handles MATLAB cell arrays
+- Validates HDF5 object references
+- Converts to Python lists/arrays</p>
+<p><strong>Output Format:</strong>
+- openhdemg JSON format
+- Compression level: 4
+- Compatible with openhdemg GUI
+- Preserves all original metadata</p>
+<h2 id="auto-delete-synchronization">Auto-Delete Synchronization<a class="headerlink" href="#auto-delete-synchronization" title="Permanent link">&para;</a></h2>
+<p>The workflow includes automatic cleanup to maintain consistency between edited and exported files.</p>
+<h3 id="delete-sync-logic">Delete Sync Logic<a class="headerlink" href="#delete-sync-logic" title="Permanent link">&para;</a></h3>
+<p>When an edited MAT file is deleted (manually or during workflow):</p>
+<ol>
+<li><strong>Detection:</strong> File watcher checks <code>decomposition_results/</code> folder</li>
+<li><strong>Comparison:</strong> Compares <code>exported_files_on_disk</code> with <code>self.edited_files</code></li>
+<li><strong>Cleanup:</strong> Removes exported JSON if source edited file no longer exists</li>
+</ol>
+<p><strong>Example:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># If edited file deleted</span>
+<span class="n">decomposition_auto</span><span class="o">/</span><span class="n">recording1_edited</span><span class="o">.</span><span class="n">mat</span>  <span class="p">(</span><span class="err">❌</span> <span class="n">deleted</span><span class="p">)</span>
+
+<span class="c1"># Auto-delete sync removes exported file</span>
+<span class="n">decomposition_results</span><span class="o">/</span><span class="n">recording1</span><span class="o">.</span><span class="n">json</span>     <span class="p">(</span><span class="err">🗑️</span> <span class="n">auto</span><span class="o">-</span><span class="n">deleted</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="benefits">Benefits<a class="headerlink" href="#benefits" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Consistency:</strong> Exported files always match edited source files</li>
+<li><strong>Cleanup:</strong> No orphaned files in results folder</li>
+<li><strong>Flexibility:</strong> Users can re-edit files without manual cleanup</li>
+</ul>
+<h2 id="progress-tracking">Progress Tracking<a class="headerlink" href="#progress-tracking" title="Permanent link">&para;</a></h2>
+<h3 id="three-stage-status">Three-Stage Status<a class="headerlink" href="#three-stage-status" title="Permanent link">&para;</a></h3>
+<p>The UI tracks files through three stages:</p>
+<ol>
+<li><strong>⏳ Pending</strong> - Exported to MUEdit, not yet edited</li>
+<li>File: <code>*_muedit.mat</code> exists</li>
+<li>
+<p>No edited version found</p>
+</li>
+<li>
+<p><strong>✅ Edited</strong> - Manually cleaned in MUEdit</p>
+</li>
+<li>File: <code>*_edited.mat</code> (or similar) exists</li>
+<li>
+<p>Ready for export</p>
+</li>
+<li>
+<p><strong>📦 Exported</strong> - Converted to openhdemg format</p>
+</li>
+<li>File: <code>*.json</code> exists in <code>decomposition_results/</code></li>
+<li>Ready for visualization</li>
+</ol>
+<h3 id="progress-bar">Progress Bar<a class="headerlink" href="#progress-bar" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="n">Manual</span><span class="w"> </span><span class="n">Cleaning</span><span class="w"> </span><span class="n">Workflow</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="o">/</span><span class="mi">5</span><span class="w"> </span><span class="n">exported</span><span class="w"> </span><span class="p">(</span><span class="mi">60</span><span class="o">%</span><span class="p">)</span>
+<span class="p">[</span><span class="err">██████████████████████░░░░░░░░</span><span class="p">]</span><span class="w"> </span><span class="mi">60</span><span class="o">%</span>
+</code></pre></div>
+
+<p><strong>Progress Calculation:</strong>
+- Based on exported files (final stage)
+- Formula: <code>(exported_count / total_muedit_files) × 100</code>
+- Updates in real-time as files are exported</p>
+<h3 id="file-status-display">File Status Display<a class="headerlink" href="#file-status-display" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="n">File</span><span class="w"> </span><span class="n">Status</span><span class="p">:</span>
+<span class="err">📦</span><span class="w"> </span><span class="n">file1</span><span class="w"> </span><span class="p">(</span><span class="n">exported</span><span class="p">)</span><span class="w">     </span><span class="err">←</span><span class="w"> </span><span class="n">Blue</span><span class="w"> </span><span class="p">(</span><span class="n">completed</span><span class="p">)</span>
+<span class="err">📦</span><span class="w"> </span><span class="n">file2</span><span class="w"> </span><span class="p">(</span><span class="n">exported</span><span class="p">)</span><span class="w">     </span><span class="err">←</span><span class="w"> </span><span class="n">Blue</span><span class="w"> </span><span class="p">(</span><span class="n">completed</span><span class="p">)</span>
+<span class="err">✅</span><span class="w"> </span><span class="n">file3</span><span class="w"> </span><span class="p">(</span><span class="n">edited</span><span class="p">)</span><span class="w">       </span><span class="err">←</span><span class="w"> </span><span class="n">Green</span><span class="w"> </span><span class="p">(</span><span class="n">exporting</span><span class="o">...</span><span class="p">)</span>
+<span class="err">⏳</span><span class="w"> </span><span class="n">file4</span><span class="w"> </span><span class="p">(</span><span class="n">pending</span><span class="p">)</span><span class="w">      </span><span class="err">←</span><span class="w"> </span><span class="n">Gray</span><span class="w"> </span><span class="p">(</span><span class="n">needs</span><span class="w"> </span><span class="n">editing</span><span class="p">)</span>
+<span class="err">⏳</span><span class="w"> </span><span class="n">file5</span><span class="w"> </span><span class="p">(</span><span class="n">pending</span><span class="p">)</span><span class="w">      </span><span class="err">←</span><span class="w"> </span><span class="n">Gray</span><span class="w"> </span><span class="p">(</span><span class="n">needs</span><span class="w"> </span><span class="n">editing</span><span class="p">)</span>
+</code></pre></div>
+
+<h2 id="show-decomposition-results-button">Show Decomposition Results Button<a class="headerlink" href="#show-decomposition-results-button" title="Permanent link">&para;</a></h2>
+<p>The "Show Decomposition Results" button is dynamically enabled based on exported files.</p>
+<h3 id="button-states">Button States<a class="headerlink" href="#button-states" title="Permanent link">&para;</a></h3>
+<p><strong>Disabled (Initial State):</strong>
+- No exported files in <code>decomposition_results/</code>
+- Tooltip: "No exported results found. Please complete manual cleaning workflow first."</p>
+<p><strong>Enabled (After Export):</strong>
+- At least one file exported successfully
+- Opens openhdemg with cleaned results
+- Tooltip: "Open openhdemg to view cleaned decomposition results from decomposition_results folder"</p>
+<h3 id="button-logic">Button Logic<a class="headerlink" href="#button-logic" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Enable when files exported</span>
+<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">exported_files</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">btn_show_results</span><span class="o">.</span><span class="n">setEnabled</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># Disable when no files</span>
+<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">exported_files</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">btn_show_results</span><span class="o">.</span><span class="n">setEnabled</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Real-time Updates:</strong>
+- Button enabled immediately after first successful export
+- Button disabled if all exported files are deleted
+- No manual refresh needed</p>
+<h3 id="openhdemg-launch">openhdemg Launch<a class="headerlink" href="#openhdemg-launch" title="Permanent link">&para;</a></h3>
+<p>When the button is clicked:</p>
+<ol>
+<li><strong>Validation:</strong></li>
+<li>Checks <code>decomposition_results/</code> folder exists</li>
+<li>Verifies at least one <code>.json</code> file present</li>
+<li>
+<p>Displays warning if no files found</p>
+</li>
+<li>
+<p><strong>Launch:</strong></p>
+</li>
+<li>Uses current Python interpreter: <code>sys.executable</code></li>
+<li>Command: <code>python -m openhdemg.gui.openhdemg_gui</code></li>
+<li>
+<p>Opens in the <code>decomposition_results/</code> folder</p>
+</li>
+<li>
+<p><strong>Loading State:</strong></p>
+</li>
+<li>Button shows loading animation</li>
+<li>Callback stops loading when openhdemg starts</li>
+</ol>
+<h2 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h2>
+<h3 id="export-errors">Export Errors<a class="headerlink" href="#export-errors" title="Permanent link">&para;</a></h3>
+<p><strong>Common Issues:</strong></p>
+<ol>
+<li><strong>Missing original JSON:</strong>
+   <code>Could not find original JSON for filename, skipping export</code></li>
+<li><strong>Cause:</strong> Original JSON file moved or deleted</li>
+<li>
+<p><strong>Solution:</strong> Ensure original JSON remains in <code>decomposition_auto/</code></p>
+</li>
+<li>
+<p><strong>Missing edited MAT file:</strong>
+   <code>Could not find edited MAT file for filename, skipping export</code></p>
+</li>
+<li><strong>Cause:</strong> Edited file not detected or has unexpected naming</li>
+<li>
+<p><strong>Solution:</strong> Verify file saved correctly from MUEdit</p>
+</li>
+<li>
+<p><strong>HDF5 Structure Error:</strong>
+   <code>'edition' group not found in file.mat</code></p>
+</li>
+<li><strong>Cause:</strong> MAT file not saved by MUEdit or wrong version</li>
+<li>
+<p><strong>Solution:</strong> Re-save file in MUEdit, ensure devHP branch</p>
+</li>
+<li>
+<p><strong>Missing required fields:</strong>
+   <code>edition.Pulsetrainclean not found in edited MAT</code></p>
+</li>
+<li><strong>Cause:</strong> MUEdit file structure incomplete</li>
+<li><strong>Solution:</strong> Check MUEdit version and save process</li>
+</ol>
+<h3 id="ui-error-messages">UI Error Messages<a class="headerlink" href="#ui-error-messages" title="Permanent link">&para;</a></h3>
+<p><strong>Export Failed:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to export </span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">error_msg</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<ul>
+<li>Displayed in status bar</li>
+<li>Logged with full traceback</li>
+<li>Other files continue processing</li>
+</ul>
+<p><strong>No Exported Files:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">&quot;No exported JSON files found in decomposition_results folder.&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<ul>
+<li>Shown when "Show Results" clicked with empty folder</li>
+<li>Guides user to complete workflow first</li>
+</ul>
+<h2 id="state-reconstruction">State Reconstruction<a class="headerlink" href="#state-reconstruction" title="Permanent link">&para;</a></h2>
+<p>When opening an existing workfolder, the export workflow state is automatically reconstructed.</p>
+<h3 id="folder-creation">Folder Creation<a class="headerlink" href="#folder-creation" title="Permanent link">&para;</a></h3>
+<p>The <code>decomposition_results/</code> folder is <strong>optional</strong> for backwards compatibility:</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># In automatic_state_reconstruction.py</span>
+<span class="n">optional_folders</span> <span class="o">=</span> <span class="p">[</span><span class="n">FolderNames</span><span class="o">.</span><span class="n">DECOMPOSITION_RESULTS</span><span class="o">.</span><span class="n">value</span><span class="p">]</span>
+
+<span class="k">if</span> <span class="n">subfolder</span> <span class="ow">in</span> <span class="n">optional_folders</span><span class="p">:</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">subfolder_path</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Created optional subfolder: </span><span class="si">{</span><span class="n">subfolder_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>Behavior:</strong>
+- Old workfolders without <code>decomposition_results/</code>: Folder auto-created
+- New workfolders: Folder created during initial setup
+- No errors if folder missing, just creates it</p>
+<h3 id="state-detection">State Detection<a class="headerlink" href="#state-detection" title="Permanent link">&para;</a></h3>
+<p>On reconstruction:</p>
+<ol>
+<li>Scans <code>decomposition_auto/</code> for edited MAT files</li>
+<li>Scans <code>decomposition_results/</code> for exported JSON files</li>
+<li>Matches files by base name</li>
+<li>Rebuilds <code>self.edited_files</code> and <code>self.exported_files</code> lists</li>
+<li>Updates UI with correct progress state</li>
+</ol>
+<h2 id="performance-considerations">Performance Considerations<a class="headerlink" href="#performance-considerations" title="Permanent link">&para;</a></h2>
+<h3 id="background-processing">Background Processing<a class="headerlink" href="#background-processing" title="Permanent link">&para;</a></h3>
+<p><strong>Worker Thread:</strong>
+- Export runs in <code>MUEditExportWorker</code> (QThread)
+- UI remains responsive during export
+- Multiple files processed sequentially
+- Progress signals emitted for each file</p>
+<p><strong>Batch Processing:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="n">export_tasks</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">(</span><span class="n">base_name</span><span class="p">,</span> <span class="n">original_json</span><span class="p">,</span> <span class="n">edited_mat</span><span class="p">,</span> <span class="n">output_json</span><span class="p">),</span>
+    <span class="o">...</span>
+<span class="p">]</span>
+<span class="n">worker</span> <span class="o">=</span> <span class="n">MUEditExportWorker</span><span class="p">(</span><span class="n">export_tasks</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="file-watching">File Watching<a class="headerlink" href="#file-watching" title="Permanent link">&para;</a></h3>
+<p><strong>Update Frequency:</strong>
+- Checks for changes every 2 seconds
+- Balances responsiveness vs. system load
+- Auto-triggers export when edited files detected</p>
+<p><strong>Optimization:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Only export if not already running</span>
+<span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">export_worker</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">export_worker</span><span class="o">.</span><span class="n">isRunning</span><span class="p">():</span>
+    <span class="k">return</span>  <span class="c1"># Skip if export in progress</span>
+</code></pre></div>
+
+<h2 id="best-practices">Best Practices<a class="headerlink" href="#best-practices" title="Permanent link">&para;</a></h2>
+<h3 id="during-manual-cleaning">During Manual Cleaning<a class="headerlink" href="#during-manual-cleaning" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Save regularly</strong> in MUEdit to trigger auto-export</li>
+<li><strong>Keep instruction dialog open</strong> to track progress</li>
+<li><strong>Work sequentially</strong> through files for better organization</li>
+<li><strong>Don't rename files</strong> manually to avoid detection issues</li>
+</ol>
+<h3 id="after-export">After Export<a class="headerlink" href="#after-export" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Verify exports</strong> before deleting edited MAT files</li>
+<li><strong>Check progress UI</strong> shows all files as 📦 exported</li>
+<li><strong>Use "Show Results" button</strong> to validate in openhdemg</li>
+<li><strong>Keep original JSON files</strong> in <code>decomposition_auto/</code> (required for re-export)</li>
+</ol>
+<h3 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>If export doesn't trigger:</strong></li>
+<li>Check file watcher is active (restart app if needed)</li>
+<li>Verify edited file naming matches base name</li>
+<li>
+<p>Check logs for error messages</p>
+</li>
+<li>
+<p><strong>If exported file missing:</strong></p>
+</li>
+<li>Check <code>decomposition_results/</code> folder permissions</li>
+<li>Look for export errors in application logs</li>
+<li>
+<p>Verify edited MAT file has correct structure</p>
+</li>
+<li>
+<p><strong>If "Show Results" button disabled:</strong></p>
+</li>
+<li>Ensure at least one file successfully exported</li>
+<li>Check <code>decomposition_results/</code> folder has .json files</li>
+<li>Wait for auto-export to complete (check progress bar)</li>
+</ol>
+<h2 id="example-workflow">Example Workflow<a class="headerlink" href="#example-workflow" title="Permanent link">&para;</a></h2>
+<h3 id="complete-export-workflow-example">Complete Export Workflow Example<a class="headerlink" href="#complete-export-workflow-example" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">Start</span><span class="w"> </span><span class="n">with</span><span class="w"> </span><span class="n">decomposition</span><span class="w"> </span><span class="n">results</span>
+<span class="w">   </span><span class="n">decomposition_auto</span><span class="o">/</span><span class="n">rec1</span><span class="mf">.</span><span class="n">json</span>
+
+<span class="mf">2.</span><span class="w"> </span><span class="nb">Exp</span><span class="ow">or</span><span class="n">t</span><span class="w"> </span><span class="kr">to</span><span class="w"> </span><span class="n">MUEdit</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">Click</span><span class="w"> </span><span class="s">&quot;Export to MUEdit&quot;</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">decomposition_auto</span><span class="o">/</span><span class="n">rec1_muedit</span><span class="mf">.</span><span class="n">mat</span><span class="w"> </span><span class="n">created</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">Status</span><span class="p">:</span><span class="w"> </span><span class="err">⏳</span><span class="w"> </span><span class="n">rec1</span><span class="w"> </span><span class="p">(</span><span class="n">pending</span><span class="p">)</span>
+
+<span class="mf">3.</span><span class="w"> </span><span class="n">Manual</span><span class="w"> </span><span class="n">cleaning</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">Click</span><span class="w"> </span><span class="s">&quot;Open MUEdit&quot;</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="kr">Load</span><span class="w"> </span><span class="n">rec1_muedit</span><span class="mf">.</span><span class="n">mat</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">Clean</span><span class="w"> </span><span class="n">motor</span><span class="w"> </span><span class="n">units</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="kr">Save</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="n">MUEdit</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">decomposition_auto</span><span class="o">/</span><span class="n">rec1_edited</span><span class="mf">.</span><span class="n">mat</span><span class="w"> </span><span class="n">created</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">Status</span><span class="p">:</span><span class="w"> </span><span class="err">✅</span><span class="w"> </span><span class="n">rec1</span><span class="w"> </span><span class="p">(</span><span class="n">edited</span><span class="p">)</span>
+
+<span class="mf">4.</span><span class="w"> </span><span class="n">Auto</span><span class="o">-</span><span class="nb">exp</span><span class="ow">or</span><span class="n">t</span><span class="w"> </span><span class="p">(</span><span class="n">background</span><span class="p">)</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="nb">Exp</span><span class="ow">or</span><span class="n">t</span><span class="w"> </span><span class="n">worker</span><span class="w"> </span><span class="n">starts</span><span class="w"> </span><span class="n">automatically</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">Converts</span><span class="w"> </span><span class="n">rec1_edited</span><span class="mf">.</span><span class="n">mat</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">rec1</span><span class="mf">.</span><span class="n">json</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">decomposition_results</span><span class="o">/</span><span class="n">rec1</span><span class="mf">.</span><span class="n">json</span><span class="w"> </span><span class="n">created</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">Status</span><span class="p">:</span><span class="w"> </span><span class="err">📦</span><span class="w"> </span><span class="n">rec1</span><span class="w"> </span><span class="p">(</span><span class="nb">exp</span><span class="ow">or</span><span class="n">ted</span><span class="p">)</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="s">&quot;Show Decomposition Results&quot;</span><span class="w"> </span><span class="n">button</span><span class="w"> </span><span class="n">enabled</span>
+
+<span class="mf">5.</span><span class="w"> </span><span class="n">View</span><span class="w"> </span><span class="n">results</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">Click</span><span class="w"> </span><span class="s">&quot;Show Decomposition Results&quot;</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="kr">open</span><span class="n">hdemg</span><span class="w"> </span><span class="kr">open</span><span class="n">s</span><span class="w"> </span><span class="n">with</span><span class="w"> </span><span class="n">decomposition_results</span><span class="o">/</span><span class="w"> </span><span class="n">folder</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="kr">Load</span><span class="w"> </span><span class="n">rec1</span><span class="mf">.</span><span class="n">json</span><span class="w"> </span><span class="kr">for</span><span class="w"> </span><span class="n">analysis</span>
+<span class="w">   </span><span class="err">→</span><span class="w"> </span><span class="n">Workflow</span><span class="w"> </span><span class="n">complete</span><span class="err">!</span>
+</code></pre></div>
+
+<h2 id="technical-reference">Technical Reference<a class="headerlink" href="#technical-reference" title="Permanent link">&para;</a></h2>
+<h3 id="files-modified">Files Modified<a class="headerlink" href="#files-modified" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>decomposition_export.py</code> - Export function implementation</li>
+<li><code>muedit_export_worker.py</code> - Background worker thread</li>
+<li><code>DecompositionStepWidget.py</code> - UI and workflow logic</li>
+<li><code>FolderNames.py</code> - Added <code>DECOMPOSITION_RESULTS</code></li>
+<li><code>global_state.py</code> - Added <code>get_decomposition_results_path()</code></li>
+<li><code>automatic_state_reconstruction.py</code> - State reconstruction support</li>
+</ul>
+<h3 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>h5py</strong> - Reading MATLAB v7.3 (HDF5) files</li>
+<li><strong>openhdemg</strong> - openhdemg library for JSON format</li>
+<li><strong>numpy</strong> - Array operations</li>
+<li><strong>pandas</strong> - DataFrame handling</li>
+</ul>
+<h3 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h3>
+<p>No additional configuration required. The workflow uses existing settings:</p>
+<ul>
+<li><code>OPENHDEMG_INSTALLED</code> - Checks if openhdemg available</li>
+<li><code>MUEDIT_PATH</code> - MUEdit installation path (for manual cleaning)</li>
+<li><code>WORKFOLDER_PATH</code> - Project workfolder</li>
+</ul>
+<h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../decomposition_results/">Decomposition Results</a> - Overview of decomposition results step</li>
+<li><a href="../decomposition_results/#manual-cleaning-workflow-muedit">MUEdit Manual Cleaning</a> - Manual cleaning workflow</li>
+<li><a href="../decomposition_results/#result-visualization">openhdemg Integration</a> - Visualization in openhdemg</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      
+    
+  </body>
+</html>
