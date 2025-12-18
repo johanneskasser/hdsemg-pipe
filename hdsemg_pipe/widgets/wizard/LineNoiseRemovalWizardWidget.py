@@ -1,6 +1,6 @@
 import os
 from PyQt5.QtWidgets import QMessageBox, QPushButton, QProgressBar, QVBoxLayout
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 
 from hdsemg_pipe.actions.workers import (
     LineNoiseRemovalWorker,
@@ -195,6 +195,9 @@ class LineNoiseRemovalWizardWidget(WizardStepWidget):
             file_path = global_state.associated_files[self.processed_files]
             logger.info(f"Processing file {self.processed_files + 1}/{self.total_files}: {file_path}")
 
+            # Clean up previous worker if it exists
+            self.cleanup_worker()
+
             # Get line noise frequencies based on region setting
             line_freqs = self.get_line_noise_frequencies()
 
@@ -256,8 +259,9 @@ class LineNoiseRemovalWizardWidget(WizardStepWidget):
         self.processed_files += 1
         self.update_progress(self.processed_files, self.total_files)
 
-        # Process next file
-        self.process_next_file()
+        # Process next file with a small delay to ensure the current worker thread
+        # has fully completed before we try to clean it up
+        QTimer.singleShot(0, self.process_next_file)
 
     def on_processing_error(self, error_msg):
         """Called when an error occurs during processing."""
@@ -266,11 +270,46 @@ class LineNoiseRemovalWizardWidget(WizardStepWidget):
         self.btn_remove_noise.stop_loading()
         self.btn_remove_noise.setEnabled(True)
         self.progress_bar.setVisible(False)
+        self.cleanup_worker()
+
+    def cleanup_worker(self):
+        """Clean up the current worker thread properly."""
+        if self.current_worker is not None:
+            logger.debug("Cleaning up worker thread")
+
+            # Disconnect signals to prevent any callbacks
+            try:
+                self.current_worker.finished.disconnect()
+            except:
+                pass  # Signal might not be connected
+
+            try:
+                self.current_worker.error.disconnect()
+            except:
+                pass  # Signal might not be connected
+
+            # Wait for thread to finish if it's still running
+            if self.current_worker.isRunning():
+                logger.debug("Worker thread still running, waiting for completion...")
+                # Wait up to 10 seconds for normal completion
+                if not self.current_worker.wait(10000):
+                    logger.warning("Worker thread did not finish in time, forcing termination")
+                    self.current_worker.terminate()
+                    # Give it a bit more time to terminate cleanly
+                    self.current_worker.wait(1000)
+
+            # Schedule deletion
+            self.current_worker.deleteLater()
+            self.current_worker = None
+            logger.debug("Worker cleanup complete")
 
     def finalize_processing(self):
         """Called when all files have been processed."""
         self.btn_remove_noise.stop_loading()
         self.progress_bar.setVisible(False)
+
+        # Clean up the last worker
+        self.cleanup_worker()
 
         # Verify all files were processed
         if len(global_state.line_noise_cleaned_files) == self.total_files:
@@ -388,3 +427,13 @@ class LineNoiseRemovalWizardWidget(WizardStepWidget):
 
         # Mark the step as complete (signals, styling, etc.)
         super().complete_step()
+
+    def closeEvent(self, event):
+        """Handle widget close event to clean up worker thread."""
+        logger.debug("LineNoiseRemovalWizardWidget closing, cleaning up worker")
+        self.cleanup_worker()
+        super().closeEvent(event)
+
+    def __del__(self):
+        """Destructor to ensure worker cleanup."""
+        self.cleanup_worker()
