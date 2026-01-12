@@ -1,7 +1,7 @@
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QDialog, QTabWidget, QWidget, QVBoxLayout,
-    QLabel, QDialogButtonBox
+    QLabel, QDialogButtonBox, QDesktopWidget, QScrollArea
 )
 from hdsemg_pipe.settings.tabs.channelselection import init as channelselectiontab_init
 from hdsemg_pipe.settings.tabs.workfolder import init_workfolder_widget
@@ -10,54 +10,26 @@ from hdsemg_pipe.settings.tabs.line_noise import init as init_line_noise_widget
 from hdsemg_pipe.settings.tabs.log_setting import init as init_logging_widget
 from hdsemg_pipe.settings.tabs.muedit_settings import init as init_muedit_widget
 from hdsemg_pipe._log.log_config import logger
-from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, Qt
 
 class SettingsDialog(QDialog):
     settingsAccepted = pyqtSignal()
     def __init__(self, parent=None):
         super(SettingsDialog, self).__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(700, 500)
+        # Make the dialog smaller and resizable
+        self.resize(550, 400)
+        self.setMinimumSize(450, 350)
         self.initUI()
+        # Center the dialog on screen
+        self.centerOnScreen()
 
     def initUI(self):
-        """Initialize the settings dialog with modern styling."""
-        # Apply modern dialog styling
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {Colors.BG_SECONDARY};
-            }}
-            QTabWidget::pane {{
-                border: 1px solid {Colors.BORDER_DEFAULT};
-                background-color: {Colors.BG_PRIMARY};
-                border-radius: {BorderRadius.LG};
-                padding: {Spacing.LG}px;
-            }}
-            QTabBar::tab {{
-                background-color: {Colors.BG_SECONDARY};
-                color: {Colors.TEXT_SECONDARY};
-                border: 1px solid {Colors.BORDER_DEFAULT};
-                border-bottom: none;
-                padding: {Spacing.SM}px {Spacing.LG}px;
-                margin-right: 2px;
-                border-top-left-radius: {BorderRadius.MD};
-                border-top-right-radius: {BorderRadius.MD};
-                font-size: {Fonts.SIZE_BASE};
-            }}
-            QTabBar::tab:selected {{
-                background-color: {Colors.BG_PRIMARY};
-                color: {Colors.TEXT_PRIMARY};
-                font-weight: {Fonts.WEIGHT_MEDIUM};
-            }}
-            QTabBar::tab:hover {{
-                background-color: {Colors.GRAY_100};
-            }}
-        """)
-
+        """Initialize the settings dialog with default styling."""
+        # Use default white background, no custom theme
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
-        main_layout.setSpacing(Spacing.LG)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
 
         self.tab_widget = QTabWidget()
         main_layout.addWidget(self.tab_widget)
@@ -87,72 +59,70 @@ class SettingsDialog(QDialog):
         self.initMUEditTab()
         self.initLoggingTab()
 
-        # Add standard dialog buttons (OK and Cancel) with modern styling
+        # Add standard dialog buttons (OK and Cancel) with default styling
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
-
-        # Style the button box buttons
-        self.button_box.setStyleSheet(f"""
-            QPushButton {{
-                min-width: 80px;
-                padding: {Spacing.SM}px {Spacing.LG}px;
-                border-radius: {BorderRadius.MD};
-                font-size: {Fonts.SIZE_BASE};
-            }}
-            QPushButton[text="OK"] {{
-                background-color: {Colors.BLUE_600};
-                color: white;
-                border: none;
-                font-weight: {Fonts.WEIGHT_MEDIUM};
-            }}
-            QPushButton[text="OK"]:hover {{
-                background-color: {Colors.BLUE_700};
-            }}
-            QPushButton[text="Cancel"] {{
-                background-color: {Colors.BG_SECONDARY};
-                color: {Colors.TEXT_PRIMARY};
-                border: 1px solid {Colors.BORDER_DEFAULT};
-            }}
-            QPushButton[text="Cancel"]:hover {{
-                background-color: {Colors.GRAY_100};
-            }}
-        """)
 
         main_layout.addWidget(self.button_box)
 
     def initChannelSelectionTab(self):
         """Initialize the 'General' settings tab."""
         channelselection_tab = channelselectiontab_init(self)
-        self.channel_selection_tab.setLayout(channelselection_tab)
+        self._wrapInScrollArea(self.channel_selection_tab, channelselection_tab)
 
     def initWorkfolderTab(self):
         """Initialize the 'Workfolder' settings tab."""
         workfolder_tab = init_workfolder_widget(self)
-        self.workfolder_tab.setLayout(workfolder_tab)
+        self._wrapInScrollArea(self.workfolder_tab, workfolder_tab)
 
     def initOpenHDsEMGTab(self):
         """Initialize the 'openhdemg' settings tab."""
         openhdemg_tab = init_openhdemg_widget(self)
-        self.openhdemg_tab.setLayout(openhdemg_tab)
+        self._wrapInScrollArea(self.openhdemg_tab, openhdemg_tab)
 
     def initLineNoiseTab(self):
         """Initialize the 'Line Noise Removal' settings tab."""
         line_noise_tab = init_line_noise_widget(self)
-        self.line_noise_tab.setLayout(line_noise_tab)
+        self._wrapInScrollArea(self.line_noise_tab, line_noise_tab)
 
     def initMUEditTab(self):
         """Initialize the 'MUEdit' settings tab."""
         muedit_tab = init_muedit_widget(self)
-        self.muedit_tab.setLayout(muedit_tab)
+        self._wrapInScrollArea(self.muedit_tab, muedit_tab)
 
     def initLoggingTab(self):
         """Initialize the 'Logging' settings tab."""
         log_tab = init_logging_widget(self)
-        self.logging_tab.setLayout(log_tab)
+        self._wrapInScrollArea(self.logging_tab, log_tab)
+
+    def _wrapInScrollArea(self, tab_widget, content_layout):
+        """Wrap tab content in a scroll area to make it scrollable."""
+        # Create a container widget for the content
+        container = QWidget()
+        container.setLayout(content_layout)
+
+        # Create scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(container)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.NoFrame)
+
+        # Set the scroll area as the tab's layout
+        tab_layout = QVBoxLayout(tab_widget)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll_area)
 
     def accept(self):
         """Emit signal and close dialog when OK is pressed."""
         self.settingsAccepted.emit()  # Emit signal
         logger.info("Settings accepted and dialog closed.")
         super().accept()  # Call parent accept method to close the dialog
+
+    def centerOnScreen(self):
+        """Center the dialog on the screen."""
+        screen = QApplication.desktop().screenGeometry()
+        dialog_geometry = self.geometry()
+        x = (screen.width() - dialog_geometry.width()) // 2
+        y = (screen.height() - dialog_geometry.height()) // 2
+        self.move(x, y)
