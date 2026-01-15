@@ -8,9 +8,14 @@ on:
 jobs:
 
   publish-testpypi:
-    if: contains(github.ref_name, 'dev') || contains(github.ref_name, 'rc') ||
-        contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') ||
-        contains(github.ref_name, 'test')
+    if: >-
+      ${{ 
+        contains(github.ref_name, 'dev') || 
+        contains(github.ref_name, 'rc') || 
+        contains(github.ref_name, 'alpha') || 
+        contains(github.ref_name, 'beta') || 
+        contains(github.ref_name, 'test') 
+      }}
     runs-on: ubuntu-latest
     env:
       RAW_TAG: ${{ github.ref_name }}
