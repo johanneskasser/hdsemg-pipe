@@ -2,22 +2,31 @@
 import os
 import re
 from pathlib import Path
-
 from setuptools import setup, find_packages
 
-version = os.getenv("PACKAGE_VERSION", "0.0.1")
+# Version aus Umgebungsvariable holen
+raw_version = os.getenv("PACKAGE_VERSION", "0.0.1")
 
-pattern = r"^\d+\.\d+\.\d+(?:-(?:dev|rc|alpha|beta|test)\d*)?$"
+# Falls ein "v" am Anfang steht (z.B. v0.2.1), schneiden wir es ab
+version = raw_version.lstrip('v')
+
+# PEP 440 konformer Regex für: 1.2.3, 1.2.3.dev1, 1.2.3a1, 1.2.3rc1, etc.
+# Erlaubt jetzt Punkte (.) vor dev/rc/alpha/beta
+pattern = r"^\d+\.\d+\.\d+(?:(\.dev|a|b|rc|post)\d*)?$"
+
 if not re.match(pattern, version):
-    print("ERROR: PACKAGE_VERSION must be a valid format. Setting to 0.0.1.")
+    print(f"ERROR: PACKAGE_VERSION '{version}' has an invalid format for PyPI.")
+    print("Falling back to 0.0.1 to prevent complete crash, but upload might fail.")
     version = "0.0.1"
+else:
+    print(f"Building version: {version}")
 
 this_dir = Path(__file__).parent
 long_description = (this_dir / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="hdsemg-pipe",
-    version=version,
+    version=version,  # Hier wird die bereinigte Version genutzt
     description="hdsemg-pipe package",
     author="Johannes Kasser",
     author_email="johanneskasser@outlook.de",
