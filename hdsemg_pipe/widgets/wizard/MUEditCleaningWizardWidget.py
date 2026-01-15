@@ -35,7 +35,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Hardcoded step configuration
-        step_index = 8
+        step_index = 9
         step_name = "MUEdit Manual Cleaning"
         description = "Launch MUEdit for manual cleaning and quality control of motor unit decomposition results."
 
