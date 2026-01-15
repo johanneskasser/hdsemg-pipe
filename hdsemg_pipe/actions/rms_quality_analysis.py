@@ -131,6 +131,7 @@ class RMSQualityDialog(QtWidgets.QDialog):
         logger.info("Initializing RMS Quality Analysis Dialog for %d files", len(file_paths))
 
         self.file_paths = file_paths
+        self.original_file_paths = self._get_original_file_paths()
         self.grid_items: List[GridData] = []
         self.performed_path_map: Dict[str, np.ndarray] = {}
         self.analysis_results: Optional[AnalysisResults] = None
@@ -141,12 +142,35 @@ class RMSQualityDialog(QtWidgets.QDialog):
         self.threshold_lines = []
         self.first_click_pos = None
 
+        # Display options
+        self.use_original_files = False
+        self.show_filenames = True
+
         self.load_files()
         self.init_ui()
 
+    def _get_original_file_paths(self) -> List[str]:
+        """Get corresponding original file paths."""
+        try:
+            original_path = global_state.get_original_files_path()
+            if os.path.exists(original_path):
+                # Get all .mat files from original_files folder
+                return [os.path.join(original_path, f) for f in os.listdir(original_path)
+                        if f.endswith('.mat')]
+        except Exception as e:
+            logger.warning("Could not get original files path: %s", e)
+        return []
+
     def load_files(self):
         """Load each file via EMGFile and collect its Grids."""
-        for fp in self.file_paths:
+        # Clear existing data
+        self.grid_items.clear()
+        self.performed_path_map.clear()
+
+        # Select which file paths to use
+        paths_to_load = self.original_file_paths if self.use_original_files else self.file_paths
+
+        for fp in paths_to_load:
             try:
                 logger.info("Loading file: %s", fp)
                 emg = EMGFile.load(fp)
@@ -225,6 +249,9 @@ class RMSQualityDialog(QtWidgets.QDialog):
         main_layout.addWidget(header)
         main_layout.addWidget(instruction)
 
+        # Options panel
+        self._create_options_panel(main_layout)
+
         # Main content: plot on left, results on right
         content_layout = QtWidgets.QHBoxLayout()
         content_layout.setSpacing(Spacing.LG)
@@ -242,6 +269,100 @@ class RMSQualityDialog(QtWidgets.QDialog):
 
         # Initialize plot
         self.update_selection_plot()
+
+    def _create_options_panel(self, parent_layout):
+        """Create options panel with checkboxes for file source and display options."""
+        options_frame = QtWidgets.QFrame()
+        options_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.SM}px;
+            }}
+        """)
+
+        options_layout = QtWidgets.QHBoxLayout(options_frame)
+        options_layout.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
+        options_layout.setSpacing(Spacing.XL)
+
+        # File source selection
+        source_label = QtWidgets.QLabel("Data Source:")
+        source_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_PRIMARY};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+            }}
+        """)
+        options_layout.addWidget(source_label)
+
+        self.cb_use_original = QtWidgets.QCheckBox("Use original files (before line noise removal)")
+        self.cb_use_original.setChecked(False)
+        self.cb_use_original.setEnabled(len(self.original_file_paths) > 0)
+        self.cb_use_original.stateChanged.connect(self._on_source_changed)
+        self.cb_use_original.setStyleSheet(f"""
+            QCheckBox {{
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """)
+        if not self.original_file_paths:
+            self.cb_use_original.setToolTip("No original files available")
+        options_layout.addWidget(self.cb_use_original)
+
+        options_layout.addSpacing(Spacing.XL)
+
+        # Display options
+        display_label = QtWidgets.QLabel("Display:")
+        display_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_PRIMARY};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+            }}
+        """)
+        options_layout.addWidget(display_label)
+
+        self.cb_show_filenames = QtWidgets.QCheckBox("Show filenames in chart")
+        self.cb_show_filenames.setChecked(True)
+        self.cb_show_filenames.stateChanged.connect(self._on_display_changed)
+        self.cb_show_filenames.setStyleSheet(f"""
+            QCheckBox {{
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """)
+        options_layout.addWidget(self.cb_show_filenames)
+
+        options_layout.addStretch()
+
+        # File count info
+        self.file_count_label = QtWidgets.QLabel(f"Files: {len(self.file_paths)}")
+        self.file_count_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_SECONDARY};
+                font-size: {Fonts.SIZE_SM};
+            }}
+        """)
+        options_layout.addWidget(self.file_count_label)
+
+        parent_layout.addWidget(options_frame)
+
+    def _on_source_changed(self, state):
+        """Handle data source checkbox change."""
+        self.use_original_files = (state == QtCore.Qt.Checked)
+        self.load_files()
+        self.reset_selection()
+
+        # Update file count label
+        count = len(self.original_file_paths) if self.use_original_files else len(self.file_paths)
+        source = "original" if self.use_original_files else "cleaned"
+        self.file_count_label.setText(f"Files: {count} ({source})")
+
+        logger.info("Switched to %s files", source)
+
+    def _on_display_changed(self, state):
+        """Handle display option checkbox change."""
+        self.show_filenames = (state == QtCore.Qt.Checked)
+        if self.analysis_results:
+            self._update_results_display()
 
     def _create_selection_panel(self, parent_layout):
         """Create the signal selection panel with matplotlib plot."""
@@ -581,10 +702,18 @@ class RMSQualityDialog(QtWidgets.QDialog):
                 continue
             processed_files.add(file_grid_key)
 
-            # Get EMG channel data
+            # Get EMG channel data only (exclude reference signals)
             emg_indices = grid.emg_indices
+            ref_indices = set(grid.ref_indices) if grid.ref_indices else set()
+
             if not emg_indices:
+                logger.warning("No EMG indices for grid %s in %s", grid.grid_key, file_name)
                 continue
+
+            # Filter out any reference indices from EMG indices (safety check)
+            emg_only_indices = [idx for idx in emg_indices if idx not in ref_indices]
+            logger.debug("Grid %s: %d EMG channels (excluded %d ref channels)",
+                        grid.grid_key, len(emg_only_indices), len(emg_indices) - len(emg_only_indices))
 
             # Clamp indices to valid range
             n_samples = emg.data.shape[0]
@@ -594,7 +723,7 @@ class RMSQualityDialog(QtWidgets.QDialog):
             channel_results = []
             rms_values = []
 
-            for ch_idx, data_idx in enumerate(emg_indices):
+            for ch_idx, data_idx in enumerate(emg_only_indices):
                 if data_idx >= emg.data.shape[1]:
                     continue
 
@@ -700,15 +829,16 @@ class RMSQualityDialog(QtWidgets.QDialog):
         # Update summary text
         self._update_summary_text(results)
 
-    def _plot_file_rms_bars(self, ax, results: AnalysisResults):
+    def _plot_file_rms_bars(self, ax, results: AnalysisResults, show_names: bool = None):
         """Plot bar chart of mean RMS per file with academic formatting."""
-        file_names = [fr.file_name[:15] + '...' if len(fr.file_name) > 18 else fr.file_name
-                      for fr in results.file_results]
+        if show_names is None:
+            show_names = self.show_filenames
+
         means = [fr.mean_rms for fr in results.file_results]
         stds = [fr.std_rms for fr in results.file_results]
         colors = [QUALITY_COLORS[fr.quality] for fr in results.file_results]
 
-        x = np.arange(len(file_names))
+        x = np.arange(len(results.file_results))
         bars = ax.bar(x, means, yerr=stds, color=colors, edgecolor='black',
                       linewidth=0.5, capsize=3, error_kw={'elinewidth': 1})
 
@@ -718,7 +848,16 @@ class RMSQualityDialog(QtWidgets.QDialog):
                        linestyle='--', alpha=0.7, linewidth=1)
 
         ax.set_xticks(x)
-        ax.set_xticklabels(file_names, rotation=45, ha='right', fontsize=8)
+        if show_names:
+            file_names = [fr.file_name[:15] + '...' if len(fr.file_name) > 18 else fr.file_name
+                          for fr in results.file_results]
+            ax.set_xticklabels(file_names, rotation=45, ha='right', fontsize=8)
+            ax.set_xlabel("")
+        else:
+            # Show index numbers instead
+            ax.set_xticklabels([str(i + 1) for i in range(len(results.file_results))], fontsize=8)
+            ax.set_xlabel("Recording #", fontsize=10, fontfamily='sans-serif')
+
         ax.set_ylabel("RMS Noise (µV)", fontsize=10, fontfamily='sans-serif')
         ax.set_title("RMS Noise Quality per Recording", fontsize=11, fontweight='bold', fontfamily='sans-serif')
         ax.set_ylim(0, max(means) * 1.3 if means else 30)
@@ -829,13 +968,11 @@ class RMSQualityDialog(QtWidgets.QDialog):
 
         # Panel A: Bar chart with error bars
         ax1 = fig.add_subplot(gs[0, :])
-        file_names = [fr.file_name for fr in results.file_results]
-        display_names = [fn[:20] + '...' if len(fn) > 23 else fn for fn in file_names]
         means = [fr.mean_rms for fr in results.file_results]
         stds = [fr.std_rms for fr in results.file_results]
         colors = [QUALITY_COLORS[fr.quality] for fr in results.file_results]
 
-        x = np.arange(len(display_names))
+        x = np.arange(len(results.file_results))
         ax1.bar(x, means, yerr=stds, color=colors, edgecolor='black',
                 linewidth=0.5, capsize=3, error_kw={'elinewidth': 1})
 
@@ -844,8 +981,15 @@ class RMSQualityDialog(QtWidgets.QDialog):
                         linestyle='--', alpha=0.7, linewidth=1, label=QUALITY_LABELS[thresh_name])
 
         ax1.set_xticks(x)
-        ax1.set_xticklabels(display_names, rotation=45, ha='right', fontsize=9)
-        ax1.set_xlabel("Recording", fontsize=11, fontfamily='sans-serif')
+        if self.show_filenames:
+            file_names = [fr.file_name for fr in results.file_results]
+            display_names = [fn[:20] + '...' if len(fn) > 23 else fn for fn in file_names]
+            ax1.set_xticklabels(display_names, rotation=45, ha='right', fontsize=9)
+            ax1.set_xlabel("Recording", fontsize=11, fontfamily='sans-serif')
+        else:
+            ax1.set_xticklabels([str(i + 1) for i in range(len(results.file_results))], fontsize=9)
+            ax1.set_xlabel("Recording #", fontsize=11, fontfamily='sans-serif')
+
         ax1.set_ylabel("RMS Noise (µV)", fontsize=11, fontfamily='sans-serif')
         ax1.set_title("A) RMS Noise Quality per Recording", fontsize=12, fontweight='bold',
                       fontfamily='sans-serif', loc='left')
@@ -951,7 +1095,7 @@ class RMSQualityDialog(QtWidgets.QDialog):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         txt_path = os.path.join(output_path, "rms_analysis_summary.txt")
-        with open(txt_path, 'w') as f:
+        with open(txt_path, 'w', encoding='utf-8') as f:
             f.write("=" * 60 + "\n")
             f.write("RMS QUALITY ANALYSIS SUMMARY\n")
             f.write("=" * 60 + "\n\n")
