@@ -12,9 +12,9 @@ from hdsemg_pipe.ui_elements.theme import Styles
 
 class ChannelSelectionWizardWidget(WizardStepWidget):
     def __init__(self):
-        """Step 5: Channel selection from the loaded .mat files."""
+        """Step 6: Channel selection from the loaded .mat files."""
         super().__init__(
-            step_index=5,
+            step_index=6,
             step_name="Channel Selection",
             description="Select the channels to be processed using the hdsemg-select tool."
         )

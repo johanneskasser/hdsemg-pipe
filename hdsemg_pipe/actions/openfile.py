@@ -113,6 +113,8 @@ def create_sub_work_folders(workfolder_path):
     decomposition_foldername = os.path.normpath(decomposition_foldername)
     cropped_signal_foldername = os.path.join(workfolder_path, FolderNames.CROPPED_SIGNAL.value)
     cropped_signal_foldername = os.path.normpath(cropped_signal_foldername)
+    analysis_foldername = os.path.join(workfolder_path, FolderNames.ANALYSIS.value)
+    analysis_foldername = os.path.normpath(analysis_foldername)
 
     try:
         os.makedirs(original_files_foldername, exist_ok=True)
@@ -127,6 +129,8 @@ def create_sub_work_folders(workfolder_path):
         logger.info(f"Created channelselection folder: {channelselection_foldername}")
         os.makedirs(cropped_signal_foldername, exist_ok=True)
         logger.info(f"Created cropped_signal folder: {cropped_signal_foldername}")
+        os.makedirs(analysis_foldername, exist_ok=True)
+        logger.info(f"Created analysis folder: {analysis_foldername}")
     except Exception as e:
         logger.error(f"Failed to create sub-folder: {e}")
 

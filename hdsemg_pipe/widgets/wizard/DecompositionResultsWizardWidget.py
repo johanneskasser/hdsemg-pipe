@@ -29,7 +29,7 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Hardcoded step configuration
-        step_index = 6
+        step_index = 7
         step_name = "Decomposition Results"
         description = "Waiting for decomposition results. Run your decomposition algorithm and save results to the decomposition folder."
 

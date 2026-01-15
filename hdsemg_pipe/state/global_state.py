@@ -143,6 +143,12 @@ class GlobalState:
         path = os.path.join(self.workfolder, FolderNames.ORIGINAL_FILES.value)
         return os.path.normpath(path)
 
+    def get_analysis_path(self):
+        if not self.workfolder:
+            raise ValueError("Workfolder is not set.")
+        path = os.path.join(self.workfolder, FolderNames.ANALYSIS.value)
+        return os.path.normpath(path)
+
     def get_original_files(self):
         """Get a copy of the original files list"""
         return self._original_files.copy()

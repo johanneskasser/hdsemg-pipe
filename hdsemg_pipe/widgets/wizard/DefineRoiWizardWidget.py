@@ -18,7 +18,7 @@ class DefineRoiWizardWidget(WizardStepWidget):
     def __init__(self):
         """Wizard step for defining region of interest (ROI)."""
         super().__init__(
-            step_index=4,
+            step_index=5,
             step_name="Crop to Region of Interest (ROI)",
             description="Define the region of interest for analysis. You can skip this step to use the entire signal."
         )

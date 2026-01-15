@@ -23,6 +23,7 @@ from hdsemg_pipe.widgets.FolderContentDrawer import FolderContentDrawer
 from hdsemg_pipe.widgets.wizard.OpenFileWizardWidget import OpenFileWizardWidget
 from hdsemg_pipe.widgets.wizard.GridAssociationWizardWidget import GridAssociationWizardWidget
 from hdsemg_pipe.widgets.wizard.LineNoiseRemovalWizardWidget import LineNoiseRemovalWizardWidget
+from hdsemg_pipe.widgets.wizard.RMSQualityWizardWidget import RMSQualityWizardWidget
 from hdsemg_pipe.widgets.wizard.DefineRoiWizardWidget import DefineRoiWizardWidget
 from hdsemg_pipe.widgets.wizard.ChannelSelectionWizardWidget import ChannelSelectionWizardWidget
 from hdsemg_pipe.widgets.wizard.DecompositionResultsWizardWidget import DecompositionResultsWizardWidget
@@ -141,47 +142,54 @@ class WizardMainWindow(QMainWindow):
         self.step_stack.addWidget(step3)
         step3.check()
 
-        # Step 4: Define ROI
-        step4 = DefineRoiWizardWidget()
+        # Step 4: RMS Quality Analysis
+        step4 = RMSQualityWizardWidget()
         global_state.register_widget(step4)
         self.steps.append(step4)
         self.step_stack.addWidget(step4)
         step4.check()
 
-        # Step 5: Channel Selection
-        step5 = ChannelSelectionWizardWidget()
+        # Step 5: Define ROI
+        step5 = DefineRoiWizardWidget()
         global_state.register_widget(step5)
         self.steps.append(step5)
         self.step_stack.addWidget(step5)
         step5.check()
 
-        # Step 6: Decomposition Results
-        step6 = DecompositionResultsWizardWidget()
+        # Step 6: Channel Selection
+        step6 = ChannelSelectionWizardWidget()
         global_state.register_widget(step6)
         self.steps.append(step6)
         self.step_stack.addWidget(step6)
         step6.check()
 
-        # Step 7: Multi-Grid Configuration
-        step7 = MultiGridConfigWizardWidget()
+        # Step 7: Decomposition Results
+        step7 = DecompositionResultsWizardWidget()
         global_state.register_widget(step7)
         self.steps.append(step7)
         self.step_stack.addWidget(step7)
         step7.check()
 
-        # Step 8: MUEdit Manual Cleaning
-        step8 = MUEditCleaningWizardWidget()
+        # Step 8: Multi-Grid Configuration
+        step8 = MultiGridConfigWizardWidget()
         global_state.register_widget(step8)
         self.steps.append(step8)
         self.step_stack.addWidget(step8)
         step8.check()
 
-        # Step 9: Final Results
-        step9 = FinalResultsWizardWidget()
+        # Step 9: MUEdit Manual Cleaning
+        step9 = MUEditCleaningWizardWidget()
         global_state.register_widget(step9)
         self.steps.append(step9)
         self.step_stack.addWidget(step9)
         step9.check()
+
+        # Step 10: Final Results
+        step10 = FinalResultsWizardWidget()
+        global_state.register_widget(step10)
+        self.steps.append(step10)
+        self.step_stack.addWidget(step10)
+        step10.check()
 
     def connectSteps(self):
         """Connect step signals."""
@@ -204,7 +212,7 @@ class WizardMainWindow(QMainWindow):
         self.progress_indicator.setStepState(step_index, "completed")
 
         # Auto-navigate to next step if not on last step
-        if step_index < 9:
+        if step_index < 10:
             self.navigateNext()
 
         # Check next step
@@ -215,7 +223,7 @@ class WizardMainWindow(QMainWindow):
 
     def navigateToStep(self, step_index):
         """Navigate to a specific step (1-indexed)."""
-        if 1 <= step_index <= 9:
+        if 1 <= step_index <= 10:
             self.current_step_index = step_index - 1
             self.step_stack.setCurrentIndex(self.current_step_index)
             self.progress_indicator.setActiveStep(step_index)
@@ -277,7 +285,7 @@ class WizardMainWindow(QMainWindow):
         last_step = start_reconstruction_workflow(self)
         if last_step is not None:
             # Navigate to next step after last completed (or stay on last if all complete)
-            next_step = min(last_step + 1, 8)  # 8 is last step (0-indexed)
+            next_step = min(last_step + 1, 9)  # 9 is last step (0-indexed)
             self.navigateToStep(next_step + 1)  # navigateToStep is 1-indexed
             logger.info(f"Navigated to step {next_step + 1} after state reconstruction")
 

@@ -8,12 +8,14 @@ class FolderNames(Enum):
     DECOMPOSITION_AUTO = "decomposition_auto"
     DECOMPOSITION_RESULTS = "decomposition_results"
     CROPPED_SIGNAL = "cropped_signal"
+    ANALYSIS = "analysis"
 
     @classmethod
     def list_values(cls):
         return [
             cls.ASSOCIATED_GRIDS.value,
             cls.LINE_NOISE_CLEANED.value,
+            cls.ANALYSIS.value,
             cls.CHANNELSELECTION.value,
             cls.DECOMPOSITION_AUTO.value,
             cls.DECOMPOSITION_RESULTS.value,
