@@ -168,7 +168,9 @@ class RMSQualityDialog(QtWidgets.QDialog):
             grid = gd.grid
 
             # Try to get performed path signal
-            if grid.performed_path_idx is not None and grid.ref_indices:
+            if (grid.performed_path_idx is not None
+                and grid.ref_indices
+                and grid.performed_path_idx < len(grid.ref_indices)):
                 ref_col_idx = grid.ref_indices[grid.performed_path_idx]
                 signal = emg.data[:, ref_col_idx]
                 logger.debug("Using performed_path_idx for %s", gd.emgfile.file_name)
