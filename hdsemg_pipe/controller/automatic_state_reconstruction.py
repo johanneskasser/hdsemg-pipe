@@ -57,6 +57,11 @@ def reconstruct_folder_state(folderpath):
         logger.info(f"Skipping line noise cleaned reconstruction: {e}")
 
     try:
+        _analysis_files(folderpath)
+    except FileNotFoundError as e:
+        logger.info(f"Skipping RMS analysis reconstruction: {e}")
+
+    try:
         _roi_files(folderpath)
     except FileNotFoundError as e:
         logger.info(f"Skipping ROI reconstruction: {e}")
@@ -103,7 +108,7 @@ def reconstruct_folder_state(folderpath):
 
 def _get_last_completed_step():
     """Get the index of the last completed step."""
-    for step_index in range(8, -1, -1):  # Check from step 8 down to 0
+    for step_index in range(9, -1, -1):  # Check from step 9 down to 0
         if global_state.is_widget_completed(f"step{step_index}"):
             return step_index
     return 0  # No steps completed, return first step
@@ -131,9 +136,9 @@ def _check_folder_existence(folderpath):
 def _check_pipe_folder_structure(folderpath):
     """Check if the folder structure is valid for the application."""
     logger.debug(f"Checking folder structure for: {folderpath}")
-    # Define the expected subfolders (decomposition_results is optional for backwards compatibility)
+    # Define the expected subfolders (some are optional for backwards compatibility)
     expected_subfolders = FolderNames.list_values()
-    optional_folders = [FolderNames.DECOMPOSITION_RESULTS.value]
+    optional_folders = [FolderNames.DECOMPOSITION_RESULTS.value, FolderNames.ANALYSIS.value]
 
     # Check if each expected subfolder exists
     for subfolder in expected_subfolders:
@@ -237,6 +242,35 @@ def _line_noise_cleaned_files(folderpath):
 
     return line_noise_cleaned_path
 
+def _analysis_files(folderpath):
+    """Check if the analysis folder exists and contains results."""
+    analysis_path = os.path.join(folderpath, str(FolderNames.ANALYSIS.value))
+
+    if not os.path.exists(analysis_path):
+        logger.warning(f"Analysis folder not found: {analysis_path}")
+        raise FileNotFoundError(f"Analysis folder not found: {analysis_path}")
+
+    files = os.listdir(analysis_path)
+
+    # Check for analysis output files (PNG, CSV, or TXT)
+    analysis_files = [f for f in files if f.endswith(('.png', '.csv', '.txt'))]
+
+    if not analysis_files or len(analysis_files) == 0:
+        logger.warning(f"No analysis files found in: {analysis_path}")
+        raise FileNotFoundError(f"No analysis files found in: {analysis_path}")
+
+    logger.debug(f"Analysis files found: {analysis_files}")
+
+    rms_quality_widget = global_state.get_widget("step3")
+    if rms_quality_widget:
+        rms_quality_widget.check()
+        rms_quality_widget.complete_step()
+    else:
+        logger.warning("RMS Quality Analysis widget not found in global state.")
+        raise ValueError("RMS Quality Analysis widget not found in global state.")
+
+    return analysis_path
+
 def _roi_files(folderpath):
     """Check if the roi files folder exists."""
     roi_file_path = os.path.join(folderpath, str(FolderNames.CROPPED_SIGNAL.value))
@@ -254,7 +288,7 @@ def _roi_files(folderpath):
 
     logger.debug(f"roi added to global state: {roi_files}")
 
-    roi_file_widget = global_state.get_widget("step3")
+    roi_file_widget = global_state.get_widget("step4")
     if roi_file_widget:
         roi_file_widget.check()
         roi_file_widget.complete_step()
@@ -281,7 +315,7 @@ def _channel_selection_files(folderpath):
 
     logger.debug(f"channelselection added to global state: {channel_selection_files}")
 
-    channel_selection_file_widget = global_state.get_widget("step4")
+    channel_selection_file_widget = global_state.get_widget("step5")
     if channel_selection_file_widget:
         channel_selection_file_widget.check()
         channel_selection_file_widget.complete_step(processed_files=len(channel_selection_files))
@@ -292,56 +326,56 @@ def _channel_selection_files(folderpath):
     return channel_selection_file_path
 
 def _decomposition_results_init():
-    """Initialize Step 5: Decomposition Results monitoring and load mapping state."""
-    decomposition_widget = global_state.get_widget("step5")
+    """Initialize Step 6: Decomposition Results monitoring and load mapping state."""
+    decomposition_widget = global_state.get_widget("step6")
     if decomposition_widget:
         decomposition_widget.init_file_checking()
 
         # Check if mapping was completed (JSON file exists and files present)
         if decomposition_widget.decomp_mapping is not None and decomposition_widget.resultfiles:
-            logger.info("Step 5 state reconstructed: mapping loaded and files found")
+            logger.info("Step 6 state reconstructed: mapping loaded and files found")
             decomposition_widget.complete_step()
     else:
         logger.warning("decomposition widget not found in global state.")
         raise ValueError("decomposition widget not found in global state.")
 
 def _multigrid_config():
-    """Reconstruct Step 6: Multi-Grid Configuration from JSON state."""
-    multigrid_widget = global_state.get_widget("step6")
+    """Reconstruct Step 7: Multi-Grid Configuration from JSON state."""
+    multigrid_widget = global_state.get_widget("step7")
     if multigrid_widget:
         multigrid_widget.init_file_checking()
 
         # Check if step was completed (groupings JSON exists and MUEdit files present)
         if multigrid_widget.grid_groupings is not None and multigrid_widget.is_completed():
-            logger.info("Step 6 state reconstructed: groupings loaded and MUEdit files found")
+            logger.info("Step 7 state reconstructed: groupings loaded and MUEdit files found")
             multigrid_widget.complete_step()
     else:
         logger.warning("Multi-grid configuration widget not found in global state.")
         raise ValueError("Multi-grid configuration widget not found in global state.")
 
 def _muedit_cleaning():
-    """Reconstruct Step 7: MUEdit Cleaning state."""
-    muedit_cleaning_widget = global_state.get_widget("step7")
+    """Reconstruct Step 8: MUEdit Cleaning state."""
+    muedit_cleaning_widget = global_state.get_widget("step8")
     if muedit_cleaning_widget:
         muedit_cleaning_widget.init_file_checking()
 
         # Check if edited files exist
         if muedit_cleaning_widget.is_completed():
-            logger.info("Step 7 state reconstructed: edited MUEdit files found")
+            logger.info("Step 8 state reconstructed: edited MUEdit files found")
             muedit_cleaning_widget.complete_step()
     else:
         logger.warning("MUEdit cleaning widget not found in global state.")
         raise ValueError("MUEdit cleaning widget not found in global state.")
 
 def _final_results():
-    """Reconstruct Step 8: Final Results state."""
-    final_results_widget = global_state.get_widget("step8")
+    """Reconstruct Step 9: Final Results state."""
+    final_results_widget = global_state.get_widget("step9")
     if final_results_widget:
         final_results_widget.init_file_checking()
 
         # Check if cleaned JSON files exist in decomposition_results folder
         if final_results_widget.is_completed():
-            logger.info("Step 8 state reconstructed: cleaned JSON files found in decomposition_results")
+            logger.info("Step 9 state reconstructed: cleaned JSON files found in decomposition_results")
             final_results_widget.complete_step()
     else:
         logger.warning("Final results widget not found in global state.")
