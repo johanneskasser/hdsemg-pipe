@@ -409,25 +409,78 @@ class RMSQualityDialog(QtWidgets.QDialog):
         layout.addWidget(self.toolbar)
         layout.addWidget(self.selection_canvas)
 
-        # ROI info display
+        # ROI info display with editable spinboxes
         info_layout = QtWidgets.QHBoxLayout()
-        self.roi_start_label = QtWidgets.QLabel("Start: --")
-        self.roi_end_label = QtWidgets.QLabel("End: --")
-        self.roi_duration_label = QtWidgets.QLabel("Duration: --")
 
-        for label in [self.roi_start_label, self.roi_end_label, self.roi_duration_label]:
-            label.setStyleSheet(f"""
-                QLabel {{
-                    color: {Colors.TEXT_PRIMARY};
-                    font-size: {Fonts.SIZE_SM};
-                    font-weight: {Fonts.WEIGHT_MEDIUM};
-                    background-color: {Colors.GRAY_100};
-                    border: 1px solid {Colors.BORDER_DEFAULT};
-                    border-radius: {BorderRadius.SM};
-                    padding: {Spacing.XS}px {Spacing.SM}px;
-                }}
-            """)
-            info_layout.addWidget(label)
+        spinbox_style = f"""
+            QDoubleSpinBox {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_SM};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+                background-color: {Colors.GRAY_100};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+                min-width: 80px;
+            }}
+            QDoubleSpinBox:focus {{
+                border: 1px solid {Colors.BLUE_600};
+            }}
+        """
+
+        label_style = f"""
+            QLabel {{
+                color: {Colors.TEXT_SECONDARY};
+                font-size: {Fonts.SIZE_SM};
+            }}
+        """
+
+        # Start time input
+        start_label = QtWidgets.QLabel("Start:")
+        start_label.setStyleSheet(label_style)
+        info_layout.addWidget(start_label)
+
+        self.roi_start_spin = QtWidgets.QDoubleSpinBox()
+        self.roi_start_spin.setDecimals(3)
+        self.roi_start_spin.setSuffix(" s")
+        self.roi_start_spin.setRange(0, 10000)
+        self.roi_start_spin.setSingleStep(0.1)
+        self.roi_start_spin.setStyleSheet(spinbox_style)
+        self.roi_start_spin.valueChanged.connect(self._on_time_input_changed)
+        info_layout.addWidget(self.roi_start_spin)
+
+        info_layout.addSpacing(Spacing.MD)
+
+        # End time input
+        end_label = QtWidgets.QLabel("End:")
+        end_label.setStyleSheet(label_style)
+        info_layout.addWidget(end_label)
+
+        self.roi_end_spin = QtWidgets.QDoubleSpinBox()
+        self.roi_end_spin.setDecimals(3)
+        self.roi_end_spin.setSuffix(" s")
+        self.roi_end_spin.setRange(0, 10000)
+        self.roi_end_spin.setSingleStep(0.1)
+        self.roi_end_spin.setStyleSheet(spinbox_style)
+        self.roi_end_spin.valueChanged.connect(self._on_time_input_changed)
+        info_layout.addWidget(self.roi_end_spin)
+
+        info_layout.addSpacing(Spacing.MD)
+
+        # Duration label (read-only)
+        self.roi_duration_label = QtWidgets.QLabel("Duration: --")
+        self.roi_duration_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_SM};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+                background-color: {Colors.GRAY_100};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+            }}
+        """)
+        info_layout.addWidget(self.roi_duration_label)
 
         info_layout.addStretch()
 
@@ -606,24 +659,66 @@ class RMSQualityDialog(QtWidgets.QDialog):
             self._draw_selection_lines()
         else:
             second_pos = x_pos
-            self.selected_region = (min(self.first_click_pos, second_pos),
-                                    max(self.first_click_pos, second_pos))
+            start = min(self.first_click_pos, second_pos)
+            end = max(self.first_click_pos, second_pos)
+            self.selected_region = (start, end)
             self.first_click_pos = None
+
+            # Update SpanSelector to show the selection
+            if self.span_selector is not None:
+                self.span_selector.extents = (start, end)
+
             self._update_roi_display()
             self._draw_selection_lines()
             self.btn_calculate.setEnabled(True)
 
     def _update_roi_display(self):
-        """Update the ROI info labels."""
+        """Update the ROI info spinboxes."""
         if self.selected_region:
             start, end = self.selected_region
             duration = end - start
-            self.roi_start_label.setText(f"Start: {start:.3f} s")
-            self.roi_end_label.setText(f"End: {end:.3f} s")
+
+            # Block signals to avoid recursion when updating from code
+            self.roi_start_spin.blockSignals(True)
+            self.roi_end_spin.blockSignals(True)
+
+            self.roi_start_spin.setValue(start)
+            self.roi_end_spin.setValue(end)
             self.roi_duration_label.setText(f"Duration: {duration:.3f} s")
 
+            self.roi_start_spin.blockSignals(False)
+            self.roi_end_spin.blockSignals(False)
+
+    def _on_time_input_changed(self):
+        """Handle manual time input changes."""
+        start = self.roi_start_spin.value()
+        end = self.roi_end_spin.value()
+
+        # Validate: end must be after start
+        if end <= start:
+            return
+
+        # Update selected region
+        self.selected_region = (start, end)
+
+        # Update duration label
+        duration = end - start
+        self.roi_duration_label.setText(f"Duration: {duration:.3f} s")
+
+        # Update the SpanSelector to match the new values
+        if self.span_selector is not None:
+            self.span_selector.extents = (start, end)
+
+        # Update visualization (removes extra lines, redraws canvas)
+        self._draw_selection_lines()
+        self.btn_calculate.setEnabled(True)
+
     def _draw_selection_lines(self):
-        """Draw selection visualization."""
+        """Draw selection visualization.
+
+        Only draws lines for first-click indicator (two-click mode).
+        The SpanSelector handles the region visualization.
+        """
         for line in self.threshold_lines:
             try:
                 line.remove()
@@ -631,18 +726,11 @@ class RMSQualityDialog(QtWidgets.QDialog):
                 pass
         self.threshold_lines.clear()
 
+        # Only draw a line for the first click in two-click mode
         if self.first_click_pos is not None:
             line = self.selection_ax.axvline(self.first_click_pos, color=Colors.BLUE_600,
                                              linestyle='--', linewidth=2)
             self.threshold_lines.append(line)
-        elif self.selected_region:
-            start, end = self.selected_region
-            line1 = self.selection_ax.axvline(start, color=Colors.GREEN_600,
-                                              linestyle='-', linewidth=2, alpha=0.7)
-            line2 = self.selection_ax.axvline(end, color=Colors.GREEN_600,
-                                              linestyle='-', linewidth=2, alpha=0.7)
-            span = self.selection_ax.axvspan(start, end, alpha=0.15, color=Colors.GREEN_500)
-            self.threshold_lines.extend([line1, line2, span])
 
         self.selection_canvas.draw_idle()
 
@@ -659,8 +747,17 @@ class RMSQualityDialog(QtWidgets.QDialog):
                 pass
         self.threshold_lines.clear()
 
-        self.roi_start_label.setText("Start: --")
-        self.roi_end_label.setText("End: --")
+        # Reset SpanSelector
+        if self.span_selector is not None:
+            self.span_selector.extents = (0, 0)
+
+        # Reset spinboxes
+        self.roi_start_spin.blockSignals(True)
+        self.roi_end_spin.blockSignals(True)
+        self.roi_start_spin.setValue(0)
+        self.roi_end_spin.setValue(0)
+        self.roi_start_spin.blockSignals(False)
+        self.roi_end_spin.blockSignals(False)
         self.roi_duration_label.setText("Duration: --")
 
         self.btn_calculate.setEnabled(False)
@@ -729,19 +826,14 @@ class RMSQualityDialog(QtWidgets.QDialog):
 
                 # Extract region and calculate RMS
                 region_data = emg.data[si:ei, data_idx]
-                rms_v = calculate_rms(region_data)
+                rms_raw = calculate_rms(region_data)
 
-                # Convert to microvolts (assuming data is in volts)
-                # Check if data seems to be in mV or V based on magnitude
-                if np.abs(region_data).max() < 0.1:
-                    # Likely in volts, convert to µV
-                    rms_uv = rms_v * 1e6
-                elif np.abs(region_data).max() < 100:
-                    # Likely in mV, convert to µV
-                    rms_uv = rms_v * 1e3
-                else:
-                    # Already in µV
-                    rms_uv = rms_v
+                # Convert to microvolts
+                # The OTB4 file loader applies: conv = ADC_Range / (2^ADC_Nbits) * 1000 / Gain
+                # The "* 1000" means data is stored in millivolts (mV).
+                # To convert mV to µV: multiply by 1000
+                # Example: 0.011 mV * 1000 = 11 µV (matches OTBiolab reference)
+                rms_uv = rms_raw * 1000.0
 
                 quality = classify_quality(rms_uv)
 
@@ -856,7 +948,7 @@ class RMSQualityDialog(QtWidgets.QDialog):
         else:
             # Show index numbers instead
             ax.set_xticklabels([str(i + 1) for i in range(len(results.file_results))], fontsize=8)
-            ax.set_xlabel("Recording #", fontsize=10, fontfamily='sans-serif')
+            ax.set_xlabel("Grid #", fontsize=10, fontfamily='sans-serif')
 
         ax.set_ylabel("RMS Noise (µV)", fontsize=10, fontfamily='sans-serif')
         ax.set_title("RMS Noise Quality per Recording", fontsize=11, fontweight='bold', fontfamily='sans-serif')

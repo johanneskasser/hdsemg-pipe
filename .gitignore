@@ -8,6 +8,8 @@ __pycache__/
 
 *.log
 **/*.log
+*.log*
+**/*.log*
 
 .vscode/
 
@@ -17,3 +19,4 @@ uv.lock
 .python-version
 hdsemg_pipe/resources_rc.py
 CLAUDE.md
+.claude/
