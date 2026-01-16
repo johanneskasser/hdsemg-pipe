@@ -18,11 +18,11 @@ See [Application Settings](application_settings.md) for detailed configuration i
 
 ## Basic Workflow
 
-The hdsemg-pipe application guides you through five main steps to process your HD-sEMG data:
+The hdsemg-pipe application guides you through ten main steps to process your HD-sEMG data:
 
 ### 1. Open Files
 - Click on the "Open File" button
-- Select your `.otb` file(s) from OT Bioelettronica devices
+- Select your `.otb`, `.otb+`, `.otb4`, or `.mat` file(s)
 - The application will automatically create a workspace structure
 - Files are automatically preprocessed (DC offset correction)
 
@@ -36,7 +36,24 @@ The hdsemg-pipe application guides you through five main steps to process your H
 
 [Learn more about Grid Association](../processing/grid_association.md)
 
-### 3. Define Region of Interest (ROI)
+### 3. Line Noise Removal
+
+- Remove powerline interference (50/60 Hz)
+- Choose from multiple filtering methods
+- Process all files with visual progress
+
+[Learn more about Line Noise Removal](../processing/line_noise_removal.md)
+
+### 4. RMS Quality Analysis
+
+- Analyze baseline noise levels across recordings
+- Select a quiet region for RMS calculation
+- Review quality statistics and visualizations
+- Identify recordings with poor signal quality
+
+[Learn more about RMS Quality Analysis](../processing/rms_quality_analysis.md)
+
+### 5. Define Region of Interest (ROI)
 - Visualize your signals
 - Select the time range of interest
 - Apply the selection to all files
@@ -44,7 +61,7 @@ The hdsemg-pipe application guides you through five main steps to process your H
 
 [Learn more about ROI Definition](../processing/crop_to_roi.md)
 
-### 4. Channel Selection
+### 6. Channel Selection
 - Launch the external channel selection application
 - Process each file to select valid channels
 - Monitor the progress
@@ -52,12 +69,29 @@ The hdsemg-pipe application guides you through five main steps to process your H
 
 [Learn more about Channel Selection](../processing/channel_selection.md)
 
-### 5. Decomposition Results
+### 7. Decomposition Results
 - Map decomposition results to channel selections
 - Review the mappings
-- Launch openhdemg to visualize results
 
 [Learn more about Decomposition Results](../processing/decomposition_results.md)
+
+### 8. Multi-Grid Configuration
+
+- Configure settings for multi-grid analysis
+- Set up decomposition parameters
+
+### 9. MUEdit Cleaning
+
+- Clean and refine motor unit decomposition results
+- Export data for MUEdit processing
+
+[Learn more about MUEdit Export](../processing/muedit_export_workflow.md)
+
+### 10. Final Results
+
+- Review all processed data
+- Launch openhdemg to visualize results
+- Export final analysis
 
 ## Workspace Structure
 
@@ -66,11 +100,15 @@ The application automatically creates and manages the following folder structure
 {! folder_structure.md !}
 
 Each folder serves a specific purpose in the processing pipeline:
+
 - `original_files/`: Contains your imported and preprocessed data
 - `associated_grids/`: Stores grid association configurations
+- `line_noise_cleaned/`: Contains signals after line noise removal
+- `analysis/`: Stores RMS quality analysis reports and figures
 - `cropped_signal/`: Contains the ROI-defined data segments
 - `channelselection/`: Stores the results of channel selection
-- `decomposition/`: Contains final decomposition results
+- `decomposition_auto/`: Contains automatic decomposition outputs
+- `decomposition_results/`: Contains final decomposition results
 
 ## Progress Tracking
 

@@ -393,7 +393,7 @@ pip install oct2py>=5.0.0
 After line noise removal is complete:
 1. Verify the number of processed files matches your input
 2. Check output directory for cleaned files
-3. Proceed to [Crop to Region of Interest](crop_to_roi.md)
+3. Proceed to [RMS Quality Analysis](rms_quality_analysis.md) to assess signal quality
 
 ## Troubleshooting
 
