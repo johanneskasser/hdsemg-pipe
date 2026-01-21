@@ -1,5 +1,5 @@
 """
-Step 9: Final Results (Wizard Version)
+Step 12: Final Results (Wizard Version)
 
 This step converts edited MUEdit files back to JSON format and displays results.
 """
@@ -98,7 +98,7 @@ class JSONConversionWorker(QThread):
 
 class FinalResultsWizardWidget(WizardStepWidget):
     """
-    Step 9: Convert edited files and show final results.
+    Step 12: Convert edited files and show final results.
 
     This step:
     - Converts edited MUEdit files back to JSON
@@ -109,7 +109,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Hardcoded step configuration
-        step_index = 10
+        step_index = 12
         step_name = "Final Results"
         description = "Convert edited MUEdit files back to JSON format and view cleaned results in openhdemg."
 

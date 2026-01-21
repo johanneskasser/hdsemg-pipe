@@ -1,5 +1,5 @@
 """
-Step 8: MUEdit Manual Cleaning (Wizard Version)
+Step 10: MUEdit Manual Cleaning (Wizard Version)
 
 This step launches MUEdit for manual cleaning of decomposition results
 and monitors progress.
@@ -23,7 +23,7 @@ from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius,
 
 class MUEditCleaningWizardWidget(WizardStepWidget):
     """
-    Step 8: Manual cleaning with MUEdit.
+    Step 10: Manual cleaning with MUEdit.
 
     This step:
     - Launches MUEdit for manual cleaning
@@ -35,7 +35,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Hardcoded step configuration
-        step_index = 9
+        step_index = 10
         step_name = "MUEdit Manual Cleaning"
         description = "Launch MUEdit for manual cleaning and quality control of motor unit decomposition results."
 
