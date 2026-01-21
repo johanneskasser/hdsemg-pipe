@@ -10,8 +10,10 @@ Provides quality assurance checkpoint with options to:
 - Return to MUedit for further cleaning
 """
 
+import csv
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -19,12 +21,14 @@ import pandas as pd
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtWidgets import (
     QDialog,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -215,6 +219,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
     def create_validation_ui(self):
         """Create the validation UI."""
         self.validation_container = QFrame()
+        self.validation_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         container_layout = QVBoxLayout(self.validation_container)
         container_layout.setSpacing(Spacing.MD)
         container_layout.setContentsMargins(0, 0, 0, 0)
@@ -226,63 +231,78 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             f"""
             QLabel {{
                 color: {Colors.TEXT_SECONDARY};
-                font-size: {Fonts.SIZE_SM};
+                font-size: {Fonts.SIZE_BASE};
                 padding: {Spacing.SM}px;
+                background-color: {Colors.BG_TERTIARY};
+                border-radius: {BorderRadius.SM};
             }}
         """
         )
         container_layout.addWidget(self.status_label)
 
+        # Summary and warning row
+        info_row = QHBoxLayout()
+        info_row.setSpacing(Spacing.MD)
+
         # Summary panel
         self.summary_frame = QFrame()
+        self.summary_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.summary_frame.setStyleSheet(
             f"""
             QFrame {{
                 background-color: {Colors.BG_TERTIARY};
                 border: 1px solid {Colors.BORDER_DEFAULT};
-                border-radius: {BorderRadius.SM};
+                border-radius: {BorderRadius.MD};
                 padding: {Spacing.MD}px;
             }}
         """
         )
         summary_layout = QVBoxLayout(self.summary_frame)
-        summary_layout.setSpacing(Spacing.XS)
+        summary_layout.setSpacing(Spacing.SM)
 
         self.summary_title = QLabel("Validation Summary")
         self.summary_title.setStyleSheet(
-            f"font-weight: {Fonts.WEIGHT_BOLD}; color: {Colors.TEXT_PRIMARY};"
+            f"font-weight: {Fonts.WEIGHT_BOLD}; font-size: {Fonts.SIZE_LG}; color: {Colors.TEXT_PRIMARY};"
         )
         summary_layout.addWidget(self.summary_title)
 
         self.summary_content = QLabel("")
         self.summary_content.setWordWrap(True)
-        self.summary_content.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
+        self.summary_content.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_BASE};")
         summary_layout.addWidget(self.summary_content)
 
         self.summary_frame.setVisible(False)
-        container_layout.addWidget(self.summary_frame)
+        info_row.addWidget(self.summary_frame)
 
         # Warning panel (for MUs exceeding threshold)
         self.warning_frame = QFrame()
+        self.warning_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.warning_frame.setStyleSheet(
             f"""
             QFrame {{
                 background-color: #FEF3C7;
                 border: 1px solid #F59E0B;
-                border-radius: {BorderRadius.SM};
+                border-radius: {BorderRadius.MD};
                 padding: {Spacing.MD}px;
             }}
         """
         )
         warning_layout = QVBoxLayout(self.warning_frame)
+        warning_layout.setSpacing(Spacing.SM)
+
+        warning_title = QLabel("Warning")
+        warning_title.setStyleSheet(f"font-weight: {Fonts.WEIGHT_BOLD}; font-size: {Fonts.SIZE_LG}; color: #92400E;")
+        warning_layout.addWidget(warning_title)
 
         self.warning_label = QLabel("")
         self.warning_label.setWordWrap(True)
-        self.warning_label.setStyleSheet("color: #92400E;")
+        self.warning_label.setStyleSheet(f"color: #92400E; font-size: {Fonts.SIZE_BASE};")
         warning_layout.addWidget(self.warning_label)
 
         self.warning_frame.setVisible(False)
-        container_layout.addWidget(self.warning_frame)
+        info_row.addWidget(self.warning_frame)
+
+        container_layout.addLayout(info_row)
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -304,8 +324,45 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.progress_bar.setVisible(False)
         container_layout.addWidget(self.progress_bar)
 
+        # Table section with header and export button
+        table_section = QFrame()
+        table_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        table_section_layout = QVBoxLayout(table_section)
+        table_section_layout.setContentsMargins(0, 0, 0, 0)
+        table_section_layout.setSpacing(Spacing.SM)
+
+        # Table header row
+        table_header_row = QHBoxLayout()
+        table_header_row.setSpacing(Spacing.MD)
+
+        self.table_header = QLabel("Pre/Post Comparison Results")
+        self.table_header.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_LG};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+            }}
+        """
+        )
+        self.table_header.setVisible(False)
+        table_header_row.addWidget(self.table_header)
+
+        table_header_row.addStretch()
+
+        # Export button
+        self.btn_export_csv = QPushButton("Export to CSV")
+        self.btn_export_csv.setStyleSheet(Styles.button_secondary())
+        self.btn_export_csv.setToolTip("Export validation results to CSV file")
+        self.btn_export_csv.clicked.connect(self.export_to_csv)
+        self.btn_export_csv.setEnabled(False)
+        table_header_row.addWidget(self.btn_export_csv)
+
+        table_section_layout.addLayout(table_header_row)
+
         # Results table
         self.results_table = QTableWidget()
+        self.results_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.results_table.setColumnCount(6)
         self.results_table.setHorizontalHeaderLabels(
             [
@@ -324,30 +381,37 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             self.results_table.horizontalHeader().setSectionResizeMode(
                 col, QHeaderView.ResizeToContents
             )
+        self.results_table.setAlternatingRowColors(True)
+        self.results_table.setSortingEnabled(True)
         self.results_table.setStyleSheet(
             f"""
             QTableWidget {{
-                background-color: {Colors.BG_SECONDARY};
+                background-color: {Colors.BG_PRIMARY};
+                alternate-background-color: {Colors.BG_SECONDARY};
                 border: 1px solid {Colors.BORDER_DEFAULT};
-                border-radius: {BorderRadius.SM};
+                border-radius: {BorderRadius.MD};
                 gridline-color: {Colors.BORDER_DEFAULT};
+                font-size: {Fonts.SIZE_BASE};
             }}
             QTableWidget::item {{
-                padding: {Spacing.XS}px;
+                padding: {Spacing.SM}px {Spacing.MD}px;
             }}
             QHeaderView::section {{
                 background-color: {Colors.BG_TERTIARY};
                 color: {Colors.TEXT_PRIMARY};
-                padding: {Spacing.SM}px;
+                padding: {Spacing.MD}px;
                 border: none;
-                border-bottom: 1px solid {Colors.BORDER_DEFAULT};
-                font-weight: {Fonts.WEIGHT_MEDIUM};
+                border-bottom: 2px solid {Colors.BORDER_DEFAULT};
+                font-weight: {Fonts.WEIGHT_BOLD};
+                font-size: {Fonts.SIZE_BASE};
             }}
         """
         )
-        self.results_table.setMaximumHeight(300)
+        self.results_table.setMinimumHeight(300)
         self.results_table.setVisible(False)
-        container_layout.addWidget(self.results_table)
+        table_section_layout.addWidget(self.results_table, stretch=1)
+
+        container_layout.addWidget(table_section, stretch=1)
 
     def create_buttons(self):
         """Create buttons for this step."""
@@ -502,34 +566,44 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         """Handle validation result for one file."""
         self.validation_results[filename] = comparison
 
-        # Add to table
+        # Show table and header
+        self.table_header.setVisible(True)
         self.results_table.setVisible(True)
+
+        # Temporarily disable sorting to add rows
+        self.results_table.setSortingEnabled(False)
 
         for detail in comparison.get("comparison_details", []):
             table_row = self.results_table.rowCount()
             self.results_table.insertRow(table_row)
 
             # File name
-            self.results_table.setItem(table_row, 0, QTableWidgetItem(filename))
+            file_item = QTableWidgetItem(filename)
+            self.results_table.setItem(table_row, 0, file_item)
 
-            # MU index
-            self.results_table.setItem(
-                table_row, 1, QTableWidgetItem(str(detail["mu_index"]))
-            )
+            # MU index - use setData for proper numeric sorting
+            mu_item = QTableWidgetItem()
+            mu_item.setData(Qt.DisplayRole, int(detail["mu_index"]))
+            mu_item.setTextAlignment(Qt.AlignCenter)
+            self.results_table.setItem(table_row, 1, mu_item)
 
-            # Pre-CoVISI
+            # Pre-CoVISI - use setData for proper numeric sorting
             pre_val = detail["covisi_pre"]
-            pre_item = QTableWidgetItem(
-                f"{pre_val:.1f}" if pd.notna(pre_val) else "N/A"
-            )
+            pre_item = QTableWidgetItem()
+            if pd.notna(pre_val):
+                pre_item.setData(Qt.DisplayRole, round(pre_val, 1))
+            else:
+                pre_item.setText("N/A")
             pre_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.results_table.setItem(table_row, 2, pre_item)
 
-            # Post-CoVISI
+            # Post-CoVISI - use setData for proper numeric sorting
             post_val = detail["covisi_post"]
-            post_item = QTableWidgetItem(
-                f"{post_val:.1f}" if pd.notna(post_val) else "N/A"
-            )
+            post_item = QTableWidgetItem()
+            if pd.notna(post_val):
+                post_item.setData(Qt.DisplayRole, round(post_val, 1))
+            else:
+                post_item.setText("N/A")
             post_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
             # Color code post value
@@ -537,34 +611,41 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                 if post_val <= DEFAULT_COVISI_THRESHOLD:
                     post_item.setBackground(Qt.darkGreen)
                     post_item.setForeground(Qt.white)
+                elif post_val <= 50.0:
+                    post_item.setBackground(Qt.darkYellow)
+                    post_item.setForeground(Qt.black)
                 else:
                     post_item.setBackground(Qt.darkRed)
                     post_item.setForeground(Qt.white)
 
             self.results_table.setItem(table_row, 3, post_item)
 
-            # Improvement
+            # Improvement - use setData for proper numeric sorting
             improvement = detail["improvement_percent"]
+            improvement_item = QTableWidgetItem()
             if pd.notna(improvement):
-                improvement_text = f"{improvement:+.1f}%"
-                improvement_item = QTableWidgetItem(improvement_text)
+                improvement_item.setData(Qt.DisplayRole, round(improvement, 1))
                 if improvement > 0:
                     improvement_item.setForeground(Qt.darkGreen)
                 elif improvement < 0:
                     improvement_item.setForeground(Qt.red)
             else:
-                improvement_item = QTableWidgetItem("N/A")
+                improvement_item.setText("N/A")
             improvement_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.results_table.setItem(table_row, 4, improvement_item)
 
             # Status
             if detail["exceeds_threshold"]:
-                status_item = QTableWidgetItem("⚠️ Exceeds")
+                status_item = QTableWidgetItem("Exceeds")
                 status_item.setForeground(Qt.red)
             else:
-                status_item = QTableWidgetItem("✓ Pass")
+                status_item = QTableWidgetItem("Pass")
                 status_item.setForeground(Qt.darkGreen)
+            status_item.setTextAlignment(Qt.AlignCenter)
             self.results_table.setItem(table_row, 5, status_item)
+
+        # Re-enable sorting
+        self.results_table.setSortingEnabled(True)
 
     def on_validation_finished(self, overall_report):
         """Handle validation completion."""
@@ -591,7 +672,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         if failing_count > 0:
             self.warning_frame.setVisible(True)
             self.warning_label.setText(
-                f"⚠️ {failing_count} motor unit(s) still exceed the {DEFAULT_COVISI_THRESHOLD}% "
+                f"{failing_count} motor unit(s) still exceed the {DEFAULT_COVISI_THRESHOLD}% "
                 f"CoVISI threshold after cleaning.\n\n"
                 "Options:\n"
                 "• Accept All: Keep these MUs (may be valid despite high CoVISI)\n"
@@ -608,6 +689,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.btn_validate.setEnabled(True)
         self.btn_accept.setEnabled(True)
         self.btn_return_muedit.setEnabled(True)
+        self.btn_export_csv.setEnabled(len(self.validation_results) > 0)
 
         self.status_label.setText(
             f"Validation complete. {overall_report['files_validated']} file(s) analyzed."
@@ -692,6 +774,83 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.status_label.setText(
             "Please clean the motor units further in MUedit, then return here."
         )
+
+    def export_to_csv(self):
+        """Export validation results to CSV file."""
+        if not self.validation_results:
+            self.warn("No validation results to export. Run validation first.")
+            return
+
+        # Get analysis folder path
+        analysis_folder = os.path.join(global_state.workfolder, "analysis")
+        if not os.path.exists(analysis_folder):
+            os.makedirs(analysis_folder)
+            logger.info(f"Created analysis folder: {analysis_folder}")
+
+        # Generate default filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"covisi_post_validation_{timestamp}.csv"
+        default_path = os.path.join(analysis_folder, default_filename)
+
+        # Open save dialog
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Validation Results to CSV",
+            default_path,
+            "CSV Files (*.csv);;All Files (*)",
+        )
+
+        if not file_path:
+            return  # User cancelled
+
+        try:
+            with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+
+                # Write header
+                writer.writerow([
+                    "File",
+                    "MU Index",
+                    "Pre-CoVISI (%)",
+                    "Post-CoVISI (%)",
+                    "Improvement (%)",
+                    "Status",
+                    "Threshold (%)",
+                ])
+
+                # Write data from table
+                for row_idx in range(self.results_table.rowCount()):
+                    file_name = self.results_table.item(row_idx, 0).text()
+                    mu_index = self.results_table.item(row_idx, 1).data(Qt.DisplayRole)
+
+                    # Handle potential N/A values
+                    pre_item = self.results_table.item(row_idx, 2)
+                    pre_val = pre_item.data(Qt.DisplayRole) if pre_item.data(Qt.DisplayRole) is not None else pre_item.text()
+
+                    post_item = self.results_table.item(row_idx, 3)
+                    post_val = post_item.data(Qt.DisplayRole) if post_item.data(Qt.DisplayRole) is not None else post_item.text()
+
+                    improvement_item = self.results_table.item(row_idx, 4)
+                    improvement_val = improvement_item.data(Qt.DisplayRole) if improvement_item.data(Qt.DisplayRole) is not None else improvement_item.text()
+
+                    status = self.results_table.item(row_idx, 5).text()
+
+                    writer.writerow([
+                        file_name,
+                        mu_index,
+                        pre_val,
+                        post_val,
+                        improvement_val,
+                        status,
+                        DEFAULT_COVISI_THRESHOLD,
+                    ])
+
+            self.success(f"Exported validation results to {os.path.basename(file_path)}")
+            logger.info(f"Exported CoVISI post-validation results to: {file_path}")
+
+        except Exception as e:
+            self.error(f"Failed to export CSV: {str(e)}")
+            logger.error(f"Failed to export CSV: {e}")
 
     def is_completed(self):
         """Check if this step is completed."""

@@ -7,20 +7,25 @@ Variation of Interspike Interval) before MUedit manual cleaning.
 Literature standard: CoVISI < 30% indicates physiologically plausible MUs.
 """
 
+import csv
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -206,6 +211,7 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
     def create_covisi_ui(self):
         """Create the CoVISI analysis UI."""
         self.covisi_container = QFrame()
+        self.covisi_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         container_layout = QVBoxLayout(self.covisi_container)
         container_layout.setSpacing(Spacing.MD)
         container_layout.setContentsMargins(0, 0, 0, 0)
@@ -217,24 +223,42 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             f"""
             QLabel {{
                 color: {Colors.TEXT_SECONDARY};
-                font-size: {Fonts.SIZE_SM};
+                font-size: {Fonts.SIZE_BASE};
                 padding: {Spacing.SM}px;
+                background-color: {Colors.BG_TERTIARY};
+                border-radius: {BorderRadius.SM};
             }}
         """
         )
         container_layout.addWidget(self.status_label)
 
-        # Threshold control
-        threshold_widget = QWidget()
-        threshold_layout = QHBoxLayout(threshold_widget)
-        threshold_layout.setContentsMargins(0, 0, 0, 0)
-        threshold_layout.setSpacing(Spacing.SM)
+        # Controls row (threshold + export)
+        controls_widget = QWidget()
+        controls_layout = QHBoxLayout(controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(Spacing.LG)
+
+        # Threshold control group
+        threshold_group = QFrame()
+        threshold_group.setStyleSheet(
+            f"""
+            QFrame {{
+                background-color: {Colors.BG_TERTIARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.SM}px;
+            }}
+        """
+        )
+        threshold_group_layout = QHBoxLayout(threshold_group)
+        threshold_group_layout.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
+        threshold_group_layout.setSpacing(Spacing.MD)
 
         threshold_label = QLabel("CoVISI Threshold (%):")
         threshold_label.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_SM};"
+            f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_BASE}; font-weight: {Fonts.WEIGHT_MEDIUM};"
         )
-        threshold_layout.addWidget(threshold_label)
+        threshold_group_layout.addWidget(threshold_label)
 
         self.threshold_spinbox = QDoubleSpinBox()
         self.threshold_spinbox.setRange(5.0, 100.0)
@@ -250,26 +274,37 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.threshold_spinbox.setStyleSheet(
             f"""
             QDoubleSpinBox {{
-                background-color: {Colors.BG_SECONDARY};
+                background-color: {Colors.BG_PRIMARY};
                 border: 1px solid {Colors.BORDER_DEFAULT};
                 border-radius: {BorderRadius.SM};
-                padding: {Spacing.XS}px {Spacing.SM}px;
+                padding: {Spacing.SM}px {Spacing.MD}px;
                 color: {Colors.TEXT_PRIMARY};
-                min-width: 100px;
+                min-width: 120px;
+                font-size: {Fonts.SIZE_BASE};
             }}
         """
         )
-        threshold_layout.addWidget(self.threshold_spinbox)
+        threshold_group_layout.addWidget(self.threshold_spinbox)
 
         # Preview label
         self.preview_label = QLabel("")
         self.preview_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_BASE};"
         )
-        threshold_layout.addWidget(self.preview_label)
-        threshold_layout.addStretch()
+        threshold_group_layout.addWidget(self.preview_label)
 
-        container_layout.addWidget(threshold_widget)
+        controls_layout.addWidget(threshold_group)
+        controls_layout.addStretch()
+
+        # Export button
+        self.btn_export_csv = QPushButton("Export to CSV")
+        self.btn_export_csv.setStyleSheet(Styles.button_secondary())
+        self.btn_export_csv.setToolTip("Export CoVISI analysis results to CSV file")
+        self.btn_export_csv.clicked.connect(self.export_to_csv)
+        self.btn_export_csv.setEnabled(False)
+        controls_layout.addWidget(self.btn_export_csv)
+
+        container_layout.addWidget(controls_widget)
 
         # Progress bar (hidden initially)
         self.progress_bar = QProgressBar()
@@ -291,8 +326,30 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.progress_bar.setVisible(False)
         container_layout.addWidget(self.progress_bar)
 
-        # Results table
+        # Results table - make it expandable
+        table_container = QFrame()
+        table_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(Spacing.XS)
+
+        # Table header label
+        self.table_header = QLabel("Motor Unit Quality Analysis")
+        self.table_header.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_LG};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+                padding: {Spacing.XS}px 0;
+            }}
+        """
+        )
+        self.table_header.setVisible(False)
+        table_layout.addWidget(self.table_header)
+
         self.results_table = QTableWidget()
+        self.results_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.results_table.setColumnCount(5)
         self.results_table.setHorizontalHeaderLabels(
             ["File", "MU Index", "CoVISI (%)", "Quality", "Status"]
@@ -312,30 +369,37 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.results_table.horizontalHeader().setSectionResizeMode(
             4, QHeaderView.ResizeToContents
         )
+        self.results_table.setAlternatingRowColors(True)
+        self.results_table.setSortingEnabled(True)
         self.results_table.setStyleSheet(
             f"""
             QTableWidget {{
-                background-color: {Colors.BG_SECONDARY};
+                background-color: {Colors.BG_PRIMARY};
+                alternate-background-color: {Colors.BG_SECONDARY};
                 border: 1px solid {Colors.BORDER_DEFAULT};
-                border-radius: {BorderRadius.SM};
+                border-radius: {BorderRadius.MD};
                 gridline-color: {Colors.BORDER_DEFAULT};
+                font-size: {Fonts.SIZE_BASE};
             }}
             QTableWidget::item {{
-                padding: {Spacing.XS}px;
+                padding: {Spacing.SM}px {Spacing.MD}px;
             }}
             QHeaderView::section {{
                 background-color: {Colors.BG_TERTIARY};
                 color: {Colors.TEXT_PRIMARY};
-                padding: {Spacing.SM}px;
+                padding: {Spacing.MD}px;
                 border: none;
-                border-bottom: 1px solid {Colors.BORDER_DEFAULT};
-                font-weight: {Fonts.WEIGHT_MEDIUM};
+                border-bottom: 2px solid {Colors.BORDER_DEFAULT};
+                font-weight: {Fonts.WEIGHT_BOLD};
+                font-size: {Fonts.SIZE_BASE};
             }}
         """
         )
-        self.results_table.setMaximumHeight(300)
+        self.results_table.setMinimumHeight(300)
         self.results_table.setVisible(False)
-        container_layout.addWidget(self.results_table)
+        table_layout.addWidget(self.results_table, stretch=1)
+
+        container_layout.addWidget(table_container, stretch=1)
 
     def create_buttons(self):
         """Create buttons for this step."""
@@ -469,28 +533,40 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.covisi_data[json_path] = result
 
         # Add to table
+        self.table_header.setVisible(True)
         self.results_table.setVisible(True)
+
+        # Temporarily disable sorting to add rows
+        self.results_table.setSortingEnabled(False)
+
         for _, row in result.iterrows():
             table_row = self.results_table.rowCount()
             self.results_table.insertRow(table_row)
 
             # File name
-            self.results_table.setItem(table_row, 0, QTableWidgetItem(filename))
+            file_item = QTableWidgetItem(filename)
+            self.results_table.setItem(table_row, 0, file_item)
 
-            # MU index
-            self.results_table.setItem(
-                table_row, 1, QTableWidgetItem(str(int(row["mu_index"])))
-            )
+            # MU index - use setData for proper numeric sorting
+            mu_item = QTableWidgetItem()
+            mu_item.setData(Qt.DisplayRole, int(row["mu_index"]))
+            mu_item.setTextAlignment(Qt.AlignCenter)
+            self.results_table.setItem(table_row, 1, mu_item)
 
-            # CoVISI value
+            # CoVISI value - use setData for proper numeric sorting
             covisi_val = row["covisi_all"]
-            covisi_item = QTableWidgetItem(f"{covisi_val:.1f}")
+            covisi_item = QTableWidgetItem()
+            covisi_item.setData(Qt.DisplayRole, round(covisi_val, 1))
             covisi_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
             # Color code by threshold
             if covisi_val <= self.threshold:
                 covisi_item.setBackground(Qt.darkGreen)
                 covisi_item.setForeground(Qt.white)
+            elif covisi_val <= 50.0:
+                # Marginal - yellow/orange
+                covisi_item.setBackground(Qt.darkYellow)
+                covisi_item.setForeground(Qt.black)
             else:
                 covisi_item.setBackground(Qt.darkRed)
                 covisi_item.setForeground(Qt.white)
@@ -500,12 +576,17 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             # Quality category
             quality = get_covisi_quality_category(covisi_val)
             quality_item = QTableWidgetItem(quality.capitalize())
+            quality_item.setTextAlignment(Qt.AlignCenter)
             self.results_table.setItem(table_row, 3, quality_item)
 
             # Status (will be filtered or kept)
             status = "Keep" if covisi_val <= self.threshold else "Filter"
             status_item = QTableWidgetItem(status)
+            status_item.setTextAlignment(Qt.AlignCenter)
             self.results_table.setItem(table_row, 4, status_item)
+
+        # Re-enable sorting
+        self.results_table.setSortingEnabled(True)
 
     def on_compute_finished(self):
         """Handle computation completion."""
@@ -518,6 +599,7 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.btn_compute.setEnabled(True)
         self.btn_apply_filter.setEnabled(len(self.covisi_data) > 0)
         self.btn_skip.setEnabled(True)
+        self.btn_export_csv.setEnabled(len(self.covisi_data) > 0)
 
         total_mus = sum(len(df) for df in self.covisi_data.values())
         self.status_label.setText(
@@ -677,6 +759,72 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         # Mark step as completed
         self.complete_step()
+
+    def export_to_csv(self):
+        """Export CoVISI analysis results to CSV file."""
+        if not self.covisi_data:
+            self.warn("No data to export. Run CoVISI analysis first.")
+            return
+
+        # Get analysis folder path
+        analysis_folder = os.path.join(global_state.workfolder, "analysis")
+        if not os.path.exists(analysis_folder):
+            os.makedirs(analysis_folder)
+            logger.info(f"Created analysis folder: {analysis_folder}")
+
+        # Generate default filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"covisi_pre_filter_analysis_{timestamp}.csv"
+        default_path = os.path.join(analysis_folder, default_filename)
+
+        # Open save dialog
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export CoVISI Analysis to CSV",
+            default_path,
+            "CSV Files (*.csv);;All Files (*)",
+        )
+
+        if not file_path:
+            return  # User cancelled
+
+        try:
+            with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+
+                # Write header
+                writer.writerow([
+                    "File",
+                    "MU Index",
+                    "CoVISI (%)",
+                    "Quality",
+                    "Status",
+                    "Threshold (%)",
+                ])
+
+                # Write data from table
+                for row_idx in range(self.results_table.rowCount()):
+                    file_name = self.results_table.item(row_idx, 0).text()
+                    mu_index = self.results_table.item(row_idx, 1).data(Qt.DisplayRole)
+                    covisi_val = self.results_table.item(row_idx, 2).data(Qt.DisplayRole)
+                    quality = self.results_table.item(row_idx, 3).text()
+                    status = self.results_table.item(row_idx, 4).text()
+
+                    writer.writerow([
+                        file_name,
+                        mu_index,
+                        covisi_val,
+                        quality,
+                        status,
+                        self.threshold,
+                    ])
+
+            self.success(f"Exported CoVISI analysis to {os.path.basename(file_path)}")
+            logger.info(f"Exported CoVISI pre-filter analysis to: {file_path}")
+
+        except Exception as e:
+            self.error(f"Failed to export CSV: {str(e)}")
+            logger.error(f"Failed to export CSV: {e}")
 
     def is_completed(self):
         """Check if this step is completed."""
