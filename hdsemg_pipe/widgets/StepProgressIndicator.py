@@ -10,7 +10,7 @@ class StepCircle(QWidget):
 
     clicked = pyqtSignal(int)
 
-    # Step names for tooltips
+    # Step names for tooltips (12 steps)
     STEP_NAMES = [
         "Open File(s)",
         "Grid Association",
@@ -20,7 +20,9 @@ class StepCircle(QWidget):
         "Channel Selection",
         "Decomposition Results",
         "Multi-Grid Configuration",
+        "CoVISI Pre-Filtering",
         "MUEdit Cleaning",
+        "CoVISI Post-Validation",
         "Final Results"
     ]
 
@@ -100,7 +102,9 @@ class StepCircle(QWidget):
 
 
 class StepProgressIndicator(QWidget):
-    """Top bar showing progress through all 10 steps."""
+    """Top bar showing progress through all 12 steps."""
+
+    TOTAL_STEPS = 12
 
     stepClicked = pyqtSignal(int)
 
@@ -127,11 +131,11 @@ class StepProgressIndicator(QWidget):
 
         # Main horizontal layout
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(Spacing.XXL, Spacing.LG, Spacing.XXL, Spacing.LG)
+        layout.setContentsMargins(Spacing.XL, Spacing.LG, Spacing.XL, Spacing.LG)
         layout.setSpacing(0)
 
-        # Create 10 step circles with connecting lines
-        for i in range(1, 11):
+        # Create 12 step circles with connecting lines
+        for i in range(1, self.TOTAL_STEPS + 1):
             # Add circle
             circle = StepCircle(i, self)
             circle.clicked.connect(self._onCircleClicked)
@@ -139,9 +143,9 @@ class StepProgressIndicator(QWidget):
             layout.addWidget(circle)
 
             # Add connecting line (except after last circle)
-            if i < 10:
+            if i < self.TOTAL_STEPS:
                 line = QLabel()
-                line.setFixedSize(40, 2)
+                line.setFixedSize(30, 2)  # Slightly smaller lines for 12 steps
                 line.setStyleSheet(f"background-color: {Colors.BORDER_DEFAULT};")
                 self.lines.append(line)
                 layout.addWidget(line, alignment=Qt.AlignCenter)
@@ -158,16 +162,16 @@ class StepProgressIndicator(QWidget):
         """Set the state of a specific step.
 
         Args:
-            step_number: 1-10
+            step_number: 1-12
             state: "completed", "active", "pending", "skipped", "error"
         """
-        if 1 <= step_number <= 10:
+        if 1 <= step_number <= self.TOTAL_STEPS:
             idx = step_number - 1
             clickable = (state in ["completed", "active"])
             self.circles[idx].setState(state, clickable)
 
             # Update connection line color if this step is completed
-            if step_number < 10:
+            if step_number < self.TOTAL_STEPS:
                 line = self.lines[step_number - 1]
                 if state == "completed":
                     line.setStyleSheet(f"background-color: {Colors.GREEN_600};")
@@ -176,7 +180,7 @@ class StepProgressIndicator(QWidget):
 
     def _updateStates(self):
         """Update all circle states based on current step."""
-        for i in range(10):
+        for i in range(self.TOTAL_STEPS):
             step_num = i + 1
             if step_num < self.current_step:
                 self.setStepState(step_num, "completed")
