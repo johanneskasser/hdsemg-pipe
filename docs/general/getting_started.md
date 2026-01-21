@@ -18,7 +18,7 @@ See [Application Settings](application_settings.md) for detailed configuration i
 
 ## Basic Workflow
 
-The hdsemg-pipe application guides you through ten main steps to process your HD-sEMG data:
+The hdsemg-pipe application guides you through twelve main steps to process your HD-sEMG data:
 
 ### 1. Open Files
 - Click on the "Open File" button
@@ -80,14 +80,30 @@ The hdsemg-pipe application guides you through ten main steps to process your HD
 - Configure settings for multi-grid analysis
 - Set up decomposition parameters
 
-### 9. MUEdit Cleaning
+### 9. CoVISI Pre-Filtering
+
+- Analyze motor unit quality using CoVISI (Coefficient of Variation of Interspike Interval)
+- Optionally filter out non-physiological motor units (CoVISI > 30%)
+- Review quality categories and export analysis to CSV
+
+[Learn more about CoVISI Filtering](../processing/covisi_filtering.md)
+
+### 10. MUEdit Cleaning
 
 - Clean and refine motor unit decomposition results
 - Export data for MUEdit processing
 
 [Learn more about MUEdit Export](../processing/muedit_export_workflow.md)
 
-### 10. Final Results
+### 11. CoVISI Post-Validation
+
+- Validate motor unit quality after MUedit manual cleaning
+- Compare pre/post cleaning CoVISI values
+- Review improvement metrics and handle MUs still exceeding threshold
+
+[Learn more about CoVISI Filtering](../processing/covisi_filtering.md)
+
+### 12. Final Results
 
 - Review all processed data
 - Launch openhdemg to visualize results

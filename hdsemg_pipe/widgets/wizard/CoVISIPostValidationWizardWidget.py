@@ -358,6 +358,14 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.btn_export_csv.setEnabled(False)
         table_header_row.addWidget(self.btn_export_csv)
 
+        # Expand table button
+        self.btn_expand_table = QPushButton("Expand Table")
+        self.btn_expand_table.setStyleSheet(Styles.button_secondary())
+        self.btn_expand_table.setToolTip("Open table in a resizable window for easier review")
+        self.btn_expand_table.clicked.connect(self.open_table_in_window)
+        self.btn_expand_table.setEnabled(False)
+        table_header_row.addWidget(self.btn_expand_table)
+
         table_section_layout.addLayout(table_header_row)
 
         # Results table
@@ -690,6 +698,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.btn_accept.setEnabled(True)
         self.btn_return_muedit.setEnabled(True)
         self.btn_export_csv.setEnabled(len(self.validation_results) > 0)
+        self.btn_expand_table.setEnabled(len(self.validation_results) > 0)
 
         self.status_label.setText(
             f"Validation complete. {overall_report['files_validated']} file(s) analyzed."
@@ -851,6 +860,115 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         except Exception as e:
             self.error(f"Failed to export CSV: {str(e)}")
             logger.error(f"Failed to export CSV: {e}")
+
+    def open_table_in_window(self):
+        """Open the results table in a separate resizable dialog window."""
+        if self.results_table.rowCount() == 0:
+            self.warn("No data to display. Run validation first.")
+            return
+
+        # Create modeless dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("CoVISI Post-Validation Results")
+        dialog.setModal(False)
+        dialog.resize(900, 600)
+
+        # Main layout
+        dialog_layout = QVBoxLayout(dialog)
+        dialog_layout.setSpacing(Spacing.MD)
+        dialog_layout.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
+
+        # Header label
+        header_label = QLabel("Pre/Post Comparison Results")
+        header_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_XL};
+                font-weight: {Fonts.WEIGHT_BOLD};
+                padding-bottom: {Spacing.SM}px;
+            }}
+        """
+        )
+        dialog_layout.addWidget(header_label)
+
+        # Create expanded table
+        expanded_table = QTableWidget()
+        expanded_table.setColumnCount(self.results_table.columnCount())
+        expanded_table.setHorizontalHeaderLabels(
+            [
+                "File",
+                "MU Index",
+                "Pre-CoVISI (%)",
+                "Post-CoVISI (%)",
+                "Improvement",
+                "Status",
+            ]
+        )
+        expanded_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        for col in range(1, 6):
+            expanded_table.horizontalHeader().setSectionResizeMode(
+                col, QHeaderView.ResizeToContents
+            )
+        expanded_table.setAlternatingRowColors(True)
+        expanded_table.setSortingEnabled(True)
+        expanded_table.setStyleSheet(
+            f"""
+            QTableWidget {{
+                background-color: {Colors.BG_PRIMARY};
+                alternate-background-color: {Colors.BG_SECONDARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.MD};
+                gridline-color: {Colors.BORDER_DEFAULT};
+                font-size: {Fonts.SIZE_BASE};
+            }}
+            QTableWidget::item {{
+                padding: {Spacing.SM}px {Spacing.MD}px;
+            }}
+            QHeaderView::section {{
+                background-color: {Colors.BG_TERTIARY};
+                color: {Colors.TEXT_PRIMARY};
+                padding: {Spacing.MD}px;
+                border: none;
+                border-bottom: 2px solid {Colors.BORDER_DEFAULT};
+                font-weight: {Fonts.WEIGHT_BOLD};
+                font-size: {Fonts.SIZE_BASE};
+            }}
+        """
+        )
+
+        # Copy data from original table
+        expanded_table.setRowCount(self.results_table.rowCount())
+        for row in range(self.results_table.rowCount()):
+            for col in range(self.results_table.columnCount()):
+                original_item = self.results_table.item(row, col)
+                if original_item:
+                    new_item = QTableWidgetItem()
+                    # Copy both text and data for proper sorting
+                    new_item.setText(original_item.text())
+                    data = original_item.data(Qt.DisplayRole)
+                    if data is not None:
+                        new_item.setData(Qt.DisplayRole, data)
+                    new_item.setTextAlignment(original_item.textAlignment())
+                    new_item.setBackground(original_item.background())
+                    new_item.setForeground(original_item.foreground())
+                    expanded_table.setItem(row, col, new_item)
+
+        dialog_layout.addWidget(expanded_table, stretch=1)
+
+        # Button row
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        close_button = QPushButton("Close")
+        close_button.setStyleSheet(Styles.button_secondary())
+        close_button.clicked.connect(dialog.close)
+        button_layout.addWidget(close_button)
+
+        dialog_layout.addLayout(button_layout)
+
+        # Show dialog
+        dialog.show()
 
     def is_completed(self):
         """Check if this step is completed."""
