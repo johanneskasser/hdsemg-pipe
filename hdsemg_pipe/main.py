@@ -332,12 +332,6 @@ def main():
 
 
     app = QApplication(sys.argv)
-    
-    # Set a consistent style
-    if sys.platform == 'darwin':
-        app.setStyle('macOS')
-    else:   
-        app.setStyle('windows')
 
     # Create and set a light palette to enforce light mode
     palette = QPalette()
