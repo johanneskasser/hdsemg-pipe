@@ -15,15 +15,18 @@ from pathlib import Path
 
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtWidgets import (
+    QButtonGroup,
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QSizePolicy,
     QSplitter,
     QTableWidget,
@@ -34,11 +37,16 @@ from PyQt5.QtWidgets import (
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.covisi_analysis import (
+    COVISI_METHOD_AUTO,
+    COVISI_METHOD_STEADY,
     DEFAULT_COVISI_THRESHOLD,
     OPENHDEMG_AVAILABLE,
+    SteadyStateSelectionDialog,
     apply_covisi_filter_to_json,
     compute_covisi_for_all_mus,
+    get_contraction_duration,
     get_covisi_quality_category,
+    get_ref_signal_for_plotting,
     save_covisi_report,
 )
 from hdsemg_pipe.actions.decomposition_export import export_to_muedit_mat
@@ -64,13 +72,17 @@ class CoVISIComputeWorker(QThread):
     """Worker thread for computing CoVISI values."""
 
     progress = pyqtSignal(int, int, str)  # current, total, filename
-    result = pyqtSignal(str, object)  # filename, covisi_df or error
+    result = pyqtSignal(str, object, float)  # filename, covisi_df or error, duration
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, json_files, parent=None):
+    def __init__(self, json_files, method=COVISI_METHOD_AUTO,
+                 start_steady=None, end_steady=None, parent=None):
         super().__init__(parent)
         self.json_files = json_files
+        self.method = method
+        self.start_steady = start_steady
+        self.end_steady = end_steady
 
     def run(self):
         """Compute CoVISI for all JSON files."""
@@ -89,13 +101,21 @@ class CoVISIComputeWorker(QThread):
                     # Load JSON file
                     emgfile = emg.emg_from_json(str(json_path))
 
-                    # Compute CoVISI
-                    covisi_df = compute_covisi_for_all_mus(emgfile)
-                    self.result.emit(json_path, covisi_df)
+                    # Get contraction duration for UI
+                    duration = get_contraction_duration(emgfile)
+
+                    # Compute CoVISI with specified method
+                    covisi_df = compute_covisi_for_all_mus(
+                        emgfile,
+                        method=self.method,
+                        start_steady=self.start_steady,
+                        end_steady=self.end_steady,
+                    )
+                    self.result.emit(json_path, covisi_df, duration)
 
                 except Exception as e:
                     logger.error(f"Failed to compute CoVISI for {filename}: {e}")
-                    self.result.emit(json_path, str(e))
+                    self.result.emit(json_path, str(e), 0.0)
 
             self.finished.emit()
 
@@ -201,6 +221,12 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.filter_worker = None
         self.filtering_applied = False
 
+        # Method selection
+        self.analysis_method = COVISI_METHOD_AUTO
+        self.start_steady = None
+        self.end_steady = None
+        self.contraction_duration = 0.0  # Will be set when files are loaded
+
         # Create custom UI
         self.create_covisi_ui()
         self.content_layout.addWidget(self.covisi_container)
@@ -232,33 +258,194 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         )
         container_layout.addWidget(self.status_label)
 
-        # Controls row (threshold + export)
-        controls_widget = QWidget()
-        controls_layout = QHBoxLayout(controls_widget)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
-        controls_layout.setSpacing(Spacing.LG)
+        # Settings row with two groups
+        settings_row = QHBoxLayout()
+        settings_row.setSpacing(Spacing.LG)
 
-        # Threshold control group
-        threshold_group = QFrame()
-        threshold_group.setStyleSheet(
+        # Method selection group
+        method_group = QGroupBox("Analysis Method")
+        method_group.setStyleSheet(
             f"""
-            QFrame {{
+            QGroupBox {{
                 background-color: {Colors.BG_TERTIARY};
                 border: 1px solid {Colors.BORDER_DEFAULT};
                 border-radius: {BorderRadius.MD};
-                padding: {Spacing.SM}px;
+                padding: {Spacing.MD}px;
+                padding-top: {Spacing.XL}px;
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+                font-size: {Fonts.SIZE_BASE};
+                color: {Colors.TEXT_PRIMARY};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 {Spacing.SM}px;
+                color: {Colors.TEXT_PRIMARY};
             }}
         """
         )
-        threshold_group_layout = QHBoxLayout(threshold_group)
-        threshold_group_layout.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
-        threshold_group_layout.setSpacing(Spacing.MD)
+        method_layout = QVBoxLayout(method_group)
+        method_layout.setSpacing(Spacing.SM)
 
-        threshold_label = QLabel("CoVISI Threshold (%):")
-        threshold_label.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_BASE}; font-weight: {Fonts.WEIGHT_MEDIUM};"
+        # Radio buttons for method selection
+        self.method_button_group = QButtonGroup(self)
+
+        self.radio_auto = QRadioButton("Auto (Rec/Derec)")
+        self.radio_auto.setToolTip(
+            "Automatic mode: Uses recruitment and derecruitment phases.\n"
+            "Fast and requires no user input.\n"
+            "Best for quick analysis or contractions without steady-state."
         )
-        threshold_group_layout.addWidget(threshold_label)
+        self.radio_auto.setChecked(True)
+        self.radio_auto.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_BASE};")
+        self.method_button_group.addButton(self.radio_auto, 0)
+        method_layout.addWidget(self.radio_auto)
+
+        self.radio_steady = QRadioButton("Manual (Steady-State)")
+        self.radio_steady.setToolTip(
+            "Manual mode: Analyze CoVISI during the steady-state plateau.\n"
+            "More accurate for trapezoidal contractions.\n"
+            "Requires specifying start and end times."
+        )
+        self.radio_steady.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_BASE};")
+        self.method_button_group.addButton(self.radio_steady, 1)
+        method_layout.addWidget(self.radio_steady)
+
+        # Steady-state time inputs (initially hidden)
+        self.steady_state_widget = QWidget()
+        steady_layout = QHBoxLayout(self.steady_state_widget)
+        steady_layout.setContentsMargins(Spacing.LG, Spacing.SM, 0, 0)
+        steady_layout.setSpacing(Spacing.MD)
+
+        start_label = QLabel("Start:")
+        start_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+        steady_layout.addWidget(start_label)
+
+        self.start_steady_spinbox = QDoubleSpinBox()
+        self.start_steady_spinbox.setRange(0.0, 999.0)
+        self.start_steady_spinbox.setValue(0.0)
+        self.start_steady_spinbox.setSingleStep(0.5)
+        self.start_steady_spinbox.setDecimals(1)
+        self.start_steady_spinbox.setSuffix(" s")
+        self.start_steady_spinbox.setToolTip("Start time of steady-state phase (seconds)")
+        self.start_steady_spinbox.setStyleSheet(
+            f"""
+            QDoubleSpinBox {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+                color: {Colors.TEXT_PRIMARY};
+                min-width: 80px;
+                font-size: {Fonts.SIZE_SM};
+            }}
+        """
+        )
+        steady_layout.addWidget(self.start_steady_spinbox)
+
+        end_label = QLabel("End:")
+        end_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+        steady_layout.addWidget(end_label)
+
+        self.end_steady_spinbox = QDoubleSpinBox()
+        self.end_steady_spinbox.setRange(0.0, 999.0)
+        self.end_steady_spinbox.setValue(10.0)
+        self.end_steady_spinbox.setSingleStep(0.5)
+        self.end_steady_spinbox.setDecimals(1)
+        self.end_steady_spinbox.setSuffix(" s")
+        self.end_steady_spinbox.setToolTip("End time of steady-state phase (seconds)")
+        self.end_steady_spinbox.setStyleSheet(
+            f"""
+            QDoubleSpinBox {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+                color: {Colors.TEXT_PRIMARY};
+                min-width: 80px;
+                font-size: {Fonts.SIZE_SM};
+            }}
+        """
+        )
+        steady_layout.addWidget(self.end_steady_spinbox)
+
+        # Duration hint label
+        self.duration_label = QLabel("")
+        self.duration_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: {Fonts.SIZE_SM};")
+        steady_layout.addWidget(self.duration_label)
+
+        steady_layout.addSpacing(Spacing.MD)
+
+        # Button to open visual selection dialog
+        self.btn_select_from_signal = QPushButton("Select from Signal...")
+        self.btn_select_from_signal.setToolTip(
+            "Open a dialog to visually select the steady-state region\n"
+            "from the reference signal (force/torque)"
+        )
+        self.btn_select_from_signal.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {Colors.BLUE_600};
+                color: white;
+                border: none;
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px {Spacing.MD}px;
+                font-size: {Fonts.SIZE_SM};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.BLUE_700};
+            }}
+            QPushButton:disabled {{
+                background-color: {Colors.GRAY_400};
+            }}
+        """
+        )
+        self.btn_select_from_signal.clicked.connect(self.open_steady_state_dialog)
+        steady_layout.addWidget(self.btn_select_from_signal)
+
+        steady_layout.addStretch()
+        self.steady_state_widget.setVisible(False)
+        method_layout.addWidget(self.steady_state_widget)
+
+        # Connect method selection signals
+        self.method_button_group.buttonClicked.connect(self.on_method_changed)
+
+        settings_row.addWidget(method_group)
+
+        # Threshold control group
+        threshold_group = QGroupBox("Filter Threshold")
+        threshold_group.setStyleSheet(
+            f"""
+            QGroupBox {{
+                background-color: {Colors.BG_TERTIARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.MD}px;
+                padding-top: {Spacing.XL}px;
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+                font-size: {Fonts.SIZE_BASE};
+                color: {Colors.TEXT_PRIMARY};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 {Spacing.SM}px;
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """
+        )
+        threshold_group_layout = QVBoxLayout(threshold_group)
+        threshold_group_layout.setSpacing(Spacing.SM)
+
+        threshold_row = QHBoxLayout()
+        threshold_row.setSpacing(Spacing.MD)
+
+        threshold_label = QLabel("CoVISI Threshold:")
+        threshold_label.setStyleSheet(
+            f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_BASE};"
+        )
+        threshold_row.addWidget(threshold_label)
 
         self.threshold_spinbox = QDoubleSpinBox()
         self.threshold_spinbox.setRange(5.0, 100.0)
@@ -279,40 +466,48 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
                 border-radius: {BorderRadius.SM};
                 padding: {Spacing.SM}px {Spacing.MD}px;
                 color: {Colors.TEXT_PRIMARY};
-                min-width: 120px;
+                min-width: 100px;
                 font-size: {Fonts.SIZE_BASE};
             }}
         """
         )
-        threshold_group_layout.addWidget(self.threshold_spinbox)
+        threshold_row.addWidget(self.threshold_spinbox)
+        threshold_row.addStretch()
+
+        threshold_group_layout.addLayout(threshold_row)
 
         # Preview label
         self.preview_label = QLabel("")
         self.preview_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_BASE};"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};"
         )
         threshold_group_layout.addWidget(self.preview_label)
 
-        controls_layout.addWidget(threshold_group)
-        controls_layout.addStretch()
+        settings_row.addWidget(threshold_group)
+        settings_row.addStretch()
 
-        # Export button
+        # Export buttons
+        export_buttons = QVBoxLayout()
+        export_buttons.setSpacing(Spacing.SM)
+
         self.btn_export_csv = QPushButton("Export to CSV")
         self.btn_export_csv.setStyleSheet(Styles.button_secondary())
         self.btn_export_csv.setToolTip("Export CoVISI analysis results to CSV file")
         self.btn_export_csv.clicked.connect(self.export_to_csv)
         self.btn_export_csv.setEnabled(False)
-        controls_layout.addWidget(self.btn_export_csv)
+        export_buttons.addWidget(self.btn_export_csv)
 
-        # Expand table button
         self.btn_expand_table = QPushButton("Expand Table")
         self.btn_expand_table.setStyleSheet(Styles.button_secondary())
         self.btn_expand_table.setToolTip("Open table in a resizable window for easier review")
         self.btn_expand_table.clicked.connect(self.open_table_in_window)
         self.btn_expand_table.setEnabled(False)
-        controls_layout.addWidget(self.btn_expand_table)
+        export_buttons.addWidget(self.btn_expand_table)
 
-        container_layout.addWidget(controls_widget)
+        export_buttons.addStretch()
+        settings_row.addLayout(export_buttons)
+
+        container_layout.addLayout(settings_row)
 
         # Progress bar (hidden initially)
         self.progress_bar = QProgressBar()
@@ -499,6 +694,18 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             self.warn("No JSON files to analyze.")
             return
 
+        # Validate steady-state parameters if using manual method
+        if self.analysis_method == COVISI_METHOD_STEADY:
+            self.start_steady = self.start_steady_spinbox.value()
+            self.end_steady = self.end_steady_spinbox.value()
+
+            if self.start_steady >= self.end_steady:
+                self.error("Start time must be less than end time for steady-state analysis.")
+                return
+
+            if self.end_steady - self.start_steady < 1.0:
+                self.warn("Steady-state duration is very short (< 1s). Results may be unreliable.")
+
         # Disable buttons
         self.btn_compute.setEnabled(False)
         self.btn_apply_filter.setEnabled(False)
@@ -513,22 +720,28 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.covisi_data.clear()
         self.results_table.setRowCount(0)
 
-        # Start worker
-        self.compute_worker = CoVISIComputeWorker(self.json_files)
+        # Start worker with method parameters
+        self.compute_worker = CoVISIComputeWorker(
+            self.json_files,
+            method=self.analysis_method,
+            start_steady=self.start_steady if self.analysis_method == COVISI_METHOD_STEADY else None,
+            end_steady=self.end_steady if self.analysis_method == COVISI_METHOD_STEADY else None,
+        )
         self.compute_worker.progress.connect(self.on_compute_progress)
         self.compute_worker.result.connect(self.on_compute_result)
         self.compute_worker.finished.connect(self.on_compute_finished)
         self.compute_worker.error.connect(self.on_compute_error)
         self.compute_worker.start()
 
-        logger.info(f"Starting CoVISI computation for {len(self.json_files)} file(s)...")
+        method_str = "steady-state" if self.analysis_method == COVISI_METHOD_STEADY else "auto (rec/derec)"
+        logger.info(f"Starting CoVISI computation ({method_str}) for {len(self.json_files)} file(s)...")
 
     def on_compute_progress(self, current, total, filename):
         """Handle computation progress."""
         self.progress_bar.setValue(current)
         self.status_label.setText(f"Computing CoVISI for {filename}...")
 
-    def on_compute_result(self, json_path, result):
+    def on_compute_result(self, json_path, result, duration):
         """Handle computation result for one file."""
         filename = os.path.basename(json_path)
 
@@ -539,6 +752,18 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         # Store result
         self.covisi_data[json_path] = result
+
+        # Update duration info (use the first file's duration as reference)
+        if duration > 0 and self.contraction_duration == 0:
+            self.contraction_duration = duration
+            self.duration_label.setText(f"(Duration: {duration:.1f}s)")
+            # Set reasonable default steady-state values if not yet set
+            if self.end_steady_spinbox.value() == 10.0:
+                # Suggest middle 60% of contraction as steady-state
+                suggested_start = duration * 0.2
+                suggested_end = duration * 0.8
+                self.start_steady_spinbox.setValue(round(suggested_start, 1))
+                self.end_steady_spinbox.setValue(round(suggested_end, 1))
 
         # Add to table
         self.table_header.setVisible(True)
@@ -611,11 +836,16 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.btn_expand_table.setEnabled(len(self.covisi_data) > 0)
 
         total_mus = sum(len(df) for df in self.covisi_data.values())
-        self.status_label.setText(
-            f"CoVISI analysis complete. Found {total_mus} motor units in "
-            f"{len(self.covisi_data)} file(s)."
-        )
+        method_str = "steady-state" if self.analysis_method == COVISI_METHOD_STEADY else "rec/derec"
 
+        status_text = (
+            f"CoVISI analysis complete ({method_str}). "
+            f"Found {total_mus} motor units in {len(self.covisi_data)} file(s)."
+        )
+        if self.analysis_method == COVISI_METHOD_STEADY:
+            status_text += f" Steady-state: {self.start_steady:.1f}s - {self.end_steady:.1f}s"
+
+        self.status_label.setText(status_text)
         self.success(f"CoVISI analysis complete for {len(self.covisi_data)} file(s).")
 
     def on_compute_error(self, error_msg):
@@ -626,6 +856,56 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         self.error(error_msg)
         self.status_label.setText(f"Error: {error_msg}")
+
+    def on_method_changed(self, button):
+        """Handle analysis method change."""
+        if button == self.radio_auto:
+            self.analysis_method = COVISI_METHOD_AUTO
+            self.steady_state_widget.setVisible(False)
+            logger.info("Switched to Auto (Rec/Derec) analysis method")
+        else:
+            self.analysis_method = COVISI_METHOD_STEADY
+            self.steady_state_widget.setVisible(True)
+            # Update duration hint if we have files loaded
+            if self.contraction_duration > 0:
+                self.duration_label.setText(f"(Duration: {self.contraction_duration:.1f}s)")
+            logger.info("Switched to Manual (Steady-State) analysis method")
+
+    def open_steady_state_dialog(self):
+        """Open the visual steady-state selection dialog."""
+        # Find MUedit MAT files in decomposition folder
+        mat_files = []
+        if self.expected_folder and os.path.exists(self.expected_folder):
+            for f in os.listdir(self.expected_folder):
+                if f.endswith("_muedit.mat") and "_edited" not in f:
+                    mat_files.append(os.path.join(self.expected_folder, f))
+
+        if not mat_files:
+            self.warn(
+                "No MUedit MAT files found. Please ensure Multi-Grid Configuration "
+                "(Step 8) has been completed to export MAT files."
+            )
+            return
+
+        # Open the selection dialog
+        dialog = SteadyStateSelectionDialog(mat_files, self)
+        result = dialog.exec_()
+
+        if result == dialog.Accepted:
+            start, end = dialog.get_selection()
+            if start is not None and end is not None:
+                # Update spinboxes with selected values
+                self.start_steady_spinbox.setValue(start)
+                self.end_steady_spinbox.setValue(end)
+                self.start_steady = start
+                self.end_steady = end
+
+                # Update duration label
+                duration = end - start
+                self.duration_label.setText(f"Selected: {start:.1f}s - {end:.1f}s ({duration:.1f}s)")
+
+                self.success(f"Steady-state region selected: {start:.1f}s - {end:.1f}s")
+                logger.info(f"Steady-state selection from dialog: {start:.2f}s - {end:.2f}s")
 
     def on_threshold_changed(self, value):
         """Handle threshold change."""
@@ -747,7 +1027,13 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             "threshold_available": self.threshold,
             "files_count": len(self.json_files),
             "reason": "User chose to skip pre-filtering",
+            "analysis_method": self.analysis_method,
         }
+
+        # Include steady-state parameters if used
+        if self.analysis_method == COVISI_METHOD_STEADY:
+            report["start_steady"] = self.start_steady
+            report["end_steady"] = self.end_steady
 
         if self.covisi_data:
             # Include CoVISI values even though filtering was skipped

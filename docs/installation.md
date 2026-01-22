@@ -98,7 +98,7 @@ After installing the dependencies, you need to compile the Qt resources:
    ```
 2. **Compile resources**
    ```bash
-   pyrcc5 img.qrc -o resources_rc.py
+   pyrcc5 resources.qrc -o resources_rc.py
    ```
 
 ## Start Application

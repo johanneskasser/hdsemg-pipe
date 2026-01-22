@@ -32,6 +32,14 @@ In order to install hdsemg-pipe, follow the instructions in the [installation gu
     venv\Scripts\activate
     # On Unix or MacOS:
     source venv/bin/activate
+
+    # install Dependencies
+    pip install -r requirements.txt
+
+    # Compile the QT Resources 
+    cd ./hdsemg_pipe
+    pyrcc5 resources.qrc -o resources_rc.py
+    
 ```
 
 2. hdsemg-pipe is available as a Python package and can be installed via pip:
@@ -43,7 +51,7 @@ In order to install hdsemg-pipe, follow the instructions in the [installation gu
 3. After the installation, you can run the application using from the command line:
 
 ```bash
-  hdsemg-pipe
+  python -m hdsemg-pipe
 ```
 
 

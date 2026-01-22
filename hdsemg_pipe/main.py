@@ -1,9 +1,9 @@
 import sys
-
-from PyQt5.QtGui import QIcon
+import os
+from PyQt5.QtGui import QIcon, QPalette, QColor
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QAction,
-    qApp, QStackedWidget, QPushButton, QHBoxLayout
+    qApp, QStackedWidget, QPushButton, QHBoxLayout, QStyleFactory
 )
 from PyQt5.QtCore import Qt
 
@@ -325,11 +325,39 @@ class WizardMainWindow(QMainWindow):
 
 
 def main():
+    # Force light mode on macOS 
+    # This prevents the system's dark mode from interfering with the app's custom theme.
+    if sys.platform == 'darwin':
+        os.environ['QT_MAC_WANTS_LIGHT_THEME'] = '1'
+
     app = QApplication(sys.argv)
+    
+    # Set a consistent style
+    app.setStyle('Fusion')
+
+    # Create and set a light palette to enforce light mode
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor(Colors.BG_PRIMARY))
+    palette.setColor(QPalette.WindowText, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.Base, QColor(Colors.BG_SECONDARY))
+    palette.setColor(QPalette.AlternateBase, QColor(Colors.BG_TERTIARY))
+    palette.setColor(QPalette.ToolTipBase, QColor(Colors.BG_PRIMARY))
+    palette.setColor(QPalette.ToolTipText, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.Text, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.Button, QColor(Colors.BG_SECONDARY))
+    palette.setColor(QPalette.ButtonText, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.BrightText, QColor(Colors.RED_600))
+    palette.setColor(QPalette.Link, QColor(Colors.BLUE_600))
+    palette.setColor(QPalette.Highlight, QColor(Colors.BLUE_600))
+    palette.setColor(QPalette.HighlightedText, QColor(Colors.BG_PRIMARY))
+    app.setPalette(palette)
+    
     setup_logging()
     sys.excepthook = exception_hook
+    
     window = WizardMainWindow()
-    window.show()
+    window.showMaximized()  # Show the window maximized
+    
     sys.exit(app.exec_())
 
 
