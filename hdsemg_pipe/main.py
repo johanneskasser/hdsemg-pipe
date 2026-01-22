@@ -330,10 +330,14 @@ def main():
     if sys.platform == 'darwin':
         os.environ['QT_MAC_WANTS_LIGHT_THEME'] = '1'
 
+
     app = QApplication(sys.argv)
     
     # Set a consistent style
-    app.setStyle('Fusion')
+    if sys.platform == 'darwin':
+        app.setStyle('macOS')
+    else:   
+        app.setStyle('windows')
 
     # Create and set a light palette to enforce light mode
     palette = QPalette()

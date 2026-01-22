@@ -788,8 +788,10 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
             # CoVISI value - use setData for proper numeric sorting
             covisi_val = row["covisi_all"]
+            display_text = f"{round(covisi_val, 2)}"
             covisi_item = QTableWidgetItem()
-            covisi_item.setData(Qt.DisplayRole, round(covisi_val, 1))
+            covisi_item.setData(Qt.EditRole, float(covisi_val))
+            covisi_item.setData(Qt.DisplayRole, display_text)
             covisi_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
             # Color code by threshold
