@@ -76,10 +76,68 @@ The pre-filtering step allows automated removal of motor units with high CoVISI 
 
 ### User Interface
 
+#### Analysis Method Selection
+
+The pre-filtering step offers two analysis methods:
+
+| Method | Description | Best For |
+|--------|-------------|----------|
+| **Auto (Rec/Derec)** | Uses recruitment and derecruitment phases automatically | Quick analysis, contractions without clear steady-state |
+| **Manual (Steady-State)** | User specifies the steady-state phase boundaries | Trapezoidal contractions with a plateau phase |
+
+##### Auto Mode (Recommended for most cases)
+
+- Uses `event_="rec_derec"` in openhdemg
+- Analyzes CoVISI based on firing patterns at recruitment and derecruitment
+- No user input required beyond clicking "Analyze CoVISI"
+- Fast and automated
+
+##### Manual Mode (Steady-State)
+
+- Uses `event_="rec_derec_steady"` in openhdemg
+- User specifies **Start** and **End** times (in seconds) for the steady-state phase
+- More accurate for trapezoidal contractions with a defined plateau
+- CoVISI from steady-state is scientifically preferred for quality assessment
+
+**When to use Manual Mode:**
+
+- Trapezoidal contractions with a clear force plateau
+- When you need the most accurate CoVISI values
+- For research requiring steady-state CoVISI specifically
+- When comparing to published literature using steady-state CoVISI
+
+**Steady-State Time Selection:**
+
+There are two ways to specify the steady-state region:
+
+1. **Manual Entry**: Enter start and end times directly in the spinboxes
+2. **Visual Selection**: Click "Select from Signal..." to open an interactive dialog
+
+##### Visual Selection Dialog
+
+The "Select from Signal..." button opens a dialog that displays the reference signal (force/torque path) from your recordings. This allows you to:
+
+- **See the actual contraction profile**: Visualize the force trace from your MUedit MAT files
+- **Select by dragging**: Click and drag on the plot to select the plateau region
+- **Two-click selection**: Click once to set the start, click again to set the end
+- **Fine-tune with spinboxes**: Adjust the selection precisely using time inputs
+- **Multiple file overlay**: If multiple files exist, all reference signals are displayed for comparison
+
+**Steady-State Time Selection Tips:**
+
+- The application automatically suggests default values based on contraction duration
+- Default: middle 60% of the contraction (20%-80% of duration)
+- Adjust based on your specific force profile
+- Ensure the steady-state region has stable force output
+- Minimum recommended duration: 0.5 seconds
+
 #### Analysis Controls
 
 | Component | Description |
 |-----------|-------------|
+| **Analysis Method** | Radio buttons to select Auto or Manual mode |
+| **Start/End Spinboxes** | Time inputs for steady-state boundaries (Manual mode only) |
+| **Select from Signal** | Opens visual dialog to select steady-state from reference signal (Manual mode only) |
 | **Analyze CoVISI** | Compute CoVISI values for all motor units in all decomposition files |
 | **Threshold Spinner** | Adjust the CoVISI threshold (default: 30%, range: 5-100%) |
 | **Preview Label** | Shows how many MUs will be filtered at the current threshold |
@@ -297,22 +355,50 @@ Files are saved to the `{workfolder}/analysis/` folder by default. The folder is
 
 ### CoVISI Computation
 
-The application uses openhdemg's `compute_covisi()` function:
+The application uses openhdemg's `compute_covisi()` function with different parameters depending on the selected analysis method:
+
+#### Auto Mode (Rec/Derec)
 
 ```python
 covisi_df = emg.compute_covisi(
     emgfile=emgfile,
     n_firings_RecDerec=4,
     event_="rec_derec",
-    start_steady=0,
+    start_steady=0,  # Dummy values, not used
     end_steady=1,
 )
 ```
 
 Key parameters:
 
-- **`event_="rec_derec"`**: Uses recruitment/derecruitment periods for non-interactive computation
+- **`event_="rec_derec"`**: Uses recruitment/derecruitment periods only
 - **`n_firings_RecDerec=4`**: Number of firings at recruitment/derecruitment to consider
+- No user interaction required
+
+#### Manual Mode (Steady-State)
+
+```python
+covisi_df = emg.compute_covisi(
+    emgfile=emgfile,
+    n_firings_RecDerec=4,
+    event_="rec_derec_steady",
+    start_steady=start_samples,  # User-specified start time (in samples)
+    end_steady=end_samples,      # User-specified end time (in samples)
+)
+```
+
+Key parameters:
+
+- **`event_="rec_derec_steady"`**: Includes steady-state phase analysis
+- **`start_steady` / `end_steady`**: Boundaries of steady-state region (converted from seconds to samples internally)
+- Returns additional `COVisi_steady` column
+
+#### Which CoVISI Value is Used for Filtering?
+
+- **`covisi_all`** is always used for filtering decisions
+- This represents CoVISI over the entire contraction
+- Even in Manual mode, `covisi_all` is used (not `covisi_steady`) to ensure consistency
+- The steady-state analysis provides additional insight but doesn't change the filtering logic
 
 ### Direct Computation from Discharge Times
 

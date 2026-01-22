@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QSizePolicy, QSpacerItem
+    QSizePolicy, QSpacerItem, QScrollArea
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont
@@ -26,8 +26,47 @@ class WizardStepWidget(QWidget):
 
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Main vertical layout
-        self.main_layout = QVBoxLayout(self)
+        # Outer layout for the entire widget
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        # Create scroll area for content
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: transparent;
+                border: none;
+            }}
+            QScrollBar:vertical {{
+                background-color: {Colors.BG_SECONDARY};
+                width: 10px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {Colors.GRAY_400};
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {Colors.GRAY_500};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """)
+
+        # Scroll content widget
+        self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background-color: transparent;")
+        self.scroll_area.setWidget(self.scroll_content)
+
+        # Main vertical layout inside scroll area
+        self.main_layout = QVBoxLayout(self.scroll_content)
         self.main_layout.setContentsMargins(Spacing.XXXL, Spacing.XXXL, Spacing.XXXL, Spacing.XXXL)
         self.main_layout.setSpacing(Spacing.XL)
 
@@ -37,6 +76,9 @@ class WizardStepWidget(QWidget):
 
         # Add stretch to push content to top
         self.main_layout.addStretch()
+
+        # Add scroll area to outer layout
+        outer_layout.addWidget(self.scroll_area)
 
         # Initialize components
         self.create_buttons()

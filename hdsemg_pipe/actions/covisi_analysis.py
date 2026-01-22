@@ -13,13 +13,23 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 
 import h5py
 import numpy as np
 import pandas as pd
+import scipy.io as sio
+
+from PyQt5 import QtWidgets, QtCore
+from matplotlib.backends.backend_qt5agg import (
+    FigureCanvasQTAgg as FigureCanvas,
+    NavigationToolbar2QT as NavigationToolbar,
+)
+from matplotlib.figure import Figure
+from matplotlib.widgets import SpanSelector
 
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
 
 try:
     import openhdemg.library as emg
@@ -34,16 +44,26 @@ except ImportError:
 # Default CoVISI threshold per literature (Taleshi et al., 2025)
 DEFAULT_COVISI_THRESHOLD = 30.0
 
+# Analysis method options
+COVISI_METHOD_AUTO = "auto"  # Uses rec_derec (automatic, no user interaction)
+COVISI_METHOD_STEADY = "steady"  # Uses steady-state phase (requires time range)
+
 
 def compute_covisi_for_all_mus(
     emgfile: dict,
     n_firings_rec_derec: int = 4,
+    method: str = COVISI_METHOD_AUTO,
+    start_steady: Optional[float] = None,
+    end_steady: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     Compute CoVISI for all motor units in an emgfile.
 
-    Uses openhdemg's compute_covisi() with event_="rec_derec" to avoid
-    interactive steady-state selection.
+    Supports two methods:
+    - "auto": Uses event_="rec_derec" for automatic computation without
+      interactive steady-state selection. Best for quick analysis.
+    - "steady": Uses event_="rec_derec_steady" with user-specified steady-state
+      boundaries. More accurate for trapezoidal contractions with a plateau.
 
     Parameters
     ----------
@@ -51,22 +71,29 @@ def compute_covisi_for_all_mus(
         The openhdemg emgfile dictionary containing IPTS, MUPULSES, etc.
     n_firings_rec_derec : int, default 4
         Number of firings at recruitment/derecruitment to consider.
+    method : str, default "auto"
+        Analysis method: "auto" (rec/derec only) or "steady" (includes steady-state).
+    start_steady : float, optional
+        Start time of steady-state phase in seconds. Required if method="steady".
+    end_steady : float, optional
+        End time of steady-state phase in seconds. Required if method="steady".
 
     Returns
     -------
     pd.DataFrame
         DataFrame with columns:
         - mu_index: Motor unit index (0-based)
-        - covisi_rec: CoVISI at recruitment
-        - covisi_derec: CoVISI at derecruitment
-        - covisi_all: CoVISI for entire contraction (used for filtering)
+        - covisi_rec: CoVISI at recruitment (if available)
+        - covisi_derec: CoVISI at derecruitment (if available)
+        - covisi_steady: CoVISI during steady-state (if method="steady")
+        - covisi_all: CoVISI for entire contraction (always available)
 
     Raises
     ------
     RuntimeError
         If openhdemg is not available.
     ValueError
-        If emgfile has no motor units.
+        If emgfile has no motor units or if steady-state bounds are invalid.
     """
     if not OPENHDEMG_AVAILABLE:
         raise RuntimeError(
@@ -83,15 +110,44 @@ def compute_covisi_for_all_mus(
     if n_mus == 0:
         raise ValueError("emgfile contains no motor units")
 
+    # Get sampling frequency for time-to-sample conversion
+    fsamp = emgfile.get("FSAMP", 2048)
+
+    # Determine event type and steady-state parameters
+    if method == COVISI_METHOD_STEADY:
+        if start_steady is None or end_steady is None:
+            raise ValueError(
+                "start_steady and end_steady are required for method='steady'"
+            )
+        if start_steady >= end_steady:
+            raise ValueError(
+                f"start_steady ({start_steady}) must be less than end_steady ({end_steady})"
+            )
+
+        # Convert time (seconds) to samples
+        start_steady_samples = int(start_steady * fsamp)
+        end_steady_samples = int(end_steady * fsamp)
+
+        event_type = "rec_derec_steady"
+        logger.info(
+            f"Computing CoVISI with steady-state: {start_steady:.2f}s - {end_steady:.2f}s "
+            f"(samples {start_steady_samples} - {end_steady_samples})"
+        )
+    else:
+        # Auto mode: use rec_derec only
+        event_type = "rec_derec"
+        start_steady_samples = 0  # Dummy values, not used
+        end_steady_samples = 1
+        logger.info("Computing CoVISI with auto mode (rec/derec only)")
+
     # Compute CoVISI using openhdemg
-    # event_="rec_derec" avoids interactive steady-state selection
     try:
         covisi_df = emg.compute_covisi(
             emgfile=emgfile,
             n_firings_RecDerec=n_firings_rec_derec,
-            event_="rec_derec",
-            start_steady=0,  # Dummy values, not used with event_="rec_derec"
-            end_steady=1,
+            event_=event_type,
+            start_steady=start_steady_samples,
+            end_steady=end_steady_samples,
         )
     except Exception as e:
         logger.error(f"Failed to compute CoVISI: {e}")
@@ -102,26 +158,98 @@ def compute_covisi_for_all_mus(
     covisi_df.insert(0, "mu_index", range(len(covisi_df)))
 
     # Rename columns for consistency
-    covisi_df = covisi_df.rename(
-        columns={
-            "COVisi_rec": "covisi_rec",
-            "COVisi_derec": "covisi_derec",
-            "COVisi_all": "covisi_all",
-        }
-    )
+    rename_map = {
+        "COVisi_rec": "covisi_rec",
+        "COVisi_derec": "covisi_derec",
+        "COVisi_all": "covisi_all",
+    }
+    if method == COVISI_METHOD_STEADY:
+        rename_map["COVisi_steady"] = "covisi_steady"
+
+    covisi_df = covisi_df.rename(columns=rename_map)
 
     return covisi_df
+
+
+def get_contraction_duration(emgfile: dict) -> float:
+    """
+    Get the total duration of the contraction in seconds.
+
+    Parameters
+    ----------
+    emgfile : dict
+        The openhdemg emgfile dictionary.
+
+    Returns
+    -------
+    float
+        Duration in seconds.
+    """
+    fsamp = emgfile.get("FSAMP", 2048)
+    ref_signal = emgfile.get("REF_SIGNAL")
+
+    if ref_signal is not None:
+        if hasattr(ref_signal, "__len__"):
+            n_samples = len(ref_signal)
+        else:
+            n_samples = ref_signal.shape[0] if hasattr(ref_signal, "shape") else 0
+    else:
+        # Fall back to EMG signal length
+        emg_signal = emgfile.get("RAW_SIGNAL")
+        if emg_signal is not None and hasattr(emg_signal, "shape"):
+            n_samples = emg_signal.shape[0]
+        else:
+            n_samples = 0
+
+    return n_samples / fsamp if n_samples > 0 else 0.0
+
+
+def get_ref_signal_for_plotting(emgfile: dict) -> tuple:
+    """
+    Extract the reference signal (force/torque) for plotting.
+
+    Parameters
+    ----------
+    emgfile : dict
+        The openhdemg emgfile dictionary.
+
+    Returns
+    -------
+    tuple
+        (time_array, signal_array) where time is in seconds.
+        Returns (None, None) if no reference signal is available.
+    """
+    fsamp = emgfile.get("FSAMP", 2048)
+    ref_signal = emgfile.get("REF_SIGNAL")
+
+    if ref_signal is None:
+        return None, None
+
+    # Convert to numpy array
+    if hasattr(ref_signal, "values"):
+        signal = ref_signal.values.flatten()
+    else:
+        signal = np.asarray(ref_signal).flatten()
+
+    # Create time array
+    time = np.arange(len(signal)) / fsamp
+
+    return time, signal
 
 
 def filter_mus_by_covisi(
     emgfile: dict,
     threshold: float = DEFAULT_COVISI_THRESHOLD,
     n_firings_rec_derec: int = 4,
+    method: str = COVISI_METHOD_AUTO,
+    start_steady: Optional[float] = None,
+    end_steady: Optional[float] = None,
+    use_steady_for_filter: bool = False,
 ) -> tuple[dict, pd.DataFrame]:
     """
     Filter motor units based on CoVISI threshold.
 
-    Removes motor units with CoVISI_all > threshold from the emgfile.
+    Removes motor units with CoVISI > threshold from the emgfile.
 
     Parameters
     ----------
@@ -131,6 +259,14 @@ def filter_mus_by_covisi(
         CoVISI threshold in percent. MUs with CoVISI > threshold are removed.
     n_firings_rec_derec : int, default 4
         Number of firings at recruitment/derecruitment for CoVISI calculation.
+    method : str, default "auto"
+        Analysis method: "auto" or "steady".
+    start_steady : float, optional
+        Start time of steady-state in seconds (required if method="steady").
+    end_steady : float, optional
+        End time of steady-state in seconds (required if method="steady").
+    use_steady_for_filter : bool, default False
+        If True and method="steady", use covisi_steady for filtering instead of covisi_all.
 
     Returns
     -------
@@ -138,16 +274,27 @@ def filter_mus_by_covisi(
         - filtered_emgfile: New emgfile dict with filtered MUs
         - report_df: DataFrame with filtering results containing:
           - mu_index: Original MU index
-          - covisi_all: CoVISI value
+          - covisi_all: CoVISI value (or covisi_steady if use_steady_for_filter)
           - status: "kept" or "removed"
     """
     # Compute CoVISI for all MUs
     covisi_df = compute_covisi_for_all_mus(
-        emgfile, n_firings_rec_derec=n_firings_rec_derec
+        emgfile,
+        n_firings_rec_derec=n_firings_rec_derec,
+        method=method,
+        start_steady=start_steady,
+        end_steady=end_steady,
     )
 
+    # Determine which column to use for filtering
+    if use_steady_for_filter and method == COVISI_METHOD_STEADY and "covisi_steady" in covisi_df.columns:
+        filter_column = "covisi_steady"
+        logger.info("Using steady-state CoVISI for filtering")
+    else:
+        filter_column = "covisi_all"
+
     # Determine which MUs to keep
-    kept_mask = covisi_df["covisi_all"] <= threshold
+    kept_mask = covisi_df[filter_column] <= threshold
     kept_indices = covisi_df.loc[kept_mask, "mu_index"].tolist()
     removed_indices = covisi_df.loc[~kept_mask, "mu_index"].tolist()
 
@@ -616,3 +763,563 @@ def get_covisi_quality_category(covisi_value: float) -> str:
         return "marginal"
     else:
         return "poor"
+
+
+def load_reference_signal_from_muedit_mat(mat_path: str) -> Tuple[Optional[np.ndarray], Optional[float]]:
+    """
+    Load the reference signal (path/target) from an MUedit MAT file.
+
+    Parameters
+    ----------
+    mat_path : str
+        Path to the MUedit MAT file.
+
+    Returns
+    -------
+    tuple
+        (signal, sampling_frequency) or (None, None) if not found.
+    """
+    try:
+        # Try to load with scipy.io first (older MAT format)
+        try:
+            mat_data = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
+            signal_struct = mat_data.get('signal')
+            if signal_struct is not None:
+                # Get path signal (performed path)
+                path_signal = getattr(signal_struct, 'path', None)
+                fsamp = getattr(signal_struct, 'fsamp', 2048)
+
+                if path_signal is not None:
+                    signal = np.asarray(path_signal).flatten()
+                    return signal, float(fsamp)
+
+        except NotImplementedError:
+            # MATLAB v7.3 file, use h5py
+            pass
+
+        # Load with h5py for HDF5/v7.3 format
+        with h5py.File(mat_path, 'r') as f:
+            if 'signal' not in f:
+                logger.warning(f"No 'signal' group in {mat_path}")
+                return None, None
+
+            signal_group = f['signal']
+
+            # Get sampling frequency
+            fsamp = 2048.0
+            if 'fsamp' in signal_group:
+                fsamp_data = signal_group['fsamp'][()]
+                fsamp = float(np.squeeze(fsamp_data))
+
+            # Get path signal
+            if 'path' in signal_group:
+                path_data = signal_group['path'][()]
+                signal = np.asarray(path_data).flatten()
+                return signal, fsamp
+
+            # Fallback to target signal
+            if 'target' in signal_group:
+                target_data = signal_group['target'][()]
+                signal = np.asarray(target_data).flatten()
+                return signal, fsamp
+
+        return None, None
+
+    except Exception as e:
+        logger.error(f"Failed to load reference signal from {mat_path}: {e}")
+        return None, None
+
+
+class SteadyStateSelectionDialog(QtWidgets.QDialog):
+    """
+    Dialog for interactive selection of the steady-state phase.
+
+    Displays the reference signal (force/torque path) from MUedit MAT files
+    and allows the user to select the steady-state plateau region by dragging
+    or two-click selection.
+    """
+
+    def __init__(self, mat_files: List[str], parent=None):
+        """
+        Initialize the dialog.
+
+        Parameters
+        ----------
+        mat_files : list
+            List of paths to MUedit MAT files containing reference signals.
+        parent : QWidget, optional
+            Parent widget.
+        """
+        super().__init__(parent)
+        logger.info(f"Initializing Steady-State Selection Dialog for {len(mat_files)} file(s)")
+
+        self.mat_files = mat_files
+        self.signal_data: dict = {}  # filename -> (time, signal)
+        self.sampling_frequency = 2048.0
+
+        # Selection state
+        self.selected_region: Optional[Tuple[float, float]] = None
+        self.span_selector = None
+        self.selection_lines = []
+        self.first_click_pos = None
+
+        # Result values
+        self.start_steady = None
+        self.end_steady = None
+
+        self.load_signals()
+        self.init_ui()
+
+    def load_signals(self):
+        """Load reference signals from all MAT files."""
+        self.signal_data.clear()
+
+        for mat_path in self.mat_files:
+            try:
+                signal, fsamp = load_reference_signal_from_muedit_mat(mat_path)
+                if signal is not None:
+                    filename = os.path.basename(mat_path)
+                    self.sampling_frequency = fsamp
+
+                    # Create time array
+                    time = np.arange(len(signal)) / fsamp
+                    self.signal_data[filename] = (time, signal)
+                    logger.debug(f"Loaded reference signal from {filename}: {len(signal)} samples")
+            except Exception as e:
+                logger.error(f"Failed to load {mat_path}: {e}")
+
+        logger.info(f"Loaded {len(self.signal_data)} reference signal(s)")
+
+    def init_ui(self):
+        """Initialize the UI."""
+        self.setWindowTitle("Select Steady-State Phase")
+        self.resize(1200, 700)
+
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {Colors.BG_SECONDARY};
+            }}
+        """)
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
+        main_layout.setSpacing(Spacing.LG)
+
+        # Header
+        header = QtWidgets.QLabel("Select Steady-State Phase")
+        header.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_XXL};
+                font-weight: {Fonts.WEIGHT_BOLD};
+            }}
+        """)
+
+        instruction = QtWidgets.QLabel(
+            "Drag to select the plateau region of your contraction. "
+            "This region will be used for steady-state CoVISI analysis."
+        )
+        instruction.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_SECONDARY};
+                font-size: {Fonts.SIZE_BASE};
+            }}
+        """)
+        instruction.setWordWrap(True)
+
+        main_layout.addWidget(header)
+        main_layout.addWidget(instruction)
+
+        # ROI info and action buttons
+        self._create_action_panel(main_layout)
+
+        # Selection panel with plot
+        self._create_selection_panel(main_layout)
+
+    def _create_selection_panel(self, parent_layout):
+        """Create the signal selection panel with matplotlib plot."""
+        panel = QtWidgets.QFrame()
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.LG};
+            }}
+        """)
+
+        layout = QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(Spacing.MD, Spacing.MD, Spacing.MD, Spacing.MD)
+
+        # Matplotlib figure
+        self.figure = Figure(figsize=(12, 5), facecolor=Colors.BG_PRIMARY)
+        self.canvas = FigureCanvas(self.figure)
+        self.ax = self.figure.add_subplot(111)
+        self.ax.set_facecolor(Colors.BG_PRIMARY)
+
+        # Navigation toolbar
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar.setStyleSheet(f"""
+            QToolBar {{
+                background-color: {Colors.BG_SECONDARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px;
+            }}
+        """)
+
+        layout.addWidget(self.toolbar)
+        layout.addWidget(self.canvas)
+
+        parent_layout.addWidget(panel)
+
+        # Initialize plot
+        self._update_plot()
+
+    def _create_action_panel(self, parent_layout):
+        """Create the ROI info and action buttons panel."""
+        panel = QtWidgets.QFrame()
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.MD}px;
+            }}
+        """)
+
+        layout = QtWidgets.QHBoxLayout(panel)
+        layout.setSpacing(Spacing.LG)
+
+        # Spinbox style
+        spinbox_style = f"""
+            QDoubleSpinBox {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_SM};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+                background-color: {Colors.GRAY_100};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+                min-width: 100px;
+            }}
+            QDoubleSpinBox:focus {{
+                border: 1px solid {Colors.BLUE_600};
+            }}
+        """
+
+        label_style = f"""
+            QLabel {{
+                color: {Colors.TEXT_SECONDARY};
+                font-size: {Fonts.SIZE_SM};
+            }}
+        """
+
+        # Start time input
+        start_label = QtWidgets.QLabel("Start:")
+        start_label.setStyleSheet(label_style)
+        layout.addWidget(start_label)
+
+        self.start_spin = QtWidgets.QDoubleSpinBox()
+        self.start_spin.setDecimals(2)
+        self.start_spin.setSuffix(" s")
+        self.start_spin.setRange(0, 10000)
+        self.start_spin.setSingleStep(0.5)
+        self.start_spin.setStyleSheet(spinbox_style)
+        self.start_spin.valueChanged.connect(self._on_time_input_changed)
+        layout.addWidget(self.start_spin)
+
+        layout.addSpacing(Spacing.MD)
+
+        # End time input
+        end_label = QtWidgets.QLabel("End:")
+        end_label.setStyleSheet(label_style)
+        layout.addWidget(end_label)
+
+        self.end_spin = QtWidgets.QDoubleSpinBox()
+        self.end_spin.setDecimals(2)
+        self.end_spin.setSuffix(" s")
+        self.end_spin.setRange(0, 10000)
+        self.end_spin.setSingleStep(0.5)
+        self.end_spin.setStyleSheet(spinbox_style)
+        self.end_spin.valueChanged.connect(self._on_time_input_changed)
+        layout.addWidget(self.end_spin)
+
+        layout.addSpacing(Spacing.MD)
+
+        # Duration label
+        self.duration_label = QtWidgets.QLabel("Duration: --")
+        self.duration_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_SM};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+                background-color: {Colors.GRAY_100};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+            }}
+        """)
+        layout.addWidget(self.duration_label)
+
+        layout.addStretch()
+
+        # Reset button
+        btn_reset = QtWidgets.QPushButton("Reset Selection")
+        btn_reset.setStyleSheet(Styles.button_secondary())
+        btn_reset.clicked.connect(self.reset_selection)
+        layout.addWidget(btn_reset)
+
+        # Confirm button
+        self.btn_confirm = QtWidgets.QPushButton("Confirm Selection")
+        self.btn_confirm.setStyleSheet(Styles.button_primary())
+        self.btn_confirm.clicked.connect(self.confirm_selection)
+        self.btn_confirm.setEnabled(False)
+        layout.addWidget(self.btn_confirm)
+
+        # Cancel button
+        btn_cancel = QtWidgets.QPushButton("Cancel")
+        btn_cancel.setStyleSheet(Styles.button_secondary())
+        btn_cancel.clicked.connect(self.reject)
+        layout.addWidget(btn_cancel)
+
+        parent_layout.addWidget(panel)
+
+    def _update_plot(self):
+        """Update the selection plot with overlaid reference signals."""
+        self.ax.clear()
+        self.ax.set_facecolor(Colors.BG_PRIMARY)
+
+        if not self.signal_data:
+            self.ax.text(0.5, 0.5, "No reference signals found in MAT files",
+                         ha='center', va='center', transform=self.ax.transAxes,
+                         fontsize=12, color=Colors.TEXT_SECONDARY)
+            self.canvas.draw_idle()
+            return
+
+        # Get max duration for setting default steady-state suggestion
+        max_duration = 0.0
+
+        # Plot all reference signals (normalized for overlay)
+        colors = ['#2563eb', '#059669', '#dc2626', '#7c3aed', '#ea580c']
+        for idx, (filename, (time, signal)) in enumerate(self.signal_data.items()):
+            color = colors[idx % len(colors)]
+            max_duration = max(max_duration, time[-1])
+
+            # Normalize to [0, 1] for visualization
+            signal_min, signal_max = signal.min(), signal.max()
+            if signal_max != signal_min:
+                signal_norm = (signal - signal_min) / (signal_max - signal_min)
+            else:
+                signal_norm = signal
+
+            self.ax.plot(time, signal_norm, color=color, alpha=0.7, linewidth=1.2,
+                         label=filename.replace('_muedit.mat', ''))
+
+        # Academic-style formatting
+        self.ax.set_xlabel("Time (s)", fontsize=11, fontfamily='sans-serif')
+        self.ax.set_ylabel("Normalized Force (a.u.)", fontsize=11, fontfamily='sans-serif')
+        self.ax.set_title("Reference Signal (Force/Torque Path)", fontsize=12,
+                          fontweight='bold', fontfamily='sans-serif')
+        self.ax.grid(True, alpha=0.3, linestyle='--', color='gray')
+        self.ax.tick_params(labelsize=10)
+
+        # Legend
+        if len(self.signal_data) <= 6:
+            self.ax.legend(loc='upper right', fontsize=9, framealpha=0.9)
+        else:
+            self.ax.legend(loc='center left', bbox_to_anchor=(1.02, 0.5),
+                           fontsize=8, framealpha=0.9)
+            self.figure.subplots_adjust(right=0.80)
+
+        # Set default steady-state suggestion (middle 60% of signal)
+        if max_duration > 0 and self.selected_region is None:
+            suggested_start = max_duration * 0.2
+            suggested_end = max_duration * 0.8
+            self.start_spin.setMaximum(max_duration)
+            self.end_spin.setMaximum(max_duration)
+            self.start_spin.setValue(round(suggested_start, 1))
+            self.end_spin.setValue(round(suggested_end, 1))
+
+        # Setup span selector
+        self.span_selector = SpanSelector(
+            self.ax,
+            self._on_span_select,
+            'horizontal',
+            useblit=True,
+            props=dict(alpha=0.3, facecolor=Colors.BLUE_500),
+            interactive=True,
+            drag_from_anywhere=True
+        )
+
+        # Connect click event for two-click selection
+        self.canvas.mpl_connect('button_press_event', self._on_click)
+
+        self.figure.tight_layout()
+        self.canvas.draw_idle()
+
+    def _on_span_select(self, xmin, xmax):
+        """Handle span selection (drag mode)."""
+        self.first_click_pos = None
+        self.selected_region = (xmin, xmax)
+        self._update_roi_display()
+        self._draw_selection_lines()
+        self.btn_confirm.setEnabled(True)
+        logger.debug(f"Region selected: {xmin:.3f} - {xmax:.3f} s")
+
+    def _on_click(self, event):
+        """Handle click events for two-click selection."""
+        if event.inaxes != self.ax or event.button != 1:
+            return
+        if self.toolbar.mode != '':
+            return
+
+        x_pos = event.xdata
+
+        if self.first_click_pos is None:
+            self.first_click_pos = x_pos
+            self._draw_selection_lines()
+        else:
+            second_pos = x_pos
+            start = min(self.first_click_pos, second_pos)
+            end = max(self.first_click_pos, second_pos)
+            self.selected_region = (start, end)
+            self.first_click_pos = None
+
+            # Update SpanSelector to show the selection
+            if self.span_selector is not None:
+                self.span_selector.extents = (start, end)
+
+            self._update_roi_display()
+            self._draw_selection_lines()
+            self.btn_confirm.setEnabled(True)
+
+    def _update_roi_display(self):
+        """Update the ROI info spinboxes."""
+        if self.selected_region:
+            start, end = self.selected_region
+            duration = end - start
+
+            # Block signals to avoid recursion when updating from code
+            self.start_spin.blockSignals(True)
+            self.end_spin.blockSignals(True)
+
+            self.start_spin.setValue(start)
+            self.end_spin.setValue(end)
+            self.duration_label.setText(f"Duration: {duration:.2f} s")
+
+            self.start_spin.blockSignals(False)
+            self.end_spin.blockSignals(False)
+
+    def _on_time_input_changed(self):
+        """Handle manual time input changes."""
+        start = self.start_spin.value()
+        end = self.end_spin.value()
+
+        # Validate: end must be after start
+        if end <= start:
+            return
+
+        # Update selected region
+        self.selected_region = (start, end)
+
+        # Update duration label
+        duration = end - start
+        self.duration_label.setText(f"Duration: {duration:.2f} s")
+
+        # Update the SpanSelector to match the new values
+        if self.span_selector is not None:
+            self.span_selector.extents = (start, end)
+
+        # Update visualization
+        self._draw_selection_lines()
+        self.btn_confirm.setEnabled(True)
+
+    def _draw_selection_lines(self):
+        """Draw selection visualization."""
+        # Remove old lines
+        for line in self.selection_lines:
+            try:
+                line.remove()
+            except Exception:
+                pass
+        self.selection_lines.clear()
+
+        # Draw first click indicator if in two-click mode
+        if self.first_click_pos is not None:
+            line = self.ax.axvline(self.first_click_pos, color=Colors.BLUE_600,
+                                   linestyle='--', linewidth=2)
+            self.selection_lines.append(line)
+
+        self.canvas.draw_idle()
+
+    def reset_selection(self):
+        """Reset the selection."""
+        self.selected_region = None
+        self.first_click_pos = None
+
+        # Remove selection lines
+        for line in self.selection_lines:
+            try:
+                line.remove()
+            except Exception:
+                pass
+        self.selection_lines.clear()
+
+        # Reset SpanSelector
+        if self.span_selector is not None:
+            self.span_selector.extents = (0, 0)
+
+        # Reset spinboxes to default suggestion
+        max_duration = 0.0
+        for time, _ in self.signal_data.values():
+            max_duration = max(max_duration, time[-1])
+
+        if max_duration > 0:
+            self.start_spin.blockSignals(True)
+            self.end_spin.blockSignals(True)
+            self.start_spin.setValue(round(max_duration * 0.2, 1))
+            self.end_spin.setValue(round(max_duration * 0.8, 1))
+            self.start_spin.blockSignals(False)
+            self.end_spin.blockSignals(False)
+
+        self.duration_label.setText("Duration: --")
+        self.btn_confirm.setEnabled(False)
+
+        self.canvas.draw_idle()
+        logger.info("Selection reset")
+
+    def confirm_selection(self):
+        """Confirm the selection and close the dialog."""
+        start = self.start_spin.value()
+        end = self.end_spin.value()
+
+        if end <= start:
+            QtWidgets.QMessageBox.warning(
+                self, "Invalid Selection",
+                "End time must be greater than start time."
+            )
+            return
+
+        if end - start < 0.5:
+            QtWidgets.QMessageBox.warning(
+                self, "Selection Too Short",
+                "Please select at least 0.5 seconds for steady-state analysis."
+            )
+            return
+
+        self.start_steady = start
+        self.end_steady = end
+
+        logger.info(f"Steady-state selection confirmed: {start:.2f}s - {end:.2f}s")
+        self.accept()
+
+    def get_selection(self) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Get the selected steady-state boundaries.
+
+        Returns
+        -------
+        tuple
+            (start_steady, end_steady) in seconds, or (None, None) if not selected.
+        """
+        return self.start_steady, self.end_steady
