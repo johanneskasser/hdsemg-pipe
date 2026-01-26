@@ -245,6 +245,7 @@ def filter_mus_by_covisi(
     start_steady: Optional[float] = None,
     end_steady: Optional[float] = None,
     use_steady_for_filter: bool = False,
+    manual_overrides: Optional[dict] = None,
 ) -> tuple[dict, pd.DataFrame]:
     """
     Filter motor units based on CoVISI threshold.
@@ -267,6 +268,9 @@ def filter_mus_by_covisi(
         End time of steady-state in seconds (required if method="steady").
     use_steady_for_filter : bool, default False
         If True and method="steady", use covisi_steady for filtering instead of covisi_all.
+    manual_overrides : dict, optional
+        Dictionary mapping MU index (int) to decision ("Keep" or "Filter").
+        Manual overrides take precedence over threshold-based decisions.
 
     Returns
     -------
@@ -276,7 +280,10 @@ def filter_mus_by_covisi(
           - mu_index: Original MU index
           - covisi_all: CoVISI value (or covisi_steady if use_steady_for_filter)
           - status: "kept" or "removed"
+          - manual_override: Whether this MU was manually overridden
     """
+    manual_overrides = manual_overrides or {}
+
     # Compute CoVISI for all MUs
     covisi_df = compute_covisi_for_all_mus(
         emgfile,
@@ -293,18 +300,47 @@ def filter_mus_by_covisi(
     else:
         filter_column = "covisi_all"
 
-    # Determine which MUs to keep
-    kept_mask = covisi_df[filter_column] <= threshold
-    kept_indices = covisi_df.loc[kept_mask, "mu_index"].tolist()
-    removed_indices = covisi_df.loc[~kept_mask, "mu_index"].tolist()
+    # Determine which MUs to keep, considering manual overrides
+    kept_indices = []
+    removed_indices = []
+    statuses = []
+    manual_override_flags = []
+
+    for _, row in covisi_df.iterrows():
+        mu_index = int(row["mu_index"])
+        covisi_val = row[filter_column]
+
+        # Check for manual override
+        if mu_index in manual_overrides:
+            override = manual_overrides[mu_index]
+            if override == "Keep":
+                kept_indices.append(mu_index)
+                statuses.append("kept")
+            else:  # "Filter"
+                removed_indices.append(mu_index)
+                statuses.append("removed")
+            manual_override_flags.append(True)
+            logger.debug(f"MU {mu_index}: Manual override -> {override}")
+        else:
+            # Use threshold-based decision
+            if covisi_val <= threshold:
+                kept_indices.append(mu_index)
+                statuses.append("kept")
+            else:
+                removed_indices.append(mu_index)
+                statuses.append("removed")
+            manual_override_flags.append(False)
 
     # Create filtering report
-    covisi_df["status"] = np.where(kept_mask, "kept", "removed")
+    covisi_df["status"] = statuses
+    covisi_df["manual_override"] = manual_override_flags
     report_df = covisi_df.copy()
 
+    manual_count = sum(manual_override_flags)
     logger.info(
         f"CoVISI filtering: {len(kept_indices)} MUs kept, "
-        f"{len(removed_indices)} MUs removed (threshold={threshold}%)"
+        f"{len(removed_indices)} MUs removed (threshold={threshold}%, "
+        f"{manual_count} manual overrides)"
     )
 
     if len(kept_indices) == 0:
@@ -391,6 +427,7 @@ def apply_covisi_filter_to_json(
     output_path: str,
     threshold: float = DEFAULT_COVISI_THRESHOLD,
     n_firings_rec_derec: int = 4,
+    manual_overrides: Optional[dict] = None,
 ) -> dict:
     """
     Load a JSON file, apply CoVISI filtering, and save the filtered result.
@@ -405,6 +442,9 @@ def apply_covisi_filter_to_json(
         CoVISI threshold in percent.
     n_firings_rec_derec : int, default 4
         Number of firings at recruitment/derecruitment for CoVISI calculation.
+    manual_overrides : dict, optional
+        Dictionary mapping MU index (int) to decision ("Keep" or "Filter").
+        Manual overrides take precedence over threshold-based decisions.
 
     Returns
     -------
@@ -416,11 +456,14 @@ def apply_covisi_filter_to_json(
         - threshold_used: The CoVISI threshold used
         - removed_mu_indices: List of removed MU indices
         - covisi_values: Dict mapping MU index to CoVISI value
+        - manual_overrides_applied: Number of manual overrides applied
     """
     if not OPENHDEMG_AVAILABLE:
         raise RuntimeError(
             "openhdemg library is required for CoVISI filtering"
         )
+
+    manual_overrides = manual_overrides or {}
 
     # Load JSON
     logger.info(f"Loading JSON for CoVISI filtering: {json_path}")
@@ -428,11 +471,12 @@ def apply_covisi_filter_to_json(
 
     original_count = emgfile.get("NUMBER_OF_MUS", 0)
 
-    # Apply filtering
+    # Apply filtering with manual overrides
     filtered_emgfile, report_df = filter_mus_by_covisi(
         emgfile,
         threshold=threshold,
         n_firings_rec_derec=n_firings_rec_derec,
+        manual_overrides=manual_overrides,
     )
 
     filtered_count = filtered_emgfile.get("NUMBER_OF_MUS", 0)
@@ -452,6 +496,7 @@ def apply_covisi_filter_to_json(
         "covisi_values": dict(
             zip(report_df["mu_index"], report_df["covisi_all"])
         ),
+        "manual_overrides_applied": len(manual_overrides),
     }
 
     return stats

@@ -16,6 +16,7 @@ from pathlib import Path
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtWidgets import (
     QButtonGroup,
+    QComboBox,
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
@@ -130,11 +131,12 @@ class CoVISIFilterWorker(QThread):
     finished = pyqtSignal(dict)  # overall stats
     error = pyqtSignal(str)
 
-    def __init__(self, json_files, threshold, output_folder, parent=None):
+    def __init__(self, json_files, threshold, output_folder, manual_overrides=None, parent=None):
         super().__init__(parent)
         self.json_files = json_files
         self.threshold = threshold
         self.output_folder = output_folder
+        self.manual_overrides = manual_overrides or {}  # (filename, mu_index) -> "Keep" or "Filter"
 
     def run(self):
         """Apply CoVISI filtering and export to MUedit."""
@@ -145,6 +147,7 @@ class CoVISIFilterWorker(QThread):
                 "total_mus_filtered": 0,
                 "total_mus_removed": 0,
                 "per_file_stats": {},
+                "manual_overrides_applied": len(self.manual_overrides),
             }
 
             total = len(self.json_files)
@@ -159,11 +162,19 @@ class CoVISIFilterWorker(QThread):
                         self.output_folder, f"{base_name}_covisi_filtered.json"
                     )
 
-                    # Apply CoVISI filter
+                    # Extract manual overrides for this file
+                    file_overrides = {
+                        mu_idx: decision
+                        for (fn, mu_idx), decision in self.manual_overrides.items()
+                        if fn == filename
+                    }
+
+                    # Apply CoVISI filter with manual overrides
                     stats = apply_covisi_filter_to_json(
                         json_path,
                         filtered_json_path,
                         threshold=self.threshold,
+                        manual_overrides=file_overrides,
                     )
 
                     # Export filtered JSON to MUedit format
@@ -220,6 +231,7 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.compute_worker = None
         self.filter_worker = None
         self.filtering_applied = False
+        self.manual_overrides = {}  # (filename, mu_index) -> "Keep" or "Filter"
 
         # Method selection
         self.analysis_method = COVISI_METHOD_AUTO
@@ -553,9 +565,9 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         self.results_table = QTableWidget()
         self.results_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.results_table.setColumnCount(5)
+        self.results_table.setColumnCount(6)
         self.results_table.setHorizontalHeaderLabels(
-            ["File", "MU Index", "CoVISI (%)", "Quality", "Status"]
+            ["File", "MU Index", "CoVISI (%)", "Quality", "Auto Status", "Manual Override"]
         )
         self.results_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.Stretch
@@ -571,6 +583,9 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         )
         self.results_table.horizontalHeader().setSectionResizeMode(
             4, QHeaderView.ResizeToContents
+        )
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.ResizeToContents
         )
         self.results_table.setAlternatingRowColors(True)
         self.results_table.setSortingEnabled(True)
@@ -641,7 +656,7 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         if not OPENHDEMG_AVAILABLE:
             self.status_label.setText(
-                "⚠️ openhdemg library not available. CoVISI analysis disabled."
+                "Warning: openhdemg library not available. CoVISI analysis disabled."
             )
             return False
 
@@ -718,6 +733,7 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         # Clear previous data
         self.covisi_data.clear()
+        self.manual_overrides.clear()
         self.results_table.setRowCount(0)
 
         # Start worker with method parameters
@@ -814,11 +830,53 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             quality_item.setTextAlignment(Qt.AlignCenter)
             self.results_table.setItem(table_row, 3, quality_item)
 
-            # Status (will be filtered or kept)
-            status = "Keep" if covisi_val <= self.threshold else "Filter"
-            status_item = QTableWidgetItem(status)
+            # Auto Status (will be filtered or kept based on threshold)
+            auto_status = "Keep" if covisi_val <= self.threshold else "Filter"
+            status_item = QTableWidgetItem(auto_status)
             status_item.setTextAlignment(Qt.AlignCenter)
             self.results_table.setItem(table_row, 4, status_item)
+
+            # Manual Override dropdown
+            override_combo = QComboBox()
+            override_combo.addItems(["Auto", "Keep", "Filter"])
+            override_combo.setCurrentIndex(0)  # Default to "Auto"
+            override_combo.setStyleSheet(
+                f"""
+                QComboBox {{
+                    background-color: {Colors.BG_PRIMARY};
+                    border: 1px solid {Colors.BORDER_DEFAULT};
+                    border-radius: {BorderRadius.SM};
+                    padding: 4px 8px;
+                    color: {Colors.TEXT_PRIMARY};
+                    min-width: 90px;
+                }}
+                QComboBox:hover {{
+                    border: 1px solid {Colors.BLUE_500};
+                }}
+                QComboBox::drop-down {{
+                    border: none;
+                    width: 24px;
+                }}
+                QComboBox::down-arrow {{
+                    width: 12px;
+                    height: 12px;
+                }}
+                QComboBox QAbstractItemView {{
+                    background-color: {Colors.BG_PRIMARY};
+                    border: 1px solid {Colors.BORDER_DEFAULT};
+                    selection-background-color: {Colors.BLUE_500};
+                    color: {Colors.TEXT_PRIMARY};
+                    padding: 4px;
+                }}
+                """
+            )
+            # Store reference data for the callback
+            override_combo.setProperty("filename", filename)
+            override_combo.setProperty("mu_index", int(row["mu_index"]))
+            override_combo.currentTextChanged.connect(
+                lambda text, f=filename, m=int(row["mu_index"]): self.on_manual_override_changed(f, m, text)
+            )
+            self.results_table.setCellWidget(table_row, 5, override_combo)
 
         # Re-enable sorting
         self.results_table.setSortingEnabled(True)
@@ -909,6 +967,20 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
                 self.success(f"Steady-state region selected: {start:.1f}s - {end:.1f}s")
                 logger.info(f"Steady-state selection from dialog: {start:.2f}s - {end:.2f}s")
 
+    def on_manual_override_changed(self, filename, mu_index, text):
+        """Handle manual override dropdown change."""
+        key = (filename, mu_index)
+        if text == "Auto":
+            # Remove from overrides dict - use automatic threshold-based decision
+            if key in self.manual_overrides:
+                del self.manual_overrides[key]
+        else:
+            # Store the manual override
+            self.manual_overrides[key] = text
+
+        self.update_filter_preview()
+        logger.debug(f"Manual override for {filename} MU {mu_index}: {text}")
+
     def on_threshold_changed(self, value):
         """Handle threshold change."""
         self.threshold = value
@@ -916,22 +988,39 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.update_table_colors()
 
     def update_filter_preview(self):
-        """Update the filter preview label."""
+        """Update the filter preview label, considering manual overrides."""
         if not self.covisi_data:
             self.preview_label.setText("")
             return
 
         total_mus = 0
         to_filter = 0
+        manual_overrides_count = 0
 
-        for df in self.covisi_data.values():
-            total_mus += len(df)
-            to_filter += (df["covisi_all"] > self.threshold).sum()
+        for json_path, df in self.covisi_data.items():
+            filename = os.path.basename(json_path)
+            for _, row in df.iterrows():
+                total_mus += 1
+                mu_index = int(row["mu_index"])
+                covisi_val = row["covisi_all"]
+                key = (filename, mu_index)
+
+                # Check for manual override
+                if key in self.manual_overrides:
+                    manual_overrides_count += 1
+                    if self.manual_overrides[key] == "Filter":
+                        to_filter += 1
+                    # "Keep" means don't filter
+                else:
+                    # Use automatic threshold-based decision
+                    if covisi_val > self.threshold:
+                        to_filter += 1
 
         to_keep = total_mus - to_filter
+        override_text = f" ({manual_overrides_count} manual)" if manual_overrides_count > 0 else ""
         self.preview_label.setText(
             f"Preview: {to_filter} of {total_mus} MUs will be filtered "
-            f"({to_keep} kept)"
+            f"({to_keep} kept){override_text}"
         )
 
     def update_table_colors(self):
@@ -966,9 +1055,10 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.setMaximum(len(self.json_files))
 
-        # Start worker
+        # Start worker with manual overrides
         self.filter_worker = CoVISIFilterWorker(
-            self.json_files, self.threshold, self.expected_folder
+            self.json_files, self.threshold, self.expected_folder,
+            manual_overrides=self.manual_overrides.copy()
         )
         self.filter_worker.progress.connect(self.on_filter_progress)
         self.filter_worker.finished.connect(self.on_filter_finished)
@@ -1005,7 +1095,7 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             f"({filtered} remaining)."
         )
         self.status_label.setText(
-            f"✓ Filtering complete: {filtered} MUs kept, {removed} removed"
+            f"Filtering complete: {filtered} MUs kept, {removed} removed"
         )
 
         # Mark step as completed
@@ -1030,6 +1120,7 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             "files_count": len(self.json_files),
             "reason": "User chose to skip pre-filtering",
             "analysis_method": self.analysis_method,
+            "manual_overrides_count": len(self.manual_overrides),
         }
 
         # Include steady-state parameters if used
@@ -1046,13 +1137,20 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
                     zip(df["mu_index"].astype(int), df["covisi_all"])
                 )
 
+        # Include manual overrides if any
+        if self.manual_overrides:
+            report["manual_overrides"] = {
+                f"{fn}:MU{mu}": decision
+                for (fn, mu), decision in self.manual_overrides.items()
+            }
+
         report_path = os.path.join(
             self.expected_folder, "covisi_pre_filter_report.json"
         )
         save_covisi_report(report, report_path, report_type="pre_filter")
 
         self.info("CoVISI filtering skipped. Proceeding with all MUs.")
-        self.status_label.setText("✓ Filtering skipped. All MUs will be processed.")
+        self.status_label.setText("Filtering skipped. All MUs will be processed.")
 
         # Mark step as completed
         self.complete_step()
@@ -1095,7 +1193,9 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
                     "MU Index",
                     "CoVISI (%)",
                     "Quality",
-                    "Status",
+                    "Auto Status",
+                    "Manual Override",
+                    "Final Decision",
                     "Threshold (%)",
                 ])
 
@@ -1105,14 +1205,26 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
                     mu_index = self.results_table.item(row_idx, 1).data(Qt.DisplayRole)
                     covisi_val = self.results_table.item(row_idx, 2).data(Qt.DisplayRole)
                     quality = self.results_table.item(row_idx, 3).text()
-                    status = self.results_table.item(row_idx, 4).text()
+                    auto_status = self.results_table.item(row_idx, 4).text()
+
+                    # Get manual override from dropdown
+                    override_combo = self.results_table.cellWidget(row_idx, 5)
+                    manual_override = override_combo.currentText() if override_combo else "Auto"
+
+                    # Determine final decision
+                    if manual_override == "Auto":
+                        final_decision = auto_status
+                    else:
+                        final_decision = manual_override
 
                     writer.writerow([
                         file_name,
                         mu_index,
                         covisi_val,
                         quality,
-                        status,
+                        auto_status,
+                        manual_override,
+                        final_decision,
                         self.threshold,
                     ])
 
@@ -1133,7 +1245,7 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         dialog = QDialog(self)
         dialog.setWindowTitle("CoVISI Pre-Filter Analysis")
         dialog.setModal(False)
-        dialog.resize(900, 600)
+        dialog.resize(1000, 600)
 
         # Main layout
         dialog_layout = QVBoxLayout(dialog)
@@ -1156,17 +1268,17 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         # Create expanded table
         expanded_table = QTableWidget()
-        expanded_table.setColumnCount(self.results_table.columnCount())
+        expanded_table.setColumnCount(6)
         expanded_table.setHorizontalHeaderLabels(
-            ["File", "MU Index", "CoVISI (%)", "Quality", "Status"]
+            ["File", "MU Index", "CoVISI (%)", "Quality", "Auto Status", "Manual Override"]
         )
         expanded_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 5):
+        for col in range(1, 6):
             expanded_table.horizontalHeader().setSectionResizeMode(
                 col, QHeaderView.ResizeToContents
             )
         expanded_table.setAlternatingRowColors(True)
-        expanded_table.setSortingEnabled(True)
+        expanded_table.setSortingEnabled(False)  # Disable sorting to preserve widget positions
         expanded_table.setStyleSheet(
             f"""
             QTableWidget {{
@@ -1195,11 +1307,11 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         # Copy data from original table
         expanded_table.setRowCount(self.results_table.rowCount())
         for row in range(self.results_table.rowCount()):
-            for col in range(self.results_table.columnCount()):
+            # Copy text columns (0-4)
+            for col in range(5):
                 original_item = self.results_table.item(row, col)
                 if original_item:
                     new_item = QTableWidgetItem()
-                    # Copy both text and data for proper sorting
                     new_item.setText(original_item.text())
                     data = original_item.data(Qt.DisplayRole)
                     if data is not None:
@@ -1208,6 +1320,60 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
                     new_item.setBackground(original_item.background())
                     new_item.setForeground(original_item.foreground())
                     expanded_table.setItem(row, col, new_item)
+
+            # Create synced dropdown for column 5
+            original_combo = self.results_table.cellWidget(row, 5)
+            if original_combo and isinstance(original_combo, QComboBox):
+                filename = original_combo.property("filename")
+                mu_index = original_combo.property("mu_index")
+                current_text = original_combo.currentText()
+
+                new_combo = QComboBox()
+                new_combo.addItems(["Auto", "Keep", "Filter"])
+                new_combo.setCurrentText(current_text)
+                new_combo.setStyleSheet(
+                    f"""
+                    QComboBox {{
+                        background-color: {Colors.BG_PRIMARY};
+                        border: 1px solid {Colors.BORDER_DEFAULT};
+                        border-radius: {BorderRadius.SM};
+                        padding: 4px 8px;
+                        color: {Colors.TEXT_PRIMARY};
+                        min-width: 90px;
+                    }}
+                    QComboBox:hover {{
+                        border: 1px solid {Colors.BLUE_500};
+                    }}
+                    QComboBox::drop-down {{
+                        border: none;
+                        width: 24px;
+                    }}
+                    QComboBox::down-arrow {{
+                        width: 12px;
+                        height: 12px;
+                    }}
+                    QComboBox QAbstractItemView {{
+                        background-color: {Colors.BG_PRIMARY};
+                        border: 1px solid {Colors.BORDER_DEFAULT};
+                        selection-background-color: {Colors.BLUE_500};
+                        color: {Colors.TEXT_PRIMARY};
+                        padding: 4px;
+                    }}
+                    """
+                )
+                new_combo.setProperty("filename", filename)
+                new_combo.setProperty("mu_index", mu_index)
+                new_combo.setProperty("original_combo", original_combo)
+
+                # Connect to sync both dropdowns
+                def sync_combos(text, orig_combo=original_combo, f=filename, m=mu_index):
+                    orig_combo.blockSignals(True)
+                    orig_combo.setCurrentText(text)
+                    orig_combo.blockSignals(False)
+                    self.on_manual_override_changed(f, m, text)
+
+                new_combo.currentTextChanged.connect(sync_combos)
+                expanded_table.setCellWidget(row, 5, new_combo)
 
         dialog_layout.addWidget(expanded_table, stretch=1)
 

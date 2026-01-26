@@ -35,18 +35,14 @@ class Toast(QWidget):
 
         # Icon/emoji
         icon_label = QLabel()
-        icon_label.setFont(QFont(Fonts.FAMILY_SANS, 18))
+        icon_label.setObjectName("toastIcon")
+        icon_label.setFont(QFont(Fonts.FAMILY_SANS, 14))
 
         # Message
         message_label = QLabel(message)
+        message_label.setObjectName("toastMessage")
         message_label.setWordWrap(True)
         message_label.setMaximumWidth(400)
-        message_label.setStyleSheet(f"""
-            QLabel {{
-                color: white;
-                font-size: {Fonts.SIZE_BASE};
-            }}
-        """)
 
         # Close button
         close_btn = QPushButton("×")
@@ -72,29 +68,45 @@ class Toast(QWidget):
         layout.addWidget(message_label, stretch=1)
         layout.addWidget(close_btn)
 
-        # Style based on type
+        # Style based on type - using simple ASCII characters for cross-platform compatibility
         if self.toast_type == "success":
-            icon_label.setText("✓")
+            icon_text = "OK"
             bg_color = Colors.GREEN_600
             border_color = Colors.GREEN_700
         elif self.toast_type == "error":
-            icon_label.setText("✕")
+            icon_text = "X"
             bg_color = Colors.RED_600
             border_color = Colors.RED_700
         elif self.toast_type == "warning":
-            icon_label.setText("⚠")
+            icon_text = "!"
             bg_color = Colors.YELLOW_600
             border_color = "#ca8a04"
         else:  # info
-            icon_label.setText("ℹ")
+            icon_text = "i"
             bg_color = Colors.BLUE_600
             border_color = Colors.BLUE_700
 
+        icon_label.setText(icon_text)
+
+        # Apply all styles to container including child elements to override global styles
+        # Using specific object names to ensure styles override the global QLabel styles from theme.py
         container.setStyleSheet(f"""
             #toastContainer {{
                 background-color: {bg_color};
                 border: 2px solid {border_color};
                 border-radius: {BorderRadius.LG};
+            }}
+            #toastContainer #toastIcon {{
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                background-color: transparent;
+                padding: 0px 4px;
+            }}
+            #toastContainer #toastMessage {{
+                color: white;
+                font-size: {Fonts.SIZE_BASE};
+                background-color: transparent;
             }}
         """)
 

@@ -400,3 +400,315 @@ class CodeBoxStyle:
                 font-size: {Fonts.SIZE_SM};
             }}
         """
+    
+    @staticmethod
+    def checkbox():
+        """Checkbox style matching the design system."""
+        return f"""
+            QCheckBox {{
+                spacing: {Spacing.SM}px;
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_BASE};
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                background-color: {Colors.BG_PRIMARY};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {Colors.BLUE_500};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {Colors.BLUE_600};
+                border-color: {Colors.BLUE_600};
+                /* Optional: Hier könnte ein SVG-Checkmark-Icon rein */
+            }}
+            QCheckBox:disabled {{
+                color: {Colors.GRAY_400};
+            }}
+            QCheckBox::indicator:disabled {{
+                background-color: {Colors.GRAY_100};
+                border-color: {Colors.GRAY_300};
+            }}
+        """
+
+
+def get_app_stylesheet() -> str:
+    """
+    Returns a global stylesheet for the application.
+    This replaces QPalette to avoid issues with native widgets like checkboxes and comboboxes.
+    Includes all component styles from Styles and CodeBoxStyle classes for consistency.
+    """
+    return f"""
+        /* Base widget styles */
+        QWidget {{
+            background-color: {Colors.BG_PRIMARY};
+            color: {Colors.TEXT_PRIMARY};
+            font-family: {Fonts.FAMILY_SANS};
+            font-size: {Fonts.SIZE_BASE};
+        }}
+        QMainWindow {{
+            background-color: {Colors.BG_PRIMARY};
+        }}
+        QToolTip {{
+            background-color: {Colors.BG_PRIMARY};
+            color: {Colors.TEXT_PRIMARY};
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            padding: {Spacing.XS}px;
+        }}
+
+        /* Menu styles */
+        QMenuBar {{
+            background-color: {Colors.BG_SECONDARY};
+            color: {Colors.TEXT_PRIMARY};
+        }}
+        QMenuBar::item:selected {{
+            background-color: {Colors.BLUE_600};
+            color: white;
+        }}
+        QMenu {{
+            background-color: {Colors.BG_PRIMARY};
+            color: {Colors.TEXT_PRIMARY};
+            border: 1px solid {Colors.BORDER_DEFAULT};
+        }}
+        QMenu::item:selected {{
+            background-color: {Colors.BLUE_600};
+            color: white;
+        }}
+
+        /* Primary button (default) */
+        QPushButton {{
+            background-color: {Colors.BLUE_600};
+            color: white;
+            border: none;
+            border-radius: {BorderRadius.MD};
+            padding: {Spacing.SM}px {Spacing.LG}px;
+            font-size: {Fonts.SIZE_BASE};
+            font-weight: {Fonts.WEIGHT_MEDIUM};
+        }}
+        QPushButton:hover {{
+            background-color: {Colors.BLUE_700};
+        }}
+        QPushButton:pressed {{
+            background-color: {Colors.BLUE_500};
+        }}
+        QPushButton:disabled {{
+            background-color: {Colors.GRAY_300};
+            color: {Colors.GRAY_500};
+        }}
+
+        /* Input fields */
+        QLineEdit, QTextEdit, QPlainTextEdit {{
+            background-color: {Colors.BG_PRIMARY};
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            border-radius: {BorderRadius.MD};
+            padding: {Spacing.SM}px;
+            color: {Colors.TEXT_PRIMARY};
+            font-size: {Fonts.SIZE_BASE};
+        }}
+        QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{
+            border-color: {Colors.BLUE_500};
+        }}
+        QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled {{
+            background-color: {Colors.GRAY_100};
+            color: {Colors.GRAY_500};
+        }}
+
+        /* Combobox */
+        QComboBox {{
+            background-color: {Colors.BG_PRIMARY};
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            border-radius: {BorderRadius.MD};
+            padding: {Spacing.SM}px;
+            color: {Colors.TEXT_PRIMARY};
+            font-size: {Fonts.SIZE_BASE};
+        }}
+        QComboBox:hover {{
+            border-color: {Colors.GRAY_400};
+        }}
+        QComboBox:focus {{
+            border-color: {Colors.BLUE_500};
+        }}
+        QComboBox:disabled {{
+            background-color: {Colors.GRAY_100};
+            color: {Colors.GRAY_500};
+        }}
+        QComboBox::drop-down {{
+            border: none;
+            padding-right: {Spacing.SM}px;
+        }}
+        QComboBox::down-arrow {{
+            image: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 6px solid {Colors.TEXT_SECONDARY};
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {Colors.BG_PRIMARY};
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            selection-background-color: {Colors.BLUE_600};
+            selection-color: white;
+        }}
+
+        /* Checkbox */
+        QCheckBox {{
+            spacing: {Spacing.SM}px;
+            color: {Colors.TEXT_PRIMARY};
+            font-size: {Fonts.SIZE_BASE};
+        }}
+        QCheckBox::indicator {{
+            width: 18px;
+            height: 18px;
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            border-radius: {BorderRadius.SM};
+            background-color: {Colors.BG_PRIMARY};
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {Colors.BLUE_500};
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {Colors.BLUE_600};
+            border-color: {Colors.BLUE_600};
+        }}
+        QCheckBox:disabled {{
+            color: {Colors.GRAY_400};
+        }}
+        QCheckBox::indicator:disabled {{
+            background-color: {Colors.GRAY_100};
+            border-color: {Colors.GRAY_300};
+        }}
+
+        /* Labels */
+        QLabel {{
+            color: {Colors.TEXT_PRIMARY};
+            font-size: {Fonts.SIZE_BASE};
+            background-color: transparent;
+        }}
+
+        /* Progress bar */
+        QProgressBar {{
+            border: none;
+            background-color: {Colors.GRAY_200};
+            border-radius: {BorderRadius.SM};
+            text-align: center;
+        }}
+        QProgressBar::chunk {{
+            background-color: {Colors.BLUE_600};
+            border-radius: {BorderRadius.SM};
+        }}
+
+        /* Group box */
+        QGroupBox {{
+            background-color: {Colors.BG_PRIMARY};
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            border-radius: {BorderRadius.LG};
+            margin-top: {Spacing.MD}px;
+            padding-top: {Spacing.LG}px;
+            font-weight: {Fonts.WEIGHT_SEMIBOLD};
+            font-size: {Fonts.SIZE_BASE};
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            left: {Spacing.MD}px;
+            padding: 0 {Spacing.SM}px;
+            color: {Colors.TEXT_PRIMARY};
+        }}
+
+        /* Scroll areas and bars */
+        QScrollArea {{
+            border: none;
+            background-color: {Colors.BG_PRIMARY};
+        }}
+        QScrollBar:vertical {{
+            background-color: {Colors.BG_SECONDARY};
+            width: 12px;
+            border-radius: {BorderRadius.SM};
+        }}
+        QScrollBar::handle:vertical {{
+            background-color: {Colors.GRAY_300};
+            border-radius: {BorderRadius.SM};
+            min-height: 20px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background-color: {Colors.GRAY_400};
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0px;
+        }}
+        QScrollBar:horizontal {{
+            background-color: {Colors.BG_SECONDARY};
+            height: 12px;
+            border-radius: {BorderRadius.SM};
+        }}
+        QScrollBar::handle:horizontal {{
+            background-color: {Colors.GRAY_300};
+            border-radius: {BorderRadius.SM};
+            min-width: 20px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background-color: {Colors.GRAY_400};
+        }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            width: 0px;
+        }}
+
+        /* Tab widget */
+        QTabWidget::pane {{
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            border-radius: {BorderRadius.MD};
+            background-color: {Colors.BG_PRIMARY};
+        }}
+        QTabBar::tab {{
+            background-color: {Colors.BG_SECONDARY};
+            color: {Colors.TEXT_PRIMARY};
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            padding: {Spacing.SM}px {Spacing.LG}px;
+            border-top-left-radius: {BorderRadius.MD};
+            border-top-right-radius: {BorderRadius.MD};
+        }}
+        QTabBar::tab:selected {{
+            background-color: {Colors.BG_PRIMARY};
+            border-bottom-color: {Colors.BG_PRIMARY};
+        }}
+        QTabBar::tab:hover:!selected {{
+            background-color: {Colors.GRAY_100};
+        }}
+
+        /* Spinbox */
+        QSpinBox, QDoubleSpinBox {{
+            background-color: {Colors.BG_PRIMARY};
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            border-radius: {BorderRadius.MD};
+            padding: {Spacing.SM}px;
+            color: {Colors.TEXT_PRIMARY};
+            font-size: {Fonts.SIZE_BASE};
+        }}
+        QSpinBox:disabled, QDoubleSpinBox:disabled {{
+            background-color: {Colors.GRAY_100};
+            color: {Colors.GRAY_500};
+        }}
+
+        /* Slider */
+        QSlider::groove:horizontal {{
+            background-color: {Colors.GRAY_200};
+            height: 6px;
+            border-radius: 3px;
+        }}
+        QSlider::handle:horizontal {{
+            background-color: {Colors.BLUE_600};
+            width: 16px;
+            height: 16px;
+            margin: -5px 0;
+            border-radius: 8px;
+        }}
+        QSlider::handle:horizontal:hover {{
+            background-color: {Colors.BLUE_700};
+        }}
+
+        /* Frame (card style) */
+        QFrame {{
+            background-color: {Colors.BG_PRIMARY};
+        }}
+    """
