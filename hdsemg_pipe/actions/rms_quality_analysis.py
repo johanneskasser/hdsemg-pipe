@@ -11,6 +11,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 import numpy as np
+import json
 from datetime import datetime
 
 from PyQt5 import QtWidgets, QtCore
@@ -1040,6 +1041,9 @@ class RMSQualityDialog(QtWidgets.QDialog):
             # Save text summary
             self._save_text_summary(analysis_path)
 
+            # Save channel selection JSON
+            self._save_channel_selection_json()
+
             logger.info("Analysis results saved to %s", analysis_path)
             QtWidgets.QMessageBox.information(
                 self, "Results Saved",
@@ -1050,6 +1054,55 @@ class RMSQualityDialog(QtWidgets.QDialog):
         except Exception as e:
             logger.error("Failed to save results: %s", e, exc_info=True)
             QtWidgets.QMessageBox.critical(self, "Save Error", f"Failed to save results:\n{e}")
+
+    def _save_channel_selection_json(self):
+        """Save channel selection data to JSON files."""
+        results = self.analysis_results
+        if not results:
+            return
+
+        try:
+            # Get cropped signal path and create it if it doesn't exist
+            cropped_signal_path = global_state.get_cropped_signal_path()
+            os.makedirs(cropped_signal_path, exist_ok=True)
+            logger.info(f"Ensured channel selection directory exists at: {cropped_signal_path}")
+
+            # Group results by file name
+            file_channel_results = {}
+            for fr in results.file_results:
+                if fr.file_name not in file_channel_results:
+                    file_channel_results[fr.file_name] = []
+                file_channel_results[fr.file_name].extend(fr.channel_results)
+
+            for file_name, channel_results in file_channel_results.items():
+                grids_data = {}
+                for cr in channel_results:
+                    if cr.grid_key not in grids_data:
+                        grids_data[cr.grid_key] = {}
+                    
+                    grids_data[cr.grid_key][str(cr.channel_idx)] = {
+                        "rms_label": cr.quality,
+                        "rms_quality": f"{cr.rms_uv:.2f} µV"
+                    }
+
+                json_data = {"grids": grids_data}
+
+                # Construct output path
+                base_name = Path(file_name).stem
+                json_file_name = f"{base_name}_rms.json"
+                output_path = os.path.join(cropped_signal_path, json_file_name)
+
+                # Save JSON file
+                with open(output_path, 'w') as f:
+                    json.dump(json_data, f, indent=4)
+                
+                logger.info(f"Saved channel selection JSON for {file_name} to {output_path}")
+
+        except Exception as e:
+            logger.error("Failed to save channel selection JSON: %s", e, exc_info=True)
+            # Optionally, show a non-critical error message to the user
+            QtWidgets.QMessageBox.warning(self, "JSON Save Warning", f"Could not save channel selection file for some items:\n{e}")
+
 
     def _save_summary_figure(self, output_path: str):
         """Save academic-style summary figure."""

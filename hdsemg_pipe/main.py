@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
     qApp, QStackedWidget, QPushButton, QHBoxLayout, QStyleFactory
 )
 from PyQt5.QtCore import Qt
+from hdsemg_pipe.ui_elements.theme import get_app_stylesheet
 
 from hdsemg_pipe._log.exception_hook import exception_hook
 from hdsemg_pipe.controller.automatic_state_reconstruction import start_reconstruction_workflow
@@ -330,33 +331,15 @@ def main():
     if sys.platform == 'darwin':
         os.environ['QT_MAC_WANTS_LIGHT_THEME'] = '1'
 
-    app = QApplication(sys.argv)
-    
-    # Set a consistent style
-    app.setStyle('Fusion')
 
-    # Create and set a light palette to enforce light mode
-    palette = QPalette()
-    palette.setColor(QPalette.Window, QColor(Colors.BG_PRIMARY))
-    palette.setColor(QPalette.WindowText, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.Base, QColor(Colors.BG_SECONDARY))
-    palette.setColor(QPalette.AlternateBase, QColor(Colors.BG_TERTIARY))
-    palette.setColor(QPalette.ToolTipBase, QColor(Colors.BG_PRIMARY))
-    palette.setColor(QPalette.ToolTipText, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.Text, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.Button, QColor(Colors.BG_SECONDARY))
-    palette.setColor(QPalette.ButtonText, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.BrightText, QColor(Colors.RED_600))
-    palette.setColor(QPalette.Link, QColor(Colors.BLUE_600))
-    palette.setColor(QPalette.Highlight, QColor(Colors.BLUE_600))
-    palette.setColor(QPalette.HighlightedText, QColor(Colors.BG_PRIMARY))
-    app.setPalette(palette)
+    app = QApplication(sys.argv)
     
     setup_logging()
     sys.excepthook = exception_hook
     
     window = WizardMainWindow()
     window.showMaximized()  # Show the window maximized
+    app.setStyleSheet(get_app_stylesheet())
     
     sys.exit(app.exec_())
 
