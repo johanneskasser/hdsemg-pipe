@@ -623,7 +623,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 current_path = eng.path(nargout=1)
                 if muedit_path not in current_path:
                     logger.info(f"Adding MUEdit path: {muedit_path}")
-                    eng.addpath(muedit_path, nargout=0)
+                    gen_path_cmd = f"addpath(genpath('{muedit_path}'))"
+                    eng.eval(gen_path_cmd, nargout=0)
 
             # Launch MUEdit GUI
             logger.info("Launching MUEdit GUI...")
@@ -642,7 +643,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             if muedit_path and os.path.exists(muedit_path):
                 matlab_cmd = (
                     f"if ~contains(path, '{muedit_path}'), "
-                    f"addpath('{muedit_path}'); "
+                    f"addpath(genpath('{muedit_path}')); "
                     f"end; MUedit"
                 )
             else:
