@@ -314,7 +314,11 @@ class MUEditInstructionDialog(QDialog):
         for file_path in self.muedit_files:
             # Extract basename since muedit_files contains full paths
             base_name = os.path.basename(file_path)
-            is_edited = file_path in self.edited_files
+
+            # Check if edited version exists
+            # MUEdit creates files by appending "_edited.mat" to the entire filename
+            edited_path = file_path + '_edited.mat'
+            is_edited = edited_path in self.edited_files
 
             if is_edited:
                 status_text = f"✅ {base_name}"
@@ -346,7 +350,9 @@ class MUEditInstructionDialog(QDialog):
         # Find next file to edit
         next_file = None
         for file_path in self.muedit_files:
-            if file_path not in self.edited_files:
+            # Check if edited version exists
+            edited_path = file_path + '_edited.mat'
+            if edited_path not in self.edited_files:
                 next_file = file_path
                 break
 
