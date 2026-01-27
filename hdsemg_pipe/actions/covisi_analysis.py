@@ -38,7 +38,7 @@ try:
 except ImportError:
     OPENHDEMG_AVAILABLE = False
     logger.warning(
-        "openhdemg library not available. CoVISI analysis will be limited."
+        "openhdemg library not available (pip install openhdemg). CoVISI analysis will be limited."
     )
 
 # Default CoVISI threshold per literature (Taleshi et al., 2025)
