@@ -151,6 +151,78 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         return True
 
+    def _has_motor_units(self, mat_path):
+        """
+        Check if a MUedit MAT file contains motor units.
+
+        Args:
+            mat_path: Path to the _muedit.mat file
+
+        Returns:
+            bool: True if the file contains motor units, False otherwise
+        """
+        import h5py
+        import scipy.io as sio
+
+        try:
+            # Try loading with scipy.io first (older MAT format)
+            try:
+                mat_data = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
+                signal = mat_data.get('signal')
+                if signal is not None:
+                    # Check if Dischargetimes exists and has motor units
+                    discharge_times = getattr(signal, 'Dischargetimes', None)
+                    if discharge_times is not None:
+                        # Check if it's not empty
+                        if hasattr(discharge_times, '__len__'):
+                            return len(discharge_times) > 0
+                        return True
+                return False
+            except NotImplementedError:
+                # MATLAB v7.3 file, use h5py
+                pass
+
+            # Load with h5py for HDF5/v7.3 format
+            with h5py.File(mat_path, 'r') as f:
+                # Check signal.Dischargetimes
+                if 'signal' in f:
+                    signal_group = f['signal']
+                    if 'Dischargetimes' in signal_group:
+                        discharge_times = signal_group['Dischargetimes']
+                        # Check if the array has content
+                        if discharge_times.size > 0:
+                            # For cell arrays, check if any cell is non-empty
+                            if discharge_times.ndim == 2:
+                                # It's a cell array (ngrids x nMU)
+                                n_grids, n_mus = discharge_times.shape
+                                if n_mus > 0:
+                                    # Check if at least one MU has discharge times
+                                    for mu_idx in range(n_mus):
+                                        ref = discharge_times[0, mu_idx]
+                                        if isinstance(ref, h5py.Reference):
+                                            data = f[ref]
+                                            if data.size > 0:
+                                                return True
+                                        elif ref.size > 0:
+                                            return True
+                                return False
+                            return True
+
+                # Check edition.Distimeclean as fallback
+                if 'edition' in f:
+                    edition_group = f['edition']
+                    if 'Distimeclean' in edition_group:
+                        distimeclean = edition_group['Distimeclean']
+                        if distimeclean.size > 0:
+                            return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Could not check motor units in {os.path.basename(mat_path)}: {e}")
+            # If we can't read the file, include it to be safe
+            return True
+
     def scan_muedit_files(self):
         """Scan for MUEdit files and track progress."""
         if not os.path.exists(self.expected_folder):
@@ -165,6 +237,12 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         for file in all_filenames:
             if file.endswith('_muedit.mat') or file.endswith('_multigrid_muedit.mat'):
                 full_path = os.path.join(self.expected_folder, file)
+
+                # Skip files without motor units (they cause MUEdit to crash)
+                if not self._has_motor_units(full_path):
+                    logger.info(f"Skipping {file} - no motor units found")
+                    continue
+
                 all_muedit_files.append(full_path)
 
                 # Check if edited version exists
