@@ -23,8 +23,8 @@ class MUEditInstructionDialog(QDialog):
     def __init__(self, muedit_files, edited_files, folder_path, parent=None):
         """
         Args:
-            muedit_files: List of base names of _muedit.mat files
-            edited_files: List of base names of already edited files
+            muedit_files: List of full paths to _muedit.mat files
+            edited_files: List of full paths to already edited files
             folder_path: Path to the decomposition folder
         """
         super().__init__(parent)
@@ -311,8 +311,10 @@ class MUEditInstructionDialog(QDialog):
         layout.setContentsMargins(0, 5, 0, 5)
         layout.setSpacing(Spacing.XS)
 
-        for base_name in self.muedit_files:
-            is_edited = base_name in self.edited_files
+        for file_path in self.muedit_files:
+            # Extract basename since muedit_files contains full paths
+            base_name = os.path.basename(file_path)
+            is_edited = file_path in self.edited_files
 
             if is_edited:
                 status_text = f"✅ {base_name}"
@@ -343,9 +345,9 @@ class MUEditInstructionDialog(QDialog):
 
         # Find next file to edit
         next_file = None
-        for base_name in self.muedit_files:
-            if base_name not in self.edited_files:
-                next_file = base_name
+        for file_path in self.muedit_files:
+            if file_path not in self.edited_files:
+                next_file = file_path
                 break
 
         if next_file:
@@ -361,8 +363,8 @@ class MUEditInstructionDialog(QDialog):
             """)
             layout.addWidget(header_label)
 
-            # File name
-            filename = f"{next_file}_muedit.mat"
+            # File name (next_file is a full path, extract basename)
+            filename = os.path.basename(next_file)
             filename_label = QLabel(filename)
             filename_label.setStyleSheet(f"""
                 QLabel {{
