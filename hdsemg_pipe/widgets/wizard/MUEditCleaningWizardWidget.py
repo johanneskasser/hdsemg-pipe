@@ -174,19 +174,26 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 if os.path.exists(edited_path):
                     edited_files.append(edited_path)
 
-        # Filter out original muedit files when covisi filtered versions exist
-        if self.chk_skip_originals.isChecked():
-            covisi_basenames = set()
-            for f in all_muedit_files:
-                fname = os.path.basename(f)
-                if '_covisi_filtered_muedit.mat' in fname:
-                    # Derive the original filename by removing '_covisi_filtered' part
-                    original_name = fname.replace('_covisi_filtered_muedit.mat', '_muedit.mat')
-                    covisi_basenames.add(original_name)
+        # Build set of originals that have a covisi filtered counterpart
+        # e.g. "base_covisi_filtered_muedit.mat" exists -> "base_muedit.mat" is the original to skip
+        covisi_filtered_names = set()
+        originals_with_covisi = set()
+        for f in all_muedit_files:
+            fname = os.path.basename(f)
+            if '_covisi_filtered_muedit.mat' in fname:
+                covisi_filtered_names.add(fname)
+                original_name = fname.replace('_covisi_filtered_muedit.mat', '_muedit.mat')
+                originals_with_covisi.add(original_name)
 
+        # Show/hide checkbox based on whether any covisi filtered muedit files exist
+        has_covisi = len(covisi_filtered_names) > 0
+        self.chk_skip_originals.setVisible(has_covisi)
+
+        # Filter out original muedit files when covisi filtered versions exist
+        if has_covisi and self.chk_skip_originals.isChecked():
             muedit_files = [
                 f for f in all_muedit_files
-                if os.path.basename(f) not in covisi_basenames
+                if os.path.basename(f) not in originals_with_covisi
             ]
             # Also filter edited_files to only include those matching kept muedit_files
             kept_basenames = {os.path.basename(f) for f in muedit_files}
