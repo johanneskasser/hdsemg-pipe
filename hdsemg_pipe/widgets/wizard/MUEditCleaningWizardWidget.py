@@ -9,7 +9,7 @@ import subprocess
 from PyQt5.QtCore import QFileSystemWatcher, QTimer
 from PyQt5.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QFrame, QScrollArea,
-    QWidget, QProgressBar
+    QWidget, QProgressBar, QCheckBox
 )
 
 from hdsemg_pipe._log.log_config import logger
@@ -68,6 +68,13 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         status_layout = QVBoxLayout(self.status_container)
         status_layout.setSpacing(Spacing.SM)
         status_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Checkbox to skip original muedit files when covisi filtered versions exist
+        self.chk_skip_originals = QCheckBox("Nur CoVISI-gefilterte Dateien verwenden (Originale auslassen)")
+        self.chk_skip_originals.setStyleSheet(f"font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;")
+        self.chk_skip_originals.setChecked(False)
+        self.chk_skip_originals.toggled.connect(self.scan_muedit_files)
+        status_layout.addWidget(self.chk_skip_originals)
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -150,13 +157,15 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             return
 
         # Find all _muedit.mat files
-        muedit_files = []
+        all_muedit_files = []
         edited_files = []
 
-        for file in os.listdir(self.expected_folder):
+        all_filenames = os.listdir(self.expected_folder)
+
+        for file in all_filenames:
             if file.endswith('_muedit.mat') or file.endswith('_multigrid_muedit.mat'):
                 full_path = os.path.join(self.expected_folder, file)
-                muedit_files.append(full_path)
+                all_muedit_files.append(full_path)
 
                 # Check if edited version exists
                 # MUEdit creates files by appending "_edited.mat" to the entire filename
@@ -164,6 +173,29 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 edited_path = os.path.join(self.expected_folder, file + '_edited.mat')
                 if os.path.exists(edited_path):
                     edited_files.append(edited_path)
+
+        # Filter out original muedit files when covisi filtered versions exist
+        if self.chk_skip_originals.isChecked():
+            covisi_basenames = set()
+            for f in all_muedit_files:
+                fname = os.path.basename(f)
+                if '_covisi_filtered_muedit.mat' in fname:
+                    # Derive the original filename by removing '_covisi_filtered' part
+                    original_name = fname.replace('_covisi_filtered_muedit.mat', '_muedit.mat')
+                    covisi_basenames.add(original_name)
+
+            muedit_files = [
+                f for f in all_muedit_files
+                if os.path.basename(f) not in covisi_basenames
+            ]
+            # Also filter edited_files to only include those matching kept muedit_files
+            kept_basenames = {os.path.basename(f) for f in muedit_files}
+            edited_files = [
+                ef for ef in edited_files
+                if any(os.path.basename(ef).startswith(kb.replace('.mat', '')) for kb in kept_basenames)
+            ]
+        else:
+            muedit_files = all_muedit_files
 
         # Check if file count changed (for logging)
         file_count = len(muedit_files) + len(edited_files)
