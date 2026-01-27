@@ -6,7 +6,7 @@ and monitors progress.
 """
 import os
 import subprocess
-from PyQt5.QtCore import QFileSystemWatcher, QTimer
+from PyQt5.QtCore import QFileSystemWatcher, QTimer, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QFrame, QScrollArea,
     QWidget, QProgressBar, QCheckBox
@@ -19,6 +19,96 @@ from hdsemg_pipe.widgets.MUEditInstructionDialog import MUEditInstructionDialog
 from hdsemg_pipe.config.config_enums import Settings, MUEditLaunchMethod
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius, Fonts
+
+
+class MUFileScanWorker(QThread):
+    """Worker thread for scanning MUEdit files and checking for motor units."""
+
+    scan_complete = pyqtSignal(list, dict)  # (valid_files, mu_check_cache)
+
+    def __init__(self, folder_path, parent=None):
+        super().__init__(parent)
+        self.folder_path = folder_path
+
+    def run(self):
+        """Scan folder and check which files have motor units."""
+        import h5py
+        import scipy.io as sio
+
+        valid_files = []
+        mu_check_cache = {}
+
+        if not os.path.exists(self.folder_path):
+            self.scan_complete.emit(valid_files, mu_check_cache)
+            return
+
+        all_filenames = os.listdir(self.folder_path)
+
+        for file in all_filenames:
+            if file.endswith('_muedit.mat') or file.endswith('_multigrid_muedit.mat'):
+                full_path = os.path.join(self.folder_path, file)
+
+                # Check if file has motor units
+                has_mus = self._check_motor_units(full_path, h5py, sio)
+                mu_check_cache[full_path] = has_mus
+
+                if has_mus:
+                    valid_files.append(full_path)
+                else:
+                    logger.info(f"Skipping {file} - no motor units found")
+
+        self.scan_complete.emit(valid_files, mu_check_cache)
+
+    def _check_motor_units(self, mat_path, h5py, sio):
+        """Check if a MUedit MAT file contains motor units."""
+        try:
+            # Try loading with scipy.io first (older MAT format)
+            try:
+                mat_data = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
+                signal = mat_data.get('signal')
+                if signal is not None:
+                    discharge_times = getattr(signal, 'Dischargetimes', None)
+                    if discharge_times is not None:
+                        if hasattr(discharge_times, '__len__'):
+                            return len(discharge_times) > 0
+                        return True
+                return False
+            except NotImplementedError:
+                pass
+
+            # Load with h5py for HDF5/v7.3 format
+            with h5py.File(mat_path, 'r') as f:
+                if 'signal' in f:
+                    signal_group = f['signal']
+                    if 'Dischargetimes' in signal_group:
+                        discharge_times = signal_group['Dischargetimes']
+                        if discharge_times.size > 0:
+                            if discharge_times.ndim == 2:
+                                n_grids, n_mus = discharge_times.shape
+                                if n_mus > 0:
+                                    for mu_idx in range(n_mus):
+                                        ref = discharge_times[0, mu_idx]
+                                        if isinstance(ref, h5py.Reference):
+                                            data = f[ref]
+                                            if data.size > 0:
+                                                return True
+                                        elif ref.size > 0:
+                                            return True
+                                return False
+                            return True
+
+                if 'edition' in f:
+                    edition_group = f['edition']
+                    if 'Distimeclean' in edition_group:
+                        distimeclean = edition_group['Distimeclean']
+                        if distimeclean.size > 0:
+                            return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Could not check motor units in {os.path.basename(mat_path)}: {e}")
+            return True
 
 
 class MUEditCleaningWizardWidget(WizardStepWidget):
@@ -46,6 +136,16 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.edited_files = []
         self.last_file_count = 0
 
+        # Cache for motor unit checks (to avoid re-scanning files every time)
+        self.mu_check_cache = {}
+        self.scan_worker = None
+        self.is_scanning = False
+
+        # Loading animation timer
+        self.loading_animation_timer = QTimer(self)
+        self.loading_animation_timer.timeout.connect(self._update_loading_animation)
+        self.loading_dots = 0
+
         # Initialize file system watcher
         self.watcher = QFileSystemWatcher(self)
         self.watcher.directoryChanged.connect(self.scan_muedit_files)
@@ -68,6 +168,22 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         status_layout = QVBoxLayout(self.status_container)
         status_layout.setSpacing(Spacing.SM)
         status_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Loading indicator (hidden by default)
+        self.loading_label = QLabel("Scanning files and checking for motor units...")
+        self.loading_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_SECONDARY};
+                font-size: {Fonts.SIZE_SM};
+                font-style: italic;
+                padding: {Spacing.SM}px;
+                background-color: {Colors.BG_SECONDARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+            }}
+        """)
+        self.loading_label.setVisible(False)
+        status_layout.addWidget(self.loading_label)
 
         # Checkbox to skip original muedit files when covisi filtered versions exist
         self.chk_skip_originals = QCheckBox("Nur CoVISI-gefilterte Dateien verwenden (Originale auslassen)")
@@ -151,86 +267,147 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         return True
 
-    def _has_motor_units(self, mat_path):
-        """
-        Check if a MUedit MAT file contains motor units.
+    def _start_initial_scan(self):
+        """Start initial scan in background thread."""
+        if self.is_scanning or not self.expected_folder:
+            return
 
-        Args:
-            mat_path: Path to the _muedit.mat file
+        self.is_scanning = True
+        self.loading_dots = 0
+        self.loading_label.setVisible(True)
+        self.loading_animation_timer.start(500)  # Update every 500ms
 
-        Returns:
-            bool: True if the file contains motor units, False otherwise
-        """
-        import h5py
-        import scipy.io as sio
+        # Create and start worker thread
+        self.scan_worker = MUFileScanWorker(self.expected_folder)
+        self.scan_worker.scan_complete.connect(self._on_scan_complete)
+        self.scan_worker.start()
 
-        try:
-            # Try loading with scipy.io first (older MAT format)
-            try:
-                mat_data = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-                signal = mat_data.get('signal')
-                if signal is not None:
-                    # Check if Dischargetimes exists and has motor units
-                    discharge_times = getattr(signal, 'Dischargetimes', None)
-                    if discharge_times is not None:
-                        # Check if it's not empty
-                        if hasattr(discharge_times, '__len__'):
-                            return len(discharge_times) > 0
-                        return True
-                return False
-            except NotImplementedError:
-                # MATLAB v7.3 file, use h5py
-                pass
+        logger.info("Started background scan for MUEdit files with motor units")
 
-            # Load with h5py for HDF5/v7.3 format
-            with h5py.File(mat_path, 'r') as f:
-                # Check signal.Dischargetimes
-                if 'signal' in f:
-                    signal_group = f['signal']
-                    if 'Dischargetimes' in signal_group:
-                        discharge_times = signal_group['Dischargetimes']
-                        # Check if the array has content
-                        if discharge_times.size > 0:
-                            # For cell arrays, check if any cell is non-empty
-                            if discharge_times.ndim == 2:
-                                # It's a cell array (ngrids x nMU)
-                                n_grids, n_mus = discharge_times.shape
-                                if n_mus > 0:
-                                    # Check if at least one MU has discharge times
-                                    for mu_idx in range(n_mus):
-                                        ref = discharge_times[0, mu_idx]
-                                        if isinstance(ref, h5py.Reference):
-                                            data = f[ref]
-                                            if data.size > 0:
-                                                return True
-                                        elif ref.size > 0:
-                                            return True
-                                return False
-                            return True
+    def _update_loading_animation(self):
+        """Update loading animation dots."""
+        self.loading_dots = (self.loading_dots + 1) % 4
+        dots = "." * self.loading_dots
+        self.loading_label.setText(f"Scanning files and checking for motor units{dots}")
 
-                # Check edition.Distimeclean as fallback
-                if 'edition' in f:
-                    edition_group = f['edition']
-                    if 'Distimeclean' in edition_group:
-                        distimeclean = edition_group['Distimeclean']
-                        if distimeclean.size > 0:
-                            return True
+    def _scan_new_files(self, new_file_paths):
+        """Scan newly discovered files in background without blocking UI."""
+        if self.is_scanning:
+            return
 
-            return False
+        self.is_scanning = True
 
-        except Exception as e:
-            logger.warning(f"Could not check motor units in {os.path.basename(mat_path)}: {e}")
-            # If we can't read the file, include it to be safe
-            return True
+        # Create custom worker for just these files
+        class NewFileWorker(QThread):
+            scan_complete = pyqtSignal(dict)
+
+            def __init__(self, file_paths):
+                super().__init__()
+                self.file_paths = file_paths
+
+            def run(self):
+                import h5py
+                import scipy.io as sio
+                cache_update = {}
+
+                for path in self.file_paths:
+                    # Use same logic as main worker
+                    has_mus = self._check_motor_units(path, h5py, sio)
+                    cache_update[path] = has_mus
+                    if not has_mus:
+                        logger.info(f"New file {os.path.basename(path)} has no motor units")
+
+                self.scan_complete.emit(cache_update)
+
+            def _check_motor_units(self, mat_path, h5py, sio):
+                try:
+                    try:
+                        mat_data = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
+                        signal = mat_data.get('signal')
+                        if signal is not None:
+                            discharge_times = getattr(signal, 'Dischargetimes', None)
+                            if discharge_times is not None:
+                                if hasattr(discharge_times, '__len__'):
+                                    return len(discharge_times) > 0
+                                return True
+                        return False
+                    except NotImplementedError:
+                        pass
+
+                    with h5py.File(mat_path, 'r') as f:
+                        if 'signal' in f:
+                            signal_group = f['signal']
+                            if 'Dischargetimes' in signal_group:
+                                discharge_times = signal_group['Dischargetimes']
+                                if discharge_times.size > 0:
+                                    if discharge_times.ndim == 2:
+                                        n_grids, n_mus = discharge_times.shape
+                                        if n_mus > 0:
+                                            for mu_idx in range(n_mus):
+                                                ref = discharge_times[0, mu_idx]
+                                                if isinstance(ref, h5py.Reference):
+                                                    data = f[ref]
+                                                    if data.size > 0:
+                                                        return True
+                                                elif ref.size > 0:
+                                                    return True
+                                        return False
+                                    return True
+
+                        if 'edition' in f:
+                            edition_group = f['edition']
+                            if 'Distimeclean' in edition_group:
+                                distimeclean = edition_group['Distimeclean']
+                                if distimeclean.size > 0:
+                                    return True
+                    return False
+                except Exception as e:
+                    logger.warning(f"Could not check motor units in {os.path.basename(mat_path)}: {e}")
+                    return True
+
+        self.scan_worker = NewFileWorker(new_file_paths)
+        self.scan_worker.scan_complete.connect(self._on_new_files_scan_complete)
+        self.scan_worker.start()
+
+    def _on_new_files_scan_complete(self, cache_update):
+        """Handle completion of new files scan."""
+        self.is_scanning = False
+        self.mu_check_cache.update(cache_update)
+        logger.info(f"New files scan complete, cache updated with {len(cache_update)} entries")
+
+        # Trigger another scan to update UI
+        self.scan_muedit_files()
+
+    def _on_scan_complete(self, valid_files, mu_check_cache):
+        """Handle completion of background scan."""
+        self.is_scanning = False
+        self.loading_animation_timer.stop()
+        self.loading_label.setVisible(False)
+        self.mu_check_cache = mu_check_cache
+
+        logger.info(f"Scan complete: {len(valid_files)} files with motor units found")
+
+        # Now do the normal scan
+        self.scan_muedit_files()
 
     def scan_muedit_files(self):
         """Scan for MUEdit files and track progress."""
         if not os.path.exists(self.expected_folder):
             return
 
+        # If cache is empty and we're not already scanning, start initial scan
+        if not self.mu_check_cache and not self.is_scanning:
+            self._start_initial_scan()
+            return
+
+        # If still scanning, skip this iteration
+        if self.is_scanning:
+            return
+
         # Find all _muedit.mat files
         all_muedit_files = []
         edited_files = []
+        new_files_found = []
 
         all_filenames = os.listdir(self.expected_folder)
 
@@ -238,9 +415,15 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             if file.endswith('_muedit.mat') or file.endswith('_multigrid_muedit.mat'):
                 full_path = os.path.join(self.expected_folder, file)
 
-                # Skip files without motor units (they cause MUEdit to crash)
-                if not self._has_motor_units(full_path):
-                    logger.info(f"Skipping {file} - no motor units found")
+                # Check if file is in cache
+                if full_path not in self.mu_check_cache:
+                    # New file found - mark for scanning but include it for now
+                    new_files_found.append(full_path)
+                    has_mus = True  # Assume True for new files until scanned
+                else:
+                    has_mus = self.mu_check_cache[full_path]
+
+                if not has_mus:
                     continue
 
                 all_muedit_files.append(full_path)
@@ -251,6 +434,11 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 edited_path = os.path.join(self.expected_folder, file + '_edited.mat')
                 if os.path.exists(edited_path):
                     edited_files.append(edited_path)
+
+        # If new files were found, trigger a background scan for them
+        if new_files_found and not self.is_scanning:
+            logger.info(f"Found {len(new_files_found)} new files, starting background check")
+            self._scan_new_files(new_files_found)
 
         # Build set of originals that have a covisi filtered counterpart
         # e.g. "base_covisi_filtered_muedit.mat" exists -> "base_muedit.mat" is the original to skip
@@ -514,3 +702,21 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         # Scan for files
         self.scan_muedit_files()
         logger.info(f"File checking initialized for folder: {self.expected_folder}")
+
+    def cleanup(self):
+        """Clean up timers and threads when widget is destroyed."""
+        if hasattr(self, 'poll_timer') and self.poll_timer.isActive():
+            self.poll_timer.stop()
+
+        if hasattr(self, 'loading_animation_timer') and self.loading_animation_timer.isActive():
+            self.loading_animation_timer.stop()
+
+        if hasattr(self, 'scan_worker') and self.scan_worker and self.scan_worker.isRunning():
+            self.scan_worker.quit()
+            self.scan_worker.wait(1000)  # Wait up to 1 second
+
+        logger.debug("MUEditCleaningWizardWidget cleanup completed")
+
+    def __del__(self):
+        """Destructor to ensure cleanup."""
+        self.cleanup()
