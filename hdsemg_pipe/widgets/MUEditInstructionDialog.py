@@ -12,6 +12,7 @@ from PyQt5.QtMultimedia import QSound
 
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.ui_elements.theme import Fonts
 
 
 class MUEditInstructionDialog(QDialog):
@@ -20,18 +21,21 @@ class MUEditInstructionDialog(QDialog):
     Shows which files need to be edited and highlights the next file to process.
     """
 
-    def __init__(self, muedit_files, edited_files, folder_path, parent=None):
+    def __init__(self, muedit_files, edited_files, folder_path, skipped_files=None, parent=None):
         """
         Args:
             muedit_files: List of full paths to _muedit.mat files
             edited_files: List of full paths to already edited files
             folder_path: Path to the decomposition folder
+            skipped_files: Dict mapping file paths to skip reasons
+            parent: Parent widget
         """
         super().__init__(parent)
         self.muedit_files = muedit_files
         self.edited_files = edited_files
         self.folder_path = folder_path
         self.parent_widget = parent
+        self.skipped_files = skipped_files or {}
 
         self.setWindowTitle("MUEdit Manual Cleaning Instructions")
         self.setMinimumWidth(700)
@@ -319,10 +323,18 @@ class MUEditInstructionDialog(QDialog):
             # MUEdit creates files by appending "_edited.mat" to the entire filename
             edited_path = file_path + '_edited.mat'
             is_edited = edited_path in self.edited_files
+            is_skipped = file_path in self.skipped_files
 
             if is_edited:
                 status_text = f"✅ {base_name}"
                 status_color = Colors.GREEN_700
+            elif is_skipped:
+                skip_reason = self.skipped_files[file_path]
+                if skip_reason:
+                    status_text = f"⊘ {base_name} (Skipped: {skip_reason})"
+                else:
+                    status_text = f"⊘ {base_name} (Skipped)"
+                status_color = Colors.ORANGE_600
             else:
                 status_text = f"⏳ {base_name}"
                 status_color = Colors.TEXT_MUTED
@@ -347,12 +359,15 @@ class MUEditInstructionDialog(QDialog):
         layout.setSpacing(Spacing.SM)
         layout.setContentsMargins(0, Spacing.MD, 0, 0)
 
-        # Find next file to edit
+        # Find next file to edit (skip edited and skipped files)
         next_file = None
         for file_path in self.muedit_files:
             # Check if edited version exists
             edited_path = file_path + '_edited.mat'
-            if edited_path not in self.edited_files:
+            is_edited = edited_path in self.edited_files
+            is_skipped = file_path in self.skipped_files
+
+            if not is_edited and not is_skipped:
                 next_file = file_path
                 break
 
@@ -412,6 +427,64 @@ class MUEditInstructionDialog(QDialog):
 
             layout.addLayout(path_layout)
 
+            # Skip section
+            skip_container = QWidget()
+            skip_layout = QHBoxLayout(skip_container)
+            skip_layout.setContentsMargins(0, Spacing.SM, 0, 0)
+            skip_layout.setSpacing(Spacing.SM)
+
+            # Skip reason input (optional)
+            skip_label = QLabel("Skip reason (optional):")
+            skip_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {Colors.TEXT_SECONDARY};
+                    font-size: {Fonts.SIZE_SM};
+                }}
+            """)
+            skip_layout.addWidget(skip_label)
+
+            self.skip_reason_field = QLineEdit()
+            self.skip_reason_field.setPlaceholderText("e.g., No valid data, artifacts, etc.")
+            self.skip_reason_field.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color: {Colors.BG_SECONDARY};
+                    border: 1px solid {Colors.BORDER_DEFAULT};
+                    border-radius: {BorderRadius.SM};
+                    padding: 6px 8px;
+                    font-size: {Fonts.SIZE_SM};
+                    color: {Colors.TEXT_PRIMARY};
+                }}
+                QLineEdit:focus {{
+                    border: 1px solid {Colors.BLUE_600};
+                }}
+            """)
+            skip_layout.addWidget(self.skip_reason_field, stretch=1)
+
+            # Skip button
+            skip_button = QPushButton("⊘ Skip File")
+            skip_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.ORANGE_600};
+                    color: white;
+                    border: none;
+                    border-radius: {BorderRadius.SM};
+                    padding: 8px 16px;
+                    font-size: {Fonts.SIZE_SM};
+                    font-weight: {Fonts.WEIGHT_MEDIUM};
+                }}
+                QPushButton:hover {{
+                    background-color: {Colors.ORANGE_700};
+                }}
+                QPushButton:pressed {{
+                    background-color: {Colors.ORANGE_800};
+                }}
+            """)
+            skip_button.setFixedWidth(120)
+            skip_button.clicked.connect(lambda: self._skip_current_file(next_file))
+            skip_layout.addWidget(skip_button)
+
+            layout.addWidget(skip_container)
+
         else:
             # All files completed
             complete_label = QLabel("🎉 All files have been cleaned!")
@@ -452,3 +525,15 @@ class MUEditInstructionDialog(QDialog):
                     widget.setEnabled(True)
         except:
             pass
+
+    def _skip_current_file(self, file_path):
+        """Marks the current file as skipped with an optional reason."""
+        reason = self.skip_reason_field.text().strip()
+        self.skipped_files[file_path] = reason
+
+        # Update parent widget if available
+        if self.parent_widget:
+            self.parent_widget.skipped_files = self.skipped_files
+
+        # Refresh UI to reflect skip
+        self._refresh_ui()

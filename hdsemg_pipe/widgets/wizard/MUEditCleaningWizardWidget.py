@@ -595,8 +595,10 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 "1. MATLAB Engine API is installed (pip install matlabengine)\n"
                 "2. MATLAB is in PATH\n"
                 "3. MUEdit is available as standalone\n\n"
-                "Configure in Settings → MUEdit"
+                "Configure in Settings → MUEdit\n"
+                "Open Matlab manually and start MUedit."
             )
+            self._show_instruction_dialog()
 
     def _launch_muedit_via_matlab_engine(self):
         """Launch MUEdit using MATLAB Engine API."""
