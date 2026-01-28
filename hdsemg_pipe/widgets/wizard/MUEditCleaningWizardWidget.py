@@ -595,8 +595,10 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 "1. MATLAB Engine API is installed (pip install matlabengine)\n"
                 "2. MATLAB is in PATH\n"
                 "3. MUEdit is available as standalone\n\n"
-                "Configure in Settings → MUEdit"
+                "Configure in Settings → MUEdit\n"
+                "Open Matlab manually and start MUedit."
             )
+            self._show_instruction_dialog()
 
     def _launch_muedit_via_matlab_engine(self):
         """Launch MUEdit using MATLAB Engine API."""
@@ -623,7 +625,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 current_path = eng.path(nargout=1)
                 if muedit_path not in current_path:
                     logger.info(f"Adding MUEdit path: {muedit_path}")
-                    eng.addpath(muedit_path, nargout=0)
+                    gen_path_cmd = f"addpath(genpath('{muedit_path}'))"
+                    eng.eval(gen_path_cmd, nargout=0)
 
             # Launch MUEdit GUI
             logger.info("Launching MUEdit GUI...")
@@ -642,7 +645,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             if muedit_path and os.path.exists(muedit_path):
                 matlab_cmd = (
                     f"if ~contains(path, '{muedit_path}'), "
-                    f"addpath('{muedit_path}'); "
+                    f"addpath(genpath('{muedit_path}')); "
                     f"end; MUedit"
                 )
             else:

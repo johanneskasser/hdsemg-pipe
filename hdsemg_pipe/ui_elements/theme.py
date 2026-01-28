@@ -61,6 +61,14 @@ class Colors:
     RED_600 = "#dc2626"
     RED_700 = "#b91c1c"
 
+    # Orange colors
+    ORANGE_50 = "#fff7ed"
+    ORANGE_100 = "#ffedd5"
+    ORANGE_500 = "#f97316"
+    ORANGE_600 = "#ea580c"
+    ORANGE_700 = "#c2410c"
+    ORANGE_800 = "#92400e"
+
 
 class Spacing:
     """Spacing system (in pixels)."""
