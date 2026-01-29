@@ -77,19 +77,31 @@ def reconstruct_folder_state(folderpath):
     except Exception as e:
         logger.info(f"Skipping decomposition results reconstruction: {e}")
 
-    # Try to reconstruct multi-grid configuration (Step 6)
+    # Try to reconstruct multi-grid configuration (Step 8)
     try:
         _multigrid_config()
     except Exception as e:
         logger.info(f"Skipping multi-grid configuration reconstruction: {e}")
 
-    # Try to reconstruct MUEdit cleaning (Step 7)
+    # Try to reconstruct CoVISI pre-filter (Step 9)
+    try:
+        _covisi_pre_filter()
+    except Exception as e:
+        logger.info(f"Skipping CoVISI pre-filter reconstruction: {e}")
+
+    # Try to reconstruct MUEdit cleaning (Step 10)
     try:
         _muedit_cleaning()
     except Exception as e:
         logger.info(f"Skipping MUEdit cleaning reconstruction: {e}")
 
-    # Try to reconstruct final results (Step 8)
+    # Try to reconstruct CoVISI post-validation (Step 11)
+    try:
+        _covisi_post_validation()
+    except Exception as e:
+        logger.info(f"Skipping CoVISI post-validation reconstruction: {e}")
+
+    # Try to reconstruct final results (Step 12)
     try:
         _final_results()
     except Exception as e:
@@ -108,7 +120,7 @@ def reconstruct_folder_state(folderpath):
 
 def _get_last_completed_step():
     """Get the index of the last completed step."""
-    for step_index in range(9, -1, -1):  # Check from step 9 down to 0
+    for step_index in range(12, 0, -1):  # Check from step 12 down to 1
         if global_state.is_widget_completed(f"step{step_index}"):
             return step_index
     return 0  # No steps completed, return first step
@@ -177,14 +189,14 @@ def _original_files(folderpath):
 
     logger.debug(f"Original files added to global state: {orig_files}")
 
-    original_files_widget = global_state.get_widget("step0")
+    original_files_widget = global_state.get_widget("step1")
     if original_files_widget:
         original_files_widget.check()
         original_files_widget.complete_step()
         original_files_widget.fileSelected.emit(folderpath)
     else:
         logger.warning("Original files widget not found in global state.")
-        raise ValueError("Original fi1les widget not found in global state.")
+        raise ValueError("Original files widget not found in global state.")
 
     return original_files_path
 
@@ -205,7 +217,7 @@ def _associated_grid_files(folderpath):
 
     logger.debug(f"associated grid added to global state: {associated_files}")
 
-    associated_grids_widget = global_state.get_widget("step1")
+    associated_grids_widget = global_state.get_widget("step2")
     if associated_grids_widget:
         associated_grids_widget.check()
         associated_grids_widget.complete_step()
@@ -232,7 +244,7 @@ def _line_noise_cleaned_files(folderpath):
 
     logger.debug(f"Line noise cleaned files added to global state: {line_noise_cleaned_files}")
 
-    line_noise_cleaned_widget = global_state.get_widget("step2")
+    line_noise_cleaned_widget = global_state.get_widget("step3")
     if line_noise_cleaned_widget:
         line_noise_cleaned_widget.check()
         line_noise_cleaned_widget.complete_step(processed_files=len(line_noise_cleaned_files))
@@ -261,7 +273,7 @@ def _analysis_files(folderpath):
 
     logger.debug(f"Analysis files found: {analysis_files}")
 
-    rms_quality_widget = global_state.get_widget("step3")
+    rms_quality_widget = global_state.get_widget("step4")
     if rms_quality_widget:
         rms_quality_widget.check()
         rms_quality_widget.complete_step()
@@ -288,7 +300,7 @@ def _roi_files(folderpath):
 
     logger.debug(f"roi added to global state: {roi_files}")
 
-    roi_file_widget = global_state.get_widget("step4")
+    roi_file_widget = global_state.get_widget("step5")
     if roi_file_widget:
         roi_file_widget.check()
         roi_file_widget.complete_step()
@@ -315,7 +327,7 @@ def _channel_selection_files(folderpath):
 
     logger.debug(f"channelselection added to global state: {channel_selection_files}")
 
-    channel_selection_file_widget = global_state.get_widget("step5")
+    channel_selection_file_widget = global_state.get_widget("step6")
     if channel_selection_file_widget:
         channel_selection_file_widget.check()
         channel_selection_file_widget.complete_step(processed_files=len(channel_selection_files))
@@ -326,56 +338,84 @@ def _channel_selection_files(folderpath):
     return channel_selection_file_path
 
 def _decomposition_results_init():
-    """Initialize Step 6: Decomposition Results monitoring and load mapping state."""
-    decomposition_widget = global_state.get_widget("step6")
+    """Initialize Step 7: Decomposition Results monitoring and load mapping state."""
+    decomposition_widget = global_state.get_widget("step7")
     if decomposition_widget:
         decomposition_widget.init_file_checking()
 
         # Check if mapping was completed (JSON file exists and files present)
         if decomposition_widget.decomp_mapping is not None and decomposition_widget.resultfiles:
-            logger.info("Step 6 state reconstructed: mapping loaded and files found")
+            logger.info("Step 7 state reconstructed: mapping loaded and files found")
             decomposition_widget.complete_step()
     else:
         logger.warning("decomposition widget not found in global state.")
         raise ValueError("decomposition widget not found in global state.")
 
 def _multigrid_config():
-    """Reconstruct Step 7: Multi-Grid Configuration from JSON state."""
-    multigrid_widget = global_state.get_widget("step7")
+    """Reconstruct Step 8: Multi-Grid Configuration from JSON state."""
+    multigrid_widget = global_state.get_widget("step8")
     if multigrid_widget:
         multigrid_widget.init_file_checking()
 
         # Check if step was completed (groupings JSON exists and MUEdit files present)
         if multigrid_widget.grid_groupings is not None and multigrid_widget.is_completed():
-            logger.info("Step 7 state reconstructed: groupings loaded and MUEdit files found")
+            logger.info("Step 8 state reconstructed: groupings loaded and MUEdit files found")
             multigrid_widget.complete_step()
     else:
         logger.warning("Multi-grid configuration widget not found in global state.")
         raise ValueError("Multi-grid configuration widget not found in global state.")
 
+def _covisi_pre_filter():
+    """Reconstruct Step 9: CoVISI Pre-Filtering state."""
+    covisi_pre_filter_widget = global_state.get_widget("step9")
+    if covisi_pre_filter_widget:
+        covisi_pre_filter_widget.init_file_checking()
+
+        # Check if step was completed (report JSON exists)
+        if covisi_pre_filter_widget.is_completed():
+            logger.info("Step 9 state reconstructed: CoVISI pre-filter report found")
+            covisi_pre_filter_widget.complete_step()
+    else:
+        logger.warning("CoVISI pre-filter widget not found in global state.")
+        raise ValueError("CoVISI pre-filter widget not found in global state.")
+
 def _muedit_cleaning():
-    """Reconstruct Step 8: MUEdit Cleaning state."""
-    muedit_cleaning_widget = global_state.get_widget("step8")
+    """Reconstruct Step 10: MUEdit Cleaning state."""
+    muedit_cleaning_widget = global_state.get_widget("step10")
     if muedit_cleaning_widget:
         muedit_cleaning_widget.init_file_checking()
 
         # Check if edited files exist
         if muedit_cleaning_widget.is_completed():
-            logger.info("Step 8 state reconstructed: edited MUEdit files found")
+            logger.info("Step 10 state reconstructed: edited MUEdit files found")
             muedit_cleaning_widget.complete_step()
     else:
         logger.warning("MUEdit cleaning widget not found in global state.")
         raise ValueError("MUEdit cleaning widget not found in global state.")
 
+def _covisi_post_validation():
+    """Reconstruct Step 11: CoVISI Post-Validation state."""
+    covisi_post_validation_widget = global_state.get_widget("step11")
+    if covisi_post_validation_widget:
+        covisi_post_validation_widget.init_file_checking()
+
+        # Check if step was completed (report JSON exists)
+        if covisi_post_validation_widget.is_completed():
+            logger.info("Step 11 state reconstructed: CoVISI post-validation report found")
+            covisi_post_validation_widget.complete_step()
+    else:
+        logger.warning("CoVISI post-validation widget not found in global state.")
+        raise ValueError("CoVISI post-validation widget not found in global state.")
+
 def _final_results():
-    """Reconstruct Step 9: Final Results state."""
-    final_results_widget = global_state.get_widget("step9")
+    """Reconstruct Step 12: Final Results state."""
+    final_results_widget = global_state.get_widget("step12")
     if final_results_widget:
         final_results_widget.init_file_checking()
 
         # Check if cleaned JSON files exist in decomposition_results folder
         if final_results_widget.is_completed():
-            logger.info("Step 9 state reconstructed: cleaned JSON files found in decomposition_results")
+            logger.info("Step 12 state reconstructed: cleaned JSON files found in decomposition_results")
             final_results_widget.complete_step()
     else:
         logger.warning("Final results widget not found in global state.")
