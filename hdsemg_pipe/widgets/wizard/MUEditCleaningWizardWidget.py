@@ -134,6 +134,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.expected_folder = None
         self.muedit_files = []
         self.edited_files = []
+        self.skipped_files = {}  # Dict: file_path -> skip_reason
         self.last_file_count = 0
 
         # Cache for motor unit checks (to avoid re-scanning files every time)
@@ -248,6 +249,9 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         self.expected_folder = global_state.get_decomposition_path()
 
+        # Load skipped files from disk
+        self.skipped_files = self._load_skipped_files()
+
         # Add watcher
         if os.path.exists(self.expected_folder):
             if self.expected_folder not in self.watcher.directories():
@@ -266,6 +270,42 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             return False
 
         return True
+
+    def _get_skipped_files_path(self):
+        """Get the path to the skipped files JSON file."""
+        if not self.expected_folder:
+            return None
+        return os.path.join(self.expected_folder, '.muedit_skipped_files.json')
+
+    def _load_skipped_files(self):
+        """Load skipped files from JSON file."""
+        skipped_path = self._get_skipped_files_path()
+        if not skipped_path or not os.path.exists(skipped_path):
+            return {}
+
+        try:
+            import json
+            with open(skipped_path, 'r') as f:
+                data = json.load(f)
+                logger.info(f"Loaded {len(data)} skipped files from {skipped_path}")
+                return data
+        except Exception as e:
+            logger.error(f"Failed to load skipped files: {e}")
+            return {}
+
+    def _save_skipped_files(self):
+        """Save skipped files to JSON file."""
+        skipped_path = self._get_skipped_files_path()
+        if not skipped_path:
+            return
+
+        try:
+            import json
+            with open(skipped_path, 'w') as f:
+                json.dump(self.skipped_files, f, indent=2)
+                logger.info(f"Saved {len(self.skipped_files)} skipped files to {skipped_path}")
+        except Exception as e:
+            logger.error(f"Failed to save skipped files: {e}")
 
     def _start_initial_scan(self):
         """Start initial scan in background thread."""
@@ -492,11 +532,15 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         """Update progress UI with current status."""
         total = len(self.muedit_files)
         edited = len(self.edited_files)
+        skipped = len([f for f in self.muedit_files if f in self.skipped_files])
+        completed = edited + skipped
 
         # Update progress bar
         self.progress_bar.setMaximum(total if total > 0 else 1)
-        self.progress_bar.setValue(edited)
-        self.progress_bar.setFormat(f"{edited}/{total} files edited ({int(edited/total*100) if total > 0 else 0}%)")
+        self.progress_bar.setValue(completed)
+        self.progress_bar.setFormat(
+            f"{edited} edited, {skipped} skipped / {total} total ({int(completed/total*100) if total > 0 else 0}%)"
+        )
 
         # Clear existing status labels
         while self.file_status_layout.count():
@@ -508,20 +552,28 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         for muedit_file in self.muedit_files:
             filename = os.path.basename(muedit_file)
             is_edited = any(os.path.basename(ef).startswith(filename.replace('.mat', '')) for ef in self.edited_files)
+            is_skipped = muedit_file in self.skipped_files
 
             status_label = QLabel()
             if is_edited:
                 status_label.setText(f"✓ {filename}")
                 status_label.setStyleSheet(f"color: {Colors.GREEN_700}; font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;")
+            elif is_skipped:
+                skip_reason = self.skipped_files[muedit_file]
+                if skip_reason:
+                    status_label.setText(f"⊘ {filename} ({skip_reason})")
+                else:
+                    status_label.setText(f"⊘ {filename} (Skipped)")
+                status_label.setStyleSheet(f"color: {Colors.ORANGE_600}; font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;")
             else:
                 status_label.setText(f"⏳ {filename}")
                 status_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;")
 
             self.file_status_layout.addWidget(status_label)
 
-        # Check if completed
-        if total > 0 and edited >= total:
-            logger.info("All MUEdit files have been edited!")
+        # Check if completed (all files either edited or skipped)
+        if total > 0 and completed >= total:
+            logger.info(f"All MUEdit files processed! {edited} edited, {skipped} skipped")
             self.complete_step()
 
     def launch_muedit(self):
@@ -678,21 +730,34 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             muedit_files=self.muedit_files,
             edited_files=self.edited_files,
             folder_path=self.expected_folder,
+            skipped_files=self.skipped_files,
             parent=self
         )
         dialog.exec_()
 
+        # Update skipped files from dialog and save to disk
+        self.skipped_files = dialog.skipped_files
+        self._save_skipped_files()
+
+        # Refresh UI to show updated skipped status
+        self.update_progress_ui()
+
     def is_completed(self):
         """Check if this step is completed."""
-        # Step is completed when all MUEdit files have been edited
+        # Step is completed when all MUEdit files have been either edited or skipped
         total = len(self.muedit_files)
         edited = len(self.edited_files)
+        skipped = len([f for f in self.muedit_files if f in self.skipped_files])
+        completed = edited + skipped
 
-        return total > 0 and edited >= total
+        return total > 0 and completed >= total
 
     def init_file_checking(self):
         """Initialize file checking for state reconstruction."""
         self.expected_folder = global_state.get_decomposition_path()
+
+        # Load skipped files from disk
+        self.skipped_files = self._load_skipped_files()
 
         if os.path.exists(self.expected_folder):
             if self.expected_folder not in self.watcher.directories():
