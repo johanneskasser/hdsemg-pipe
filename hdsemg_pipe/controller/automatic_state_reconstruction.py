@@ -357,10 +357,23 @@ def _multigrid_config():
     if multigrid_widget:
         multigrid_widget.init_file_checking()
 
-        # Check if step was completed (groupings JSON exists and MUEdit files present)
+        # Check if step was completed
+        # Case 1: groupings JSON exists (empty or with groups) and all required MUEdit files exist
         if multigrid_widget.grid_groupings is not None and multigrid_widget.is_completed():
-            logger.info("Step 8 state reconstructed: groupings loaded and MUEdit files found")
+            if len(multigrid_widget.grid_groupings) > 0:
+                logger.info("Step 8 state reconstructed: groupings loaded and MUEdit files found")
+            else:
+                logger.info("Step 8 state reconstructed: no multi-grid groups (single grids only)")
             multigrid_widget.complete_step()
+        # Case 2: No groupings JSON but MUEdit files exist (backwards compatibility)
+        # This handles folders where the step was completed before the JSON saving was implemented
+        elif multigrid_widget.grid_groupings == {} and multigrid_widget.is_completed():
+            logger.info("Step 8 state reconstructed: no groupings JSON but MUEdit files exist (backwards compat)")
+            # Save an empty groupings JSON for future state reconstruction
+            multigrid_widget.save_groupings_to_json()
+            multigrid_widget.complete_step()
+        else:
+            logger.info("Step 8 not completed: no MUEdit files found or step not yet processed")
     else:
         logger.warning("Multi-grid configuration widget not found in global state.")
         raise ValueError("Multi-grid configuration widget not found in global state.")

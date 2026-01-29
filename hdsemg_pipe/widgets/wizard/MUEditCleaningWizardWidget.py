@@ -573,8 +573,10 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         # Check if completed (all files either edited or skipped)
         if total > 0 and completed >= total:
-            logger.info(f"All MUEdit files processed! {edited} edited, {skipped} skipped")
-            self.complete_step()
+            # Only complete if not already completed (prevent multiple emissions)
+            if not self.step_completed:
+                logger.info(f"All MUEdit files processed! {edited} edited, {skipped} skipped")
+                self.complete_step()
 
     def launch_muedit(self):
         """Launch MUEdit for manual cleaning."""
@@ -753,7 +755,12 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         return total > 0 and completed >= total
 
     def init_file_checking(self):
-        """Initialize file checking for state reconstruction."""
+        """Initialize file checking for state reconstruction.
+
+        Always performs motor unit checking in a background thread to ensure
+        only files with motor units are included. The UI remains responsive
+        during the scan with a loading indicator.
+        """
         self.expected_folder = global_state.get_decomposition_path()
 
         # Load skipped files from disk
@@ -767,8 +774,10 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             if not self.poll_timer.isActive():
                 self.poll_timer.start()
 
-        # Scan for files
+        # Always scan for files with motor unit checking
+        # This runs in a background thread and shows a loading indicator
         self.scan_muedit_files()
+
         logger.info(f"File checking initialized for folder: {self.expected_folder}")
 
     def cleanup(self):

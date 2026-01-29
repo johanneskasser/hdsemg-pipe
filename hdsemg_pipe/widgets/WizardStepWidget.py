@@ -195,6 +195,11 @@ class WizardStepWidget(QWidget):
 
     def complete_step(self):
         """Marks the step as completed."""
+        # Prevent multiple completions - only emit signal once
+        if self.step_completed:
+            logger.debug(f"Step {self.step_index} already completed, skipping re-emission")
+            return
+
         self.success(f"Step {self.step_index} completed successfully!")
         self.step_completed = True
         global_state.complete_widget(f"step{self.step_index}")

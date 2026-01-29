@@ -310,11 +310,13 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
             summary = f"Successfully exported {success_count} file(s) to MUEdit format."
             if multi_grid_count > 0:
                 summary += f"\n• {multi_grid_count} multi-grid group(s)"
+            else:
+                summary += "\n• All files exported as single grids"
 
             self.success(summary)
             self.status_label.setText(f"✓ Export complete: {success_count} file(s) exported")
 
-            # Save state to JSON
+            # ALWAYS save state to JSON (even if empty) for state reconstruction
             self.save_groupings_to_json()
 
             # Mark step as completed
@@ -325,6 +327,7 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
             if self.is_completed():
                 # All required files exist despite some errors, mark as complete
                 self.success(f"Export completed with warnings. All required files exist.")
+                # ALWAYS save state to JSON (even if empty) for state reconstruction
                 self.save_groupings_to_json()
                 self.complete_step()
             else:
