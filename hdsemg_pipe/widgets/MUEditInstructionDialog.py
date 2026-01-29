@@ -141,10 +141,12 @@ class MUEditInstructionDialog(QDialog):
             # Get updated file lists from parent widget
             updated_muedit_files = self.parent_widget.muedit_files
             updated_edited_files = self.parent_widget.edited_files
+            updated_skipped_files = getattr(self.parent_widget, 'skipped_files', {})
 
             # Check if anything changed
             if (updated_muedit_files != self.muedit_files or
-                updated_edited_files != self.edited_files):
+                updated_edited_files != self.edited_files or
+                updated_skipped_files != self.skipped_files):
 
                 # Check if new file was completed (play sound)
                 new_edited_count = len(updated_edited_files)
@@ -158,6 +160,7 @@ class MUEditInstructionDialog(QDialog):
                 # Update stored data
                 self.muedit_files = updated_muedit_files
                 self.edited_files = updated_edited_files
+                self.skipped_files = updated_skipped_files
                 self.last_edited_count = new_edited_count
 
                 # Rebuild UI with new data
@@ -531,9 +534,21 @@ class MUEditInstructionDialog(QDialog):
         reason = self.skip_reason_field.text().strip()
         self.skipped_files[file_path] = reason
 
+        filename = os.path.basename(file_path)
+        if reason:
+            logger.info(f"File skipped: {filename} - Reason: {reason}")
+        else:
+            logger.info(f"File skipped: {filename}")
+
         # Update parent widget if available
         if self.parent_widget:
             self.parent_widget.skipped_files = self.skipped_files
+            # Save to disk immediately
+            if hasattr(self.parent_widget, '_save_skipped_files'):
+                self.parent_widget._save_skipped_files()
+
+        # Clear the skip reason field for next file
+        self.skip_reason_field.clear()
 
         # Refresh UI to reflect skip
         self._refresh_ui()
