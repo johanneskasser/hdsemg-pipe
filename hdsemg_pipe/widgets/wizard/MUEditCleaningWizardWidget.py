@@ -141,6 +141,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.mu_check_cache = {}
         self.scan_worker = None
         self.is_scanning = False
+        self.indexing_needed = False  # Flag to track if manual indexing is needed
 
         # Loading animation timer
         self.loading_animation_timer = QTimer(self)
@@ -149,11 +150,11 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         # Initialize file system watcher
         self.watcher = QFileSystemWatcher(self)
-        self.watcher.directoryChanged.connect(self.scan_muedit_files)
+        self.watcher.directoryChanged.connect(lambda: self.scan_muedit_files(skip_mu_check=self.indexing_needed))
 
         # Add polling timer for reliable file detection (QFileSystemWatcher can miss events on Windows)
         self.poll_timer = QTimer(self)
-        self.poll_timer.timeout.connect(self.scan_muedit_files)
+        self.poll_timer.timeout.connect(lambda: self.scan_muedit_files(skip_mu_check=self.indexing_needed))
         self.poll_timer.setInterval(2000)  # Check every 2 seconds
 
         # Create status UI
@@ -169,6 +170,17 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         status_layout = QVBoxLayout(self.status_container)
         status_layout.setSpacing(Spacing.SM)
         status_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Button to manually trigger motor unit indexing (hidden by default)
+        self.btn_index_motor_units = QPushButton("⚡ Index Motor Units")
+        self.btn_index_motor_units.setStyleSheet(Styles.button_secondary())
+        self.btn_index_motor_units.setToolTip(
+            "Scan MUEdit files and check which ones contain motor units.\n"
+            "This helps identify files that can be skipped."
+        )
+        self.btn_index_motor_units.clicked.connect(self._trigger_manual_indexing)
+        self.btn_index_motor_units.setVisible(False)
+        status_layout.addWidget(self.btn_index_motor_units)
 
         # Loading indicator (hidden by default)
         self.loading_label = QLabel("Scanning files and checking for motor units...")
@@ -189,8 +201,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         # Checkbox to skip original muedit files when covisi filtered versions exist
         self.chk_skip_originals = QCheckBox("Nur CoVISI-gefilterte Dateien verwenden (Originale auslassen)")
         self.chk_skip_originals.setStyleSheet(f"font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;")
-        self.chk_skip_originals.setChecked(False)
-        self.chk_skip_originals.toggled.connect(self.scan_muedit_files)
+        self.chk_skip_originals.setChecked(True)
+        self.chk_skip_originals.toggled.connect(lambda: self.scan_muedit_files(skip_mu_check=self.indexing_needed))
         status_layout.addWidget(self.chk_skip_originals)
 
         # Progress bar
@@ -306,6 +318,82 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 logger.info(f"Saved {len(self.skipped_files)} skipped files to {skipped_path}")
         except Exception as e:
             logger.error(f"Failed to save skipped files: {e}")
+
+    def _trigger_manual_indexing(self):
+        """Manually trigger motor unit indexing in background thread."""
+        logger.info("Manual motor unit indexing triggered by user")
+        self.indexing_needed = False
+        self.btn_index_motor_units.setVisible(False)
+        self._start_initial_scan()
+
+    def _scan_files_fast(self):
+        """Fast file scanning without motor unit checking (for state reconstruction).
+
+        This method quickly lists all _muedit.mat and _edited.mat files without
+        checking if they contain motor units. Used during automatic state reconstruction
+        to avoid blocking the UI.
+        """
+        all_muedit_files = []
+        edited_files = []
+
+        all_filenames = os.listdir(self.expected_folder)
+
+        for file in all_filenames:
+            if file.endswith('_muedit.mat') or file.endswith('_multigrid_muedit.mat'):
+                full_path = os.path.join(self.expected_folder, file)
+                all_muedit_files.append(full_path)
+
+                # Check if edited version exists
+                edited_path = os.path.join(self.expected_folder, file + '_edited.mat')
+                if os.path.exists(edited_path):
+                    edited_files.append(edited_path)
+
+        # Build set of originals that have a covisi filtered counterpart
+        covisi_filtered_names = set()
+        originals_with_covisi = set()
+        for f in all_muedit_files:
+            fname = os.path.basename(f)
+            if '_covisi_filtered_muedit.mat' in fname:
+                covisi_filtered_names.add(fname)
+                original_name = fname.replace('_covisi_filtered_muedit.mat', '_muedit.mat')
+                originals_with_covisi.add(original_name)
+
+        # Show/hide checkbox based on whether any covisi filtered muedit files exist
+        has_covisi = len(covisi_filtered_names) > 0
+        self.chk_skip_originals.setVisible(has_covisi)
+
+        # Filter out original muedit files when covisi filtered versions exist
+        if has_covisi and self.chk_skip_originals.isChecked():
+            muedit_files = [
+                f for f in all_muedit_files
+                if os.path.basename(f) not in originals_with_covisi
+            ]
+            # Also filter edited_files to only include those matching kept muedit_files
+            kept_basenames = {os.path.basename(f) for f in muedit_files}
+            edited_files = [
+                ef for ef in edited_files
+                if any(os.path.basename(ef).startswith(kb.replace('.mat', '')) for kb in kept_basenames)
+            ]
+        else:
+            muedit_files = all_muedit_files
+
+        self.muedit_files = muedit_files
+        self.edited_files = edited_files
+
+        # Show indexing button if we have files but no cache and not currently scanning
+        if len(muedit_files) > 0 and not self.mu_check_cache and not self.is_scanning:
+            self.indexing_needed = True
+            self.btn_index_motor_units.setVisible(True)
+            logger.info(f"Fast scan complete: {len(muedit_files)} MUEdit files, {len(edited_files)} edited files. Motor unit indexing available.")
+        else:
+            self.indexing_needed = False
+            self.btn_index_motor_units.setVisible(False)
+
+        # Update UI
+        self.update_progress_ui()
+
+        # Enable button if files exist
+        self.btn_launch_muedit.setEnabled(len(muedit_files) > 0)
 
     def _start_initial_scan(self):
         """Start initial scan in background thread."""
@@ -425,14 +513,27 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.loading_label.setVisible(False)
         self.mu_check_cache = mu_check_cache
 
+        # Hide indexing button now that indexing is complete
+        self.indexing_needed = False
+        self.btn_index_motor_units.setVisible(False)
+
         logger.info(f"Scan complete: {len(valid_files)} files with motor units found")
 
-        # Now do the normal scan
+        # Now do the normal scan (with cache populated, this will be fast)
         self.scan_muedit_files()
 
-    def scan_muedit_files(self):
-        """Scan for MUEdit files and track progress."""
+    def scan_muedit_files(self, skip_mu_check=False):
+        """Scan for MUEdit files and track progress.
+
+        Args:
+            skip_mu_check: If True, skip motor unit checking (fast path for state reconstruction)
+        """
         if not os.path.exists(self.expected_folder):
+            return
+
+        # Fast path: Skip motor unit checking entirely (for state reconstruction)
+        if skip_mu_check:
+            self._scan_files_fast()
             return
 
         # If cache is empty and we're not already scanning, start initial scan
@@ -757,9 +858,9 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
     def init_file_checking(self):
         """Initialize file checking for state reconstruction.
 
-        Always performs motor unit checking in a background thread to ensure
-        only files with motor units are included. The UI remains responsive
-        during the scan with a loading indicator.
+        Uses fast path (skips motor unit checking) during state reconstruction
+        to avoid blocking the UI. If motor unit indexing is needed, a button
+        will be shown for the user to trigger it manually.
         """
         self.expected_folder = global_state.get_decomposition_path()
 
@@ -774,11 +875,11 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             if not self.poll_timer.isActive():
                 self.poll_timer.start()
 
-        # Always scan for files with motor unit checking
-        # This runs in a background thread and shows a loading indicator
-        self.scan_muedit_files()
+        # Use fast scan during state reconstruction (skip motor unit checking)
+        # This is much faster and doesn't block the UI
+        self.scan_muedit_files(skip_mu_check=True)
 
-        logger.info(f"File checking initialized for folder: {self.expected_folder}")
+        logger.info(f"File checking initialized for folder (fast mode): {self.expected_folder}")
 
     def cleanup(self):
         """Clean up timers and threads when widget is destroyed."""
