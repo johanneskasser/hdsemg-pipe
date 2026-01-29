@@ -21,3 +21,4 @@ hdsemg_pipe/resources_rc.py
 CLAUDE.md
 GEMINI.md
 .claude/
+.grepai/

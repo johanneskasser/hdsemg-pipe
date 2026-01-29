@@ -606,7 +606,8 @@ def compute_covisi_from_muedit_mat(
                 for mu_idx in range(n_mus):
                     # Get discharge times for this MU (from first grid)
                     ref = distimeclean[0, mu_idx]
-                    if isinstance(ref, h5py.Reference):
+                    # Check if it's any kind of h5py reference
+                    if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)):
                         data = np.array(f[ref]).flatten()
                     else:
                         data = np.array(ref).flatten()
@@ -620,7 +621,8 @@ def compute_covisi_from_muedit_mat(
                 # Single grid case
                 for mu_idx in range(len(distimeclean)):
                     ref = distimeclean[mu_idx]
-                    if isinstance(ref, h5py.Reference):
+                    # Check if it's any kind of h5py reference
+                    if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)):
                         data = np.array(f[ref]).flatten()
                     else:
                         data = np.array(ref).flatten()
