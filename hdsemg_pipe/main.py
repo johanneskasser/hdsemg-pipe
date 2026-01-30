@@ -225,12 +225,20 @@ class WizardMainWindow(QMainWindow):
         """Handle step completion."""
         logger.info(f"Step {step_index} completed")
 
-        # Update progress indicator
-        self.progress_indicator.setStepState(step_index, "completed")
+        # Refresh progress indicator to reflect GlobalState (completed/skipped status)
+        self.progress_indicator.refreshStates()
 
-        # Auto-navigate to next step if not on last step
-        if step_index < 12:
-            self.navigateNext()
+        # Only auto-navigate if the completed step is the currently viewed step
+        # This prevents navigation during state reconstruction
+        current_viewed_step = self.current_step_index + 1  # Convert 0-based to 1-based
+        if step_index == current_viewed_step:
+            # Auto-navigate to next step if not on last step
+            if step_index < 12:
+                logger.info(f"Auto-navigating from step {step_index} to step {step_index + 1}")
+                self.navigateNext()
+            else:
+                # If last step, refresh again to ensure it shows as completed
+                self.progress_indicator.refreshStates()
 
         # Check next step
         if step_index < len(self.steps):

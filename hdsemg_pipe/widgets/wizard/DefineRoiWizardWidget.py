@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import QPushButton
 
 from hdsemg_pipe.actions.crop_roi import CropRoiDialog
 from hdsemg_pipe.actions.file_utils import copy_files
+from hdsemg_pipe.actions.skip_marker import save_skip_marker
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.state.global_state import global_state
@@ -40,7 +41,10 @@ class DefineRoiWizardWidget(WizardStepWidget):
         dest = global_state.get_cropped_signal_path()
         try:
             global_state.cropped_files = copy_files(global_state.line_noise_cleaned_files, dest)
-            self.complete_step()
+            # Save skip marker for state reconstruction
+            save_skip_marker(dest, "ROI cropping skipped - using full signal")
+            # Call parent skip_step to mark as skipped in GlobalState
+            super().skip_step("ROI cropping skipped - using full signal")
         except Exception as e:
             logger.error("Failed to copy files: %s", e)
             self.warn("Failed to copy files. Please check the destination folder.")

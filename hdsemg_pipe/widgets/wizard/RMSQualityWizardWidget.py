@@ -7,6 +7,7 @@ Pipeline step for analyzing RMS noise quality across EMG recordings.
 from PyQt5.QtWidgets import QPushButton
 
 from hdsemg_pipe.actions.rms_quality_analysis import RMSQualityDialog
+from hdsemg_pipe.actions.skip_marker import save_skip_marker
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.state.global_state import global_state
@@ -45,8 +46,11 @@ class RMSQualityWizardWidget(WizardStepWidget):
     def skip_step(self):
         """Skip the RMS analysis step."""
         logger.debug("Skipping RMS Quality Analysis step.")
-        self.info("RMS analysis skipped - proceeding to next step.")
-        self.complete_step()
+        # Save skip marker for state reconstruction
+        analysis_folder = global_state.get_analysis_path()
+        save_skip_marker(analysis_folder, "RMS quality analysis skipped")
+        # Call parent skip_step to mark as skipped in GlobalState
+        super().skip_step("RMS quality analysis skipped - proceeding to next step")
 
     def start_analysis(self):
         """Start the RMS quality analysis dialog."""

@@ -1149,11 +1149,10 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         )
         save_covisi_report(report, report_path, report_type="pre_filter")
 
-        self.info("CoVISI filtering skipped. Proceeding with all MUs.")
         self.status_label.setText("Filtering skipped. All MUs will be processed.")
 
-        # Mark step as completed
-        self.complete_step()
+        # Mark step as completed but skipped
+        self.skip_step("CoVISI filtering skipped. Proceeding with all MUs.")
 
     def export_to_csv(self):
         """Export CoVISI analysis results to CSV file."""

@@ -505,11 +505,22 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         ]
 
         # Load sampling frequencies from JSON files
+        # Optimized: Read only FSAMP field directly from JSON without loading entire EMG file
         self.fsamp_dict = {}
         for json_path in self.json_files:
             try:
-                emgfile = emg.emg_from_json(str(json_path))
-                self.fsamp_dict[json_path] = emgfile.get("FSAMP", 2048.0)
+                import json
+                import gzip
+                # Try gzip-compressed format first (standard for openhdemg JSON files)
+                try:
+                    with gzip.open(json_path, 'rt', encoding='utf-8') as f:
+                        data = json.load(f)
+                        self.fsamp_dict[json_path] = data.get("FSAMP", 2048.0)
+                except (gzip.BadGzipFile, OSError):
+                    # Fall back to plain text JSON if not gzip-compressed
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        self.fsamp_dict[json_path] = data.get("FSAMP", 2048.0)
             except Exception as e:
                 logger.warning(f"Could not read FSAMP from {json_path}: {e}")
                 self.fsamp_dict[json_path] = 2048.0

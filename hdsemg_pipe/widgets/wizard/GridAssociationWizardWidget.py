@@ -3,6 +3,7 @@ import os
 from PyQt5.QtWidgets import QPushButton, QDialog
 
 from hdsemg_pipe.actions.file_utils import copy_files
+from hdsemg_pipe.actions.skip_marker import save_skip_marker
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
@@ -49,7 +50,10 @@ class GridAssociationWizardWidget(WizardStepWidget):
         files = global_state.get_original_files()
         try:
             global_state.associated_files = copy_files(files, dest_folder)
-            self.complete_step()
+            # Save skip marker for state reconstruction
+            save_skip_marker(dest_folder, "Grid association skipped - files copied directly")
+            # Call parent skip_step to mark as skipped in GlobalState
+            super().skip_step("Grid association skipped - files copied directly")
             return
         except Exception as e:
             logger.error(f"Failed to copy files to dest folder {dest_folder} with error: {str(e)}")

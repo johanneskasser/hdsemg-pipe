@@ -195,14 +195,31 @@ class WizardStepWidget(QWidget):
 
     def complete_step(self):
         """Marks the step as completed."""
-        # Prevent multiple completions - only emit signal once
-        if self.step_completed:
-            logger.debug(f"Step {self.step_index} already completed, skipping re-emission")
-            return
+        # Show message only on first completion
+        if not self.step_completed:
+            self.success(f"Step {self.step_index} completed successfully!")
 
-        self.success(f"Step {self.step_index} completed successfully!")
         self.step_completed = True
         global_state.complete_widget(f"step{self.step_index}")
+
+        # Always emit signal to trigger navigation (main.py checks if navigation is needed)
+        self.stepCompleted.emit(self.step_index)
+
+    def skip_step(self, message=None):
+        """Marks the step as completed but skipped.
+
+        Args:
+            message: Optional custom message to display
+        """
+        # Show message only on first completion
+        if not self.step_completed:
+            if message:
+                self.info(message)
+            else:
+                self.info(f"Step {self.step_index} completed (skipped).")
+
+        self.step_completed = True
+        global_state.skip_widget(f"step{self.step_index}")
         self.stepCompleted.emit(self.step_index)
 
     def setActionButtonsEnabled(self, enabled, override=False):

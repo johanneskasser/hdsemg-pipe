@@ -8,6 +8,7 @@ from hdsemg_pipe.actions.workers import (
     MatlabLineNoiseRemovalWorker,
     OctaveLineNoiseRemovalWorker
 )
+from hdsemg_pipe.actions.skip_marker import save_skip_marker
 from hdsemg_pipe.config.config_enums import Settings, LineNoiseRegion, LineNoiseMethod
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe._log.log_config import logger
@@ -147,8 +148,11 @@ class LineNoiseRemovalWizardWidget(WizardStepWidget):
             self.total_files = len(global_state.associated_files)
             self.update_progress(self.processed_files, self.total_files)
 
-            # Mark step as complete
-            self.complete_step()
+            # Save skip marker for state reconstruction
+            save_skip_marker(output_dir, "Line noise removal skipped - files copied directly")
+
+            # Call parent skip_step to mark as skipped in GlobalState
+            super().skip_step("Line noise removal skipped - files copied directly")
 
             QMessageBox.information(
                 self,
