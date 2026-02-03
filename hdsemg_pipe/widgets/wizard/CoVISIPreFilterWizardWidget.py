@@ -682,12 +682,13 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             "covisi_pre_filter_report.json",
         }
 
-        # Find JSON files (exclude state files and already-filtered files)
+        # Find JSON files (exclude state files, algorithm_params, and already-filtered files)
         self.json_files = [
             os.path.join(self.expected_folder, f)
             for f in os.listdir(self.expected_folder)
             if f.endswith(".json")
             and f not in state_files
+            and not f.startswith("algorithm_params")
             and "_covisi_filtered" not in f
         ]
 

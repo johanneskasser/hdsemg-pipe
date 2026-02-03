@@ -96,6 +96,29 @@ class JSONConversionWorker(QThread):
             self.error.emit(f"Conversion worker failed: {str(e)}")
 
 
+class NotebookExportWorker(QThread):
+    """Worker thread for exporting analysis notebook."""
+
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, workfolder, parent=None):
+        super().__init__(parent)
+        self.workfolder = workfolder
+
+    def run(self):
+        """Run the notebook export process."""
+        from hdsemg_pipe.actions.notebook_export import export_analysis_notebook
+        try:
+            result = export_analysis_notebook(self.workfolder)
+            if 'error' in result:
+                self.error.emit(result['error'])
+            else:
+                self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(f"Notebook export failed: {str(e)}")
+
+
 class FinalResultsWizardWidget(WizardStepWidget):
     """
     Step 12: Convert edited files and show final results.
@@ -120,6 +143,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
         self.edited_files = []
         self.exported_files = []
         self.conversion_worker = None
+        self.notebook_worker = None
 
         # Create status UI
         self.create_status_ui()
@@ -181,6 +205,13 @@ class FinalResultsWizardWidget(WizardStepWidget):
         self.btn_show_results.setEnabled(False)
         self.buttons.append(self.btn_show_results)
 
+        self.btn_export_notebook = QPushButton("Export Analysis Notebook")
+        self.btn_export_notebook.setStyleSheet(Styles.button_secondary())
+        self.btn_export_notebook.setToolTip("Export Jupyter notebook for custom analysis")
+        self.btn_export_notebook.clicked.connect(self.start_notebook_export)
+        self.btn_export_notebook.setEnabled(False)
+        self.buttons.append(self.btn_export_notebook)
+
     def check(self):
         """Check if this step can be activated."""
         workfolder = global_state.workfolder
@@ -237,6 +268,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
 
         if self.exported_files:
             self.btn_show_results.setEnabled(True)
+            self.btn_export_notebook.setEnabled(True)
 
     def start_conversion(self):
         """Start the conversion process."""
@@ -327,6 +359,58 @@ class FinalResultsWizardWidget(WizardStepWidget):
             )
         except Exception as e:
             self.error(f"Failed to launch openhdemg GUI: {str(e)}\n\nResults are saved in: {self.results_folder}")
+
+    def start_notebook_export(self):
+        """Start notebook export in background thread."""
+        try:
+            import nbformat
+        except ImportError:
+            self.error(
+                "Jupyter notebook export requires 'nbformat' library.\n\n"
+                "Install with: pip install nbformat"
+            )
+            return
+
+        if not self.exported_files:
+            self.warn("No cleaned JSON files available. Please convert files first.")
+            return
+
+        # Disable button during export
+        self.btn_export_notebook.setEnabled(False)
+        self.status_label.setText("Generating analysis notebook...")
+
+        # Start worker
+        self.notebook_worker = NotebookExportWorker(global_state.workfolder)
+        self.notebook_worker.finished.connect(self.on_notebook_export_finished)
+        self.notebook_worker.error.connect(self.on_notebook_export_error)
+        self.notebook_worker.start()
+
+        logger.info("Starting notebook export...")
+
+    def on_notebook_export_finished(self, result):
+        """Handle notebook export completion."""
+        self.btn_export_notebook.setEnabled(True)
+        self.status_label.setText("")
+
+        helper_path = result.get('helper_path', '')
+        notebook_path = result.get('notebook_path', '')
+
+        self.success(
+            f"Analysis notebook exported successfully!\n\n"
+            f"Files created:\n"
+            f"  - {Path(helper_path).name}\n"
+            f"  - {Path(notebook_path).name}\n\n"
+            f"Open the notebook in Jupyter to begin analysis."
+        )
+
+        logger.info(f"Notebook exported: {notebook_path}")
+
+    def on_notebook_export_error(self, error_msg):
+        """Handle notebook export error."""
+        self.btn_export_notebook.setEnabled(True)
+        self.status_label.setText("")
+        self.error(f"Notebook export failed:\n{error_msg}")
+        logger.error(f"Notebook export error: {error_msg}")
 
     def is_completed(self):
         """Check if this step is completed."""

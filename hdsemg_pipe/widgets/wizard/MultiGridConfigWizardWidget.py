@@ -225,7 +225,7 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
         self.json_files = [
             os.path.join(self.expected_folder, f)
             for f in os.listdir(self.expected_folder)
-            if f.endswith('.json') and f not in state_files
+            if f.endswith('.json') and f not in state_files and not f.startswith('algorithm_params')
         ]
 
         # Update UI
@@ -296,11 +296,12 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
         self.btn_configure_groups.setEnabled(len(self.json_files) >= 2)
         self.btn_export.setEnabled(True)
 
-        # Filter out errors related to state files (these are already filtered in scan now, but handle legacy errors)
+        # Filter out errors related to state files and algorithm_params (these are already filtered in scan now, but handle legacy errors)
         state_files = {'decomposition_mapping.json', 'multigrid_groupings.json'}
         non_state_errors = [
             msg for msg in error_messages
             if not any(state_file in msg for state_file in state_files)
+            and 'algorithm_params' not in msg
         ]
         actual_error_count = len(non_state_errors)
 

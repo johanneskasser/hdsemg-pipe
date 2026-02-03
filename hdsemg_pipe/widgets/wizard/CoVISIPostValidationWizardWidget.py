@@ -501,7 +501,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.json_files = [
             os.path.join(self.expected_folder, f)
             for f in os.listdir(self.expected_folder)
-            if f.endswith(".json") and f not in state_files
+            if f.endswith(".json") and f not in state_files and not f.startswith("algorithm_params")
         ]
 
         # Load sampling frequencies from JSON files
