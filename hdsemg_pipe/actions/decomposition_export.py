@@ -11,6 +11,7 @@ from hdsemg_pipe._log.log_config import logger
 
 try:
     import openhdemg.library as emg
+    import openhdemg.library.tools as emg_tools
     OPENHDEMG_AVAILABLE = True
 except ImportError:
     OPENHDEMG_AVAILABLE = False
@@ -808,6 +809,8 @@ def concatenate_emgfiles(emgfile_list):
     merged['FILENAME'] = f"merged_{len(emgfile_list)}_files"
 
     logger.info(f"Concatenated {len(emgfile_list)} emgfiles: {merged['NUMBER_OF_MUS']} total MUs")
+
+    emg_tools.sort_mus(merged)
 
     return merged
 
