@@ -185,7 +185,12 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
         """Create buttons for this step."""
         self.btn_configure_groups = QPushButton("Configure Multi-Grid Groups")
         self.btn_configure_groups.setStyleSheet(Styles.button_secondary())
-        self.btn_configure_groups.setToolTip("Group grids from the same muscle (optional)")
+        self.btn_configure_groups.setToolTip(
+            "Configure multi-grid groups (manual or auto-grouping)\n"
+            "• Auto-group by muscle only\n"
+            "• Auto-group by file + muscle\n"
+            "• Or manually drag files into groups"
+        )
         self.btn_configure_groups.clicked.connect(self.open_grid_grouping_dialog)
         self.btn_configure_groups.setEnabled(False)
         self.buttons.append(self.btn_configure_groups)

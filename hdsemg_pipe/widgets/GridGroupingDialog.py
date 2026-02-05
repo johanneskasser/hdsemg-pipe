@@ -9,10 +9,10 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QLineEdit, QGroupBox,
-    QScrollArea, QWidget, QMessageBox, QFrame, QSplitter
+    QScrollArea, QWidget, QMessageBox, QFrame, QSplitter, QMenu
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QCursor
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
@@ -99,11 +99,12 @@ class GridGroup(QGroupBox):
                 border-radius: {BorderRadius.SM};
                 background-color: white;
                 padding: {Spacing.SM}px;
-                min-height: 100px;
+                min-height: 120px;
             }}
             QListWidget::item {{
-                padding: {Spacing.SM}px;
+                padding: {Spacing.MD}px {Spacing.LG}px;
                 border-bottom: 1px solid {Colors.BORDER_MUTED};
+                min-height: 28px;
             }}
             QListWidget::item:selected {{
                 background-color: {Colors.BLUE_100};
@@ -185,7 +186,7 @@ class GridGroupingDialog(QDialog):
         self.result_groupings = {}  # Result to return
 
         self.setWindowTitle("Configure Multi-Grid Groups for MUEdit")
-        self.resize(1000, 700)
+        self.resize(1100, 800)
         self.init_ui()
         self.load_existing_groupings()
 
@@ -198,14 +199,54 @@ class GridGroupingDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(Spacing.LG)
 
-        # Header
+        # Header with info button
+        header_layout = QHBoxLayout()
+
         header = QLabel(
             "<h2>Configure Multi-Grid Groups</h2>"
             "Group grids from the same muscle together for MUEdit's duplicate detection."
         )
         header.setWordWrap(True)
-        header.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; padding-bottom: {Spacing.MD}px;")
-        layout.addWidget(header)
+        header.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
+        header_layout.addWidget(header, 1)
+
+        # Info button
+        info_btn = QPushButton("ℹ")
+        info_btn.setFixedSize(28, 28)
+        info_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        info_btn.setToolTip(
+            "<b>How Multi-Grid Grouping Works:</b><br><br>"
+            "• <b>Drag & Drop:</b> Drag JSON files from left to right into groups<br>"
+            "• <b>Auto-Grouping:</b> Use the button below to automatically create groups<br>"
+            "• <b>Groups:</b> Files in the same group will be combined for MUEdit<br>"
+            "• <b>Duplicate Detection:</b> MUEdit can find common motor units across grids<br>"
+            "• <b>Single Files:</b> Ungrouped files export as single-grid files<br><br>"
+            "<b>Tips:</b><br>"
+            "• Group grids from the same muscle together<br>"
+            "• At least 2 files needed per group<br>"
+            "• You can manually adjust auto-generated groups"
+        )
+        info_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Colors.BLUE_100};
+                color: {Colors.BLUE_700};
+                border: 1px solid {Colors.BLUE_500};
+                border-radius: 14px;
+                font-size: 16px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.BLUE_100};
+                border-color: {Colors.BLUE_600};
+            }}
+        """)
+        header_layout.addWidget(info_btn, 0, Qt.AlignTop)
+
+        layout.addLayout(header_layout)
+        layout.addSpacing(Spacing.MD)
+
+        # Auto-grouping section
+        self.add_auto_grouping_section(layout)
 
         # Info box
         info_frame = QFrame()
@@ -228,7 +269,7 @@ class GridGroupingDialog(QDialog):
             "• Files not in any group will be exported as single-grid files"
         )
         info_text.setWordWrap(True)
-        info_text.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_SM};")
+        info_text.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_XS};")
         info_layout.addWidget(info_text)
         layout.addWidget(info_frame)
 
@@ -261,11 +302,13 @@ class GridGroupingDialog(QDialog):
                 border-radius: {BorderRadius.MD};
                 background-color: white;
                 padding: {Spacing.SM}px;
+                min-height: 400px;
             }}
             QListWidget::item {{
-                padding: {Spacing.MD}px;
+                padding: {Spacing.MD}px {Spacing.LG}px;
                 border-bottom: 1px solid {Colors.BORDER_MUTED};
                 background-color: white;
+                min-height: 32px;
             }}
             QListWidget::item:hover {{
                 background-color: {Colors.GRAY_50};
@@ -347,6 +390,319 @@ class GridGroupingDialog(QDialog):
         button_layout.addWidget(ok_btn)
 
         layout.addLayout(button_layout)
+
+    def add_auto_grouping_section(self, parent_layout):
+        """Add auto-grouping UI section with strategy selection."""
+        # Compact container
+        auto_group_frame = QFrame()
+        auto_group_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Colors.BLUE_50};
+                border: 1px solid {Colors.BLUE_500};
+                border-radius: {BorderRadius.MD};
+                padding: {Spacing.MD}px;
+            }}
+        """)
+
+        auto_layout = QHBoxLayout(auto_group_frame)
+        auto_layout.setSpacing(Spacing.MD)
+
+        # Label
+        label = QLabel("Quick Actions:")
+        label.setStyleSheet(f"""
+            QLabel {{
+                font-size: {Fonts.SIZE_BASE};
+                font-weight: 600;
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """)
+        auto_layout.addWidget(label)
+
+        auto_layout.addStretch()
+
+        # Large Auto-Group button with dropdown menu
+        self.auto_group_btn = QPushButton("⚡ Auto-Group Files")
+        self.auto_group_btn.setFixedHeight(40)
+        self.auto_group_btn.setMinimumWidth(180)
+        self.auto_group_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.auto_group_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Colors.BLUE_600},
+                    stop:1 {Colors.BLUE_700}
+                );
+                color: white;
+                border: none;
+                border-radius: {BorderRadius.MD};
+                padding: 0 {Spacing.LG}px;
+                font-size: {Fonts.SIZE_BASE};
+                font-weight: 600;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {Colors.BLUE_700},
+                    stop:1 {Colors.BLUE_900}
+                );
+            }}
+            QPushButton::menu-indicator {{
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                right: 8px;
+                width: 12px;
+            }}
+        """)
+
+        # Create dropdown menu
+        auto_menu = QMenu(self)
+        auto_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: white;
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.SM}px;
+            }}
+            QMenu::item {{
+                padding: {Spacing.MD}px {Spacing.LG}px;
+                border-radius: {BorderRadius.SM};
+            }}
+            QMenu::item:selected {{
+                background-color: {Colors.BLUE_100};
+                color: {Colors.TEXT_PRIMARY};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {Colors.BORDER_MUTED};
+                margin: {Spacing.SM}px 0;
+            }}
+        """)
+
+        # Menu actions
+        action1 = auto_menu.addAction("📁 Group by File + Muscle")
+        action1.setToolTip("Separate groups for each (file, muscle) combination")
+        action1.triggered.connect(lambda: self.apply_strategy("file_and_muscle"))
+
+        action2 = auto_menu.addAction("💪 Group by Muscle Only")
+        action2.setToolTip("Combine all files with same muscle name")
+        action2.triggered.connect(lambda: self.apply_strategy("muscle_only"))
+
+        self.auto_group_btn.setMenu(auto_menu)
+        auto_layout.addWidget(self.auto_group_btn)
+
+        parent_layout.addWidget(auto_group_frame)
+
+    def apply_strategy(self, strategy):
+        """Apply a specific grouping strategy."""
+        # Clear existing groups
+        for group in self.groups[:]:
+            self.remove_group(group)
+
+        # Return all files to available list
+        self.available_list.clear()
+        for json_file in self.json_files:
+            item = QListWidgetItem(json_file.name)
+            item.setData(Qt.UserRole, str(json_file))
+            self.available_list.addItem(item)
+
+        # Apply grouping strategy
+        if strategy == "muscle_only":
+            self.apply_muscle_only_grouping()
+        elif strategy == "file_and_muscle":
+            self.apply_file_and_muscle_grouping()
+
+        logger.info(f"Applied auto-grouping strategy: {strategy}")
+
+    def extract_file_basename(self, filename):
+        """
+        Extract the file basename (without grid/muscle suffix).
+
+        Example: bl3_trap1_8mm_5x13_2_VastusLateralisRight.json -> bl3_trap1
+        """
+        import re
+
+        # Remove file extensions
+        name = filename
+        for ext in ['.json', '.pkl', '.mat']:
+            if name.endswith(ext):
+                name = name[:-len(ext)]
+
+        # Remove known suffixes
+        suffixes = [
+            '_covisi_filtered_muedit.mat_edited',
+            '_covisi_filtered_muedit',
+            '_muedit.mat_edited',
+            '_covisi_filtered',
+            '_muedit',
+            '_edited',
+        ]
+        for suffix in suffixes:
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+
+        # Split by underscore and find the first 2-3 parts that form the basename
+        # Pattern: [participant]_[session]_[optional_identifier]
+        parts = name.split('_')
+
+        # Take first 2 parts (e.g., bl3_trap1) as baseline
+        if len(parts) >= 2:
+            basename = '_'.join(parts[:2])
+            return basename
+
+        return parts[0] if parts else filename
+
+    def extract_muscle_name(self, filename):
+        """
+        Extract muscle name from filename using CamelCase pattern matching.
+
+        Expected pattern: [basename]_[grid]_[dimensions]_[optional_number]_[MuscleName].[ext]
+        Example: bl3_trap1_8mm_5x13_2_VastusLateralisRight.json -> VastusLateralisRight
+        """
+        import os
+
+        # Remove directory path
+        basename = os.path.basename(filename)
+
+        # Remove known suffixes in order of specificity
+        suffixes_to_remove = [
+            '_covisi_filtered_muedit.mat_edited.mat',
+            '_covisi_filtered_muedit.mat',
+            '_muedit.mat_edited.mat',
+            '_covisi_filtered.json',
+            '_muedit.mat',
+            '_edited.mat',
+            '.json',
+            '.pkl',
+            '.mat',
+        ]
+
+        for suffix in suffixes_to_remove:
+            if basename.endswith(suffix):
+                basename = basename[:-len(suffix)]
+                break
+
+        # Split by underscore and find CamelCase parts
+        parts = basename.split('_')
+
+        # Find the last CamelCase part (muscle name)
+        for part in reversed(parts):
+            if len(part) > 1 and any(c.isupper() for c in part) and any(c.islower() for c in part):
+                return part
+
+        return None
+
+    def apply_muscle_only_grouping(self):
+        """Group files by muscle name only."""
+        muscle_groups = {}
+        ungrouped_files = []
+
+        for json_file in self.json_files:
+            filename = json_file.name
+            muscle = self.extract_muscle_name(filename)
+
+            if muscle:
+                if muscle not in muscle_groups:
+                    muscle_groups[muscle] = []
+                muscle_groups[muscle].append(filename)
+            else:
+                ungrouped_files.append(filename)
+                logger.warning(f"Could not extract muscle name from: {filename}")
+
+        # Create groups (only for muscles with 2+ files)
+        groups_created = 0
+        for muscle, files in muscle_groups.items():
+            if len(files) >= 2:
+                group = GridGroup(muscle)
+                group.remove_requested.connect(self.remove_group)
+
+                for filename in files:
+                    group.add_grid(filename)
+                    # Remove from available list
+                    for i in range(self.available_list.count()):
+                        item = self.available_list.item(i)
+                        if item and item.text() == filename:
+                            self.available_list.takeItem(i)
+                            break
+
+                self.groups.append(group)
+                self.groups_layout.insertWidget(self.groups_layout.count() - 1, group)
+                groups_created += 1
+
+        # Show summary
+        if groups_created > 0:
+            total_files = sum(len(files) for muscle, files in muscle_groups.items() if len(files) >= 2)
+            QMessageBox.information(
+                self,
+                "Auto-Grouping Complete",
+                f"Created {groups_created} muscle group(s) with {total_files} file(s).\n\n"
+                f"{self.available_list.count()} file(s) remain ungrouped (will export as single grids)."
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "No Groups Created",
+                "No multi-grid groups could be created. All files have unique muscle names."
+            )
+
+    def apply_file_and_muscle_grouping(self):
+        """Group files by combination of file basename and muscle name."""
+        file_muscle_groups = {}
+        ungrouped_files = []
+
+        for json_file in self.json_files:
+            filename = json_file.name
+            file_base = self.extract_file_basename(filename)
+            muscle = self.extract_muscle_name(filename)
+
+            if file_base and muscle:
+                group_key = f"{file_base}_{muscle}"
+                if group_key not in file_muscle_groups:
+                    file_muscle_groups[group_key] = {
+                        'display_name': f"{file_base} - {muscle}",
+                        'files': []
+                    }
+                file_muscle_groups[group_key]['files'].append(filename)
+            else:
+                ungrouped_files.append(filename)
+                logger.warning(f"Could not extract file/muscle from: {filename}")
+
+        # Create groups (only for groups with 2+ files)
+        groups_created = 0
+        for group_data in file_muscle_groups.values():
+            files = group_data['files']
+            if len(files) >= 2:
+                group = GridGroup(group_data['display_name'])
+                group.remove_requested.connect(self.remove_group)
+
+                for filename in files:
+                    group.add_grid(filename)
+                    # Remove from available list
+                    for i in range(self.available_list.count()):
+                        item = self.available_list.item(i)
+                        if item and item.text() == filename:
+                            self.available_list.takeItem(i)
+                            break
+
+                self.groups.append(group)
+                self.groups_layout.insertWidget(self.groups_layout.count() - 1, group)
+                groups_created += 1
+
+        # Show summary
+        if groups_created > 0:
+            total_files = sum(len(data['files']) for data in file_muscle_groups.values() if len(data['files']) >= 2)
+            QMessageBox.information(
+                self,
+                "Auto-Grouping Complete",
+                f"Created {groups_created} file+muscle group(s) with {total_files} file(s).\n\n"
+                f"{self.available_list.count()} file(s) remain ungrouped (will export as single grids)."
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "No Groups Created",
+                "No multi-grid groups could be created. All file+muscle combinations are unique."
+            )
 
     def add_group(self):
         """Add a new grid group."""

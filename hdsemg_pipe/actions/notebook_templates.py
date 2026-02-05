@@ -458,6 +458,7 @@ from workfolder_analysis_helper import plot_pipeline_overview, plot_covisi_compa
 try:
     from openhdemg.library import plotemg as plot
     from openhdemg.library import openfiles as emg
+    from openhdemg.library import tools as tools
     OPENHDEMG_AVAILABLE = True
     print("✓ openhdemg available")
 except ImportError:
@@ -512,6 +513,7 @@ if OPENHDEMG_AVAILABLE:
     for json_path in final_files:
         try:
             emgfile = emg.emg_from_json(str(json_path))
+            emgfile = tools.sort_mus(emgfile)
             emgfiles.append({
                 'filename': json_path.name,
                 'path': json_path,

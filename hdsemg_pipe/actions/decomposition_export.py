@@ -605,6 +605,279 @@ def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
         raise ValueError(f"Multi-grid export failed: {str(e)}") from e
 
 
+def extract_file_basename_from_path(filename):
+    """
+    Extract the file basename (participant_session identifier) from a filename.
+
+    This function removes all suffixes and extracts the core file identifier,
+    typically consisting of the first 2 underscore-separated parts.
+
+    Args:
+        filename (str): Filename to parse (e.g., 'bl3_trap1_8mm_5x13_VastusLateralisRight.json')
+
+    Returns:
+        str: File basename (e.g., 'bl3_trap1')
+
+    Example:
+        >>> extract_file_basename_from_path('bl3_trap1_8mm_5x13_2_VastusLateralisRight_covisi_filtered.json')
+        'bl3_trap1'
+    """
+    import os
+
+    # Remove directory path
+    name = os.path.basename(filename)
+
+    # Remove file extensions
+    for ext in ['.json', '.pkl', '.mat']:
+        if name.endswith(ext):
+            name = name[:-len(ext)]
+
+    # Remove known suffixes (most specific first)
+    suffixes = [
+        '_covisi_filtered_muedit.mat_edited',
+        '_covisi_filtered_muedit',
+        '_muedit.mat_edited',
+        '_covisi_filtered',
+        '_muedit',
+        '_edited',
+    ]
+    for suffix in suffixes:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+
+    # Split by underscore and take first 2 parts as baseline
+    parts = name.split('_')
+    if len(parts) >= 2:
+        return '_'.join(parts[:2])
+
+    return parts[0] if parts else filename
+
+
+def extract_muscle_name_from_path(filename):
+    """
+    Extract muscle name from filename using CamelCase pattern matching.
+
+    The muscle name is identified as the last CamelCase component in the filename
+    after removing known suffixes.
+
+    Args:
+        filename (str): Filename to parse
+
+    Returns:
+        str or None: Muscle name if found (e.g., 'VastusLateralisRight'), None otherwise
+
+    Example:
+        >>> extract_muscle_name_from_path('bl3_trap1_8mm_5x13_2_VastusLateralisRight.json')
+        'VastusLateralisRight'
+    """
+    import os
+
+    # Remove directory path
+    basename = os.path.basename(filename)
+
+    # Remove known suffixes in order of specificity
+    suffixes_to_remove = [
+        '_covisi_filtered_muedit.mat_edited.mat',
+        '_covisi_filtered_muedit.mat',
+        '_muedit.mat_edited.mat',
+        '_covisi_filtered.json',
+        '_muedit.mat',
+        '_edited.mat',
+        '.json',
+        '.pkl',
+        '.mat',
+    ]
+
+    for suffix in suffixes_to_remove:
+        if basename.endswith(suffix):
+            basename = basename[:-len(suffix)]
+            break
+
+    # Split by underscore and find CamelCase parts
+    parts = basename.split('_')
+
+    # Find the last CamelCase part (muscle name)
+    for part in reversed(parts):
+        if len(part) > 1 and any(c.isupper() for c in part) and any(c.islower() for c in part):
+            return part
+
+    return None
+
+
+def create_emgfile_groups(emgfiles, strategy='file_and_muscle'):
+    """
+    Group loaded openhdemg files by file basename and/or muscle name.
+
+    This function analyzes a list of loaded openhdemg files and creates logical
+    groupings based on filename patterns. Useful for organizing data in notebooks
+    or scripts where files need to be processed in groups.
+
+    Args:
+        emgfiles (list): List of dictionaries with loaded emgfile data. Each dict should have:
+            - 'filename': Filename (str)
+            - 'path': File path (Path or str)
+            - 'data': Loaded emgfile dictionary from openhdemg
+        strategy (str): Grouping strategy:
+            - 'file_and_muscle': Group by unique (file_basename, muscle) combination (default)
+            - 'muscle_only': Group by muscle name only
+
+    Returns:
+        dict: Dictionary with structure:
+            {
+                'groups': [
+                    {
+                        'name': str,           # Display name for the group
+                        'muscle': str,         # Muscle name
+                        'file_base': str,      # File basename (only for 'file_and_muscle' strategy)
+                        'count': int,          # Number of files in group
+                        'files': [             # List of file dictionaries
+                            {
+                                'filename': str,
+                                'path': Path,
+                                'data': dict  # openhdemg data
+                            },
+                            ...
+                        ]
+                    },
+                    ...
+                ],
+                'ungrouped': [  # Files that don't fit any group (single files)
+                    {
+                        'filename': str,
+                        'path': Path,
+                        'data': dict
+                    },
+                    ...
+                ],
+                'summary': {
+                    'total_files': int,
+                    'grouped_files': int,
+                    'ungrouped_files': int,
+                    'group_count': int,
+                    'strategy': str
+                }
+            }
+
+    Example:
+        >>> import openhdemg.library as emg
+        >>> from pathlib import Path
+        >>>
+        >>> # Load files
+        >>> emgfiles = []
+        >>> for json_path in Path('decomposition_auto').glob('*.json'):
+        ...     emgfile = emg.emg_from_json(str(json_path))
+        ...     emgfiles.append({
+        ...         'filename': json_path.name,
+        ...         'path': json_path,
+        ...         'data': emgfile
+        ...     })
+        >>>
+        >>> # Create groups
+        >>> result = create_emgfile_groups(emgfiles, strategy='file_and_muscle')
+        >>>
+        >>> # Access groups
+        >>> for group in result['groups']:
+        ...     print(f"{group['name']}: {group['count']} files")
+        ...     for file in group['files']:
+        ...         print(f"  - {file['filename']}")
+    """
+    if not emgfiles:
+        return {
+            'groups': [],
+            'ungrouped': [],
+            'summary': {
+                'total_files': 0,
+                'grouped_files': 0,
+                'ungrouped_files': 0,
+                'group_count': 0,
+                'strategy': strategy
+            }
+        }
+
+    logger.info(f"Creating groups using strategy: {strategy}")
+
+    # Analyze files and create groupings
+    groupings = {}
+    ungrouped = []
+    parse_errors = []
+
+    for emgfile_entry in emgfiles:
+        filename = emgfile_entry['filename']
+        file_base = extract_file_basename_from_path(filename)
+        muscle = extract_muscle_name_from_path(filename)
+
+        # Validate parsing
+        if not muscle:
+            logger.warning(f"Could not extract muscle name from: {filename}")
+            parse_errors.append(filename)
+            ungrouped.append(emgfile_entry)
+            continue
+
+        # Create group key based on strategy
+        if strategy == 'file_and_muscle':
+            if not file_base:
+                logger.warning(f"Could not extract file basename from: {filename}")
+                parse_errors.append(filename)
+                ungrouped.append(emgfile_entry)
+                continue
+            group_key = f"{file_base}_{muscle}"
+            display_name = f"{file_base} - {muscle}"
+        elif strategy == 'muscle_only':
+            group_key = muscle
+            display_name = muscle
+        else:
+            raise ValueError(f"Invalid strategy: {strategy}. Use 'file_and_muscle' or 'muscle_only'")
+
+        # Add to group
+        if group_key not in groupings:
+            groupings[group_key] = {
+                'name': display_name,
+                'muscle': muscle,
+                'file_base': file_base if strategy == 'file_and_muscle' else None,
+                'files': []
+            }
+        groupings[group_key]['files'].append(emgfile_entry)
+
+    # Filter out single-file groups (move to ungrouped)
+    multi_file_groups = []
+    for group_key, group_data in groupings.items():
+        if len(group_data['files']) >= 2:
+            group_data['count'] = len(group_data['files'])
+            multi_file_groups.append(group_data)
+        else:
+            # Single file groups become ungrouped
+            ungrouped.extend(group_data['files'])
+
+    # Sort groups by name
+    multi_file_groups.sort(key=lambda x: x['name'])
+
+    # Calculate summary
+    grouped_file_count = sum(group['count'] for group in multi_file_groups)
+    total_files = len(emgfiles)
+
+    summary = {
+        'total_files': total_files,
+        'grouped_files': grouped_file_count,
+        'ungrouped_files': len(ungrouped),
+        'group_count': len(multi_file_groups),
+        'strategy': strategy,
+        'parse_errors': len(parse_errors)
+    }
+
+    # Log summary
+    logger.info(f"Grouping complete: {summary['group_count']} groups created")
+    logger.info(f"  - {summary['grouped_files']} files in groups")
+    logger.info(f"  - {summary['ungrouped_files']} files ungrouped")
+    if parse_errors:
+        logger.warning(f"  - {len(parse_errors)} files with parsing errors")
+
+    return {
+        'groups': multi_file_groups,
+        'ungrouped': ungrouped,
+        'summary': summary
+    }
+
+
 def _is_valid_ref(ref):
     """
     Check if an HDF5 reference is valid (non-null).
