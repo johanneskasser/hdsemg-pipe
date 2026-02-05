@@ -551,13 +551,9 @@ class GridGroupingDialog(QDialog):
             if name.endswith('_'):
                 name = name[:-1]
 
-        # Remove grid dimension patterns (e.g., 10mm_4x8, 8mm_5x13)
-        # Pattern: Xmm_YxZ
-        name = re.sub(r'_\d+mm_\d+x\d+', '', name)
-
-        # Remove trailing single numbers (e.g., _2)
-        if name and name[-1].isdigit() and len(name) > 1 and name[-2] == '_':
-            name = name[:-2]
+        # Remove grid dimension patterns with optional trailing number
+        # Pattern: Xmm_YxZ or Xmm_YxZ_N (e.g., 10mm_4x8, 8mm_5x13_2)
+        name = re.sub(r'_\d+mm_\d+x\d+(_\d+)?', '', name)
 
         return name if name else filename
 
