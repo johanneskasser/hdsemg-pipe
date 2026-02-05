@@ -456,8 +456,8 @@ from workfolder_analysis_helper import plot_pipeline_overview, plot_covisi_compa
 
 # openhdemg (optional but recommended)
 try:
-    import openhdemg.library as emg
-    import openhdemg.plotemg as plot
+    from openhdemg.library import plotemg as plot
+    from openhdemg.library import openfiles as emg
     OPENHDEMG_AVAILABLE = True
     print("✓ openhdemg available")
 except ImportError:
@@ -552,7 +552,6 @@ if OPENHDEMG_AVAILABLE and len(emgfiles) > 0:
     fig = plot.plot_mupulses(
         emgfile=emgfile,
         linewidths=0.8,
-        title=f"Motor Unit Discharge Times: {filename}"
     )
     plt.show()
 else:
@@ -570,7 +569,6 @@ if OPENHDEMG_AVAILABLE and len(emgfiles) > 0:
     fig = plot.plot_idr(
         emgfile=emgfile,
         munumber="all",
-        title=f"Instantaneous Discharge Rate: {filename}"
     )
     plt.show()'''
     })
@@ -589,7 +587,6 @@ if OPENHDEMG_AVAILABLE and len(emgfiles) > 0:
             emgfile=emgfile,
             munumber="all",
             channel=0,  # First channel
-            title=f"Motor Unit Action Potentials: {filename}"
         )
         plt.show()
     except Exception as e:
@@ -607,7 +604,6 @@ if OPENHDEMG_AVAILABLE and len(emgfiles) > 0:
     fig = plot.plot_refsig(
         emgfile=emgfile,
         ylabel="Force",
-        title=f"Reference Signal: {filename}"
     )
     plt.show()'''
     })
