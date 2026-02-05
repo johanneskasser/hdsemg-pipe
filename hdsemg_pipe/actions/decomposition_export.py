@@ -713,13 +713,99 @@ def extract_muscle_name_from_path(filename):
     return None
 
 
-def create_emgfile_groups(emgfiles, strategy='file_and_muscle'):
+def concatenate_emgfiles(emgfile_list):
+    """
+    Concatenate multiple openhdemg emgfiles into a single combined file.
+
+    This function merges motor units from multiple EMG files (e.g., different grids
+    recording the same muscle) into one unified emgfile. Useful for analyzing all
+    motor units together.
+
+    Args:
+        emgfile_list (list): List of openhdemg emgfile dictionaries to concatenate
+
+    Returns:
+        dict: Combined openhdemg emgfile with all motor units, or None if input is empty
+
+    Note:
+        - Uses the first file's RAW_SIGNAL, REF_SIGNAL, FSAMP, and EMG_LENGTH
+        - All files should have the same sampling rate and signal length
+        - Motor units are appended in the order of input files
+
+    Example:
+        >>> emgfile1 = emg.emg_from_json('grid1.json')
+        >>> emgfile2 = emg.emg_from_json('grid2.json')
+        >>> combined = concatenate_emgfiles([emgfile1, emgfile2])
+        >>> print(f"Total MUs: {combined['NUMBER_OF_MUS']}")
+    """
+    import copy
+    import numpy as np
+    import pandas as pd
+
+    if not emgfile_list:
+        return None
+
+    if len(emgfile_list) == 1:
+        return copy.deepcopy(emgfile_list[0])
+
+    # Start with a deep copy of the first file
+    merged = copy.deepcopy(emgfile_list[0])
+
+    # Track source files
+    source_files = [merged.get('FILENAME', 'unknown')]
+
+    # Concatenate motor units from additional files
+    for idx, emgfile in enumerate(emgfile_list[1:], start=2):
+        source_files.append(emgfile.get('FILENAME', f'unknown_{idx}'))
+
+        # Extend motor unit lists
+        if 'IPTS' in emgfile and 'IPTS' in merged:
+            merged['IPTS'].extend(emgfile['IPTS'])
+
+        if 'MUPULSES' in emgfile and 'MUPULSES' in merged:
+            merged['MUPULSES'].extend(emgfile['MUPULSES'])
+
+        # Concatenate binary firing patterns (vertical stack: MUs × time)
+        if 'BINARY_MUS_FIRING' in emgfile and 'BINARY_MUS_FIRING' in merged:
+            try:
+                merged['BINARY_MUS_FIRING'] = np.vstack([
+                    merged['BINARY_MUS_FIRING'],
+                    emgfile['BINARY_MUS_FIRING']
+                ])
+            except ValueError as e:
+                logger.warning(f"Could not concatenate BINARY_MUS_FIRING: {e}")
+
+        # Concatenate accuracy/CoVISI values
+        if 'ACCURACY' in emgfile and 'ACCURACY' in merged:
+            try:
+                if isinstance(merged['ACCURACY'], pd.DataFrame) and isinstance(emgfile['ACCURACY'], pd.DataFrame):
+                    merged['ACCURACY'] = pd.concat([
+                        merged['ACCURACY'],
+                        emgfile['ACCURACY']
+                    ], ignore_index=True)
+            except Exception as e:
+                logger.warning(f"Could not concatenate ACCURACY: {e}")
+
+    # Update total motor unit count
+    merged['NUMBER_OF_MUS'] = sum(f['NUMBER_OF_MUS'] for f in emgfile_list)
+
+    # Add metadata about concatenation
+    merged['SOURCE'] = f"Concatenated from {len(emgfile_list)} files"
+    merged['SOURCE_FILES'] = source_files
+    merged['FILENAME'] = f"merged_{len(emgfile_list)}_files"
+
+    logger.info(f"Concatenated {len(emgfile_list)} emgfiles: {merged['NUMBER_OF_MUS']} total MUs")
+
+    return merged
+
+
+def create_emgfile_groups(emgfiles, strategy='file_and_muscle', concatenate=True):
     """
     Group loaded openhdemg files by file basename and/or muscle name.
 
     This function analyzes a list of loaded openhdemg files and creates logical
-    groupings based on filename patterns. Useful for organizing data in notebooks
-    or scripts where files need to be processed in groups.
+    groupings based on filename patterns. Optionally concatenates motor units
+    within each group for unified analysis.
 
     Args:
         emgfiles (list): List of dictionaries with loaded emgfile data. Each dict should have:
@@ -729,6 +815,7 @@ def create_emgfile_groups(emgfiles, strategy='file_and_muscle'):
         strategy (str): Grouping strategy:
             - 'file_and_muscle': Group by unique (file_basename, muscle) combination (default)
             - 'muscle_only': Group by muscle name only
+        concatenate (bool): If True, create a merged emgfile with all MUs for each group (default: True)
 
     Returns:
         dict: Dictionary with structure:
@@ -739,14 +826,15 @@ def create_emgfile_groups(emgfiles, strategy='file_and_muscle'):
                         'muscle': str,         # Muscle name
                         'file_base': str,      # File basename (only for 'file_and_muscle' strategy)
                         'count': int,          # Number of files in group
-                        'files': [             # List of file dictionaries
+                        'files': [             # List of individual file dictionaries
                             {
                                 'filename': str,
                                 'path': Path,
                                 'data': dict  # openhdemg data
                             },
                             ...
-                        ]
+                        ],
+                        'concatenated': dict   # Combined emgfile with all MUs (if concatenate=True)
                     },
                     ...
                 ],
@@ -781,14 +869,21 @@ def create_emgfile_groups(emgfiles, strategy='file_and_muscle'):
         ...         'data': emgfile
         ...     })
         >>>
-        >>> # Create groups
-        >>> result = create_emgfile_groups(emgfiles, strategy='file_and_muscle')
+        >>> # Create groups with concatenation
+        >>> result = create_emgfile_groups(emgfiles, strategy='file_and_muscle', concatenate=True)
         >>>
-        >>> # Access groups
+        >>> # Access individual files in groups
         >>> for group in result['groups']:
         ...     print(f"{group['name']}: {group['count']} files")
         ...     for file in group['files']:
-        ...         print(f"  - {file['filename']}")
+        ...         print(f"  - {file['filename']}: {file['data']['NUMBER_OF_MUS']} MUs")
+        >>>
+        >>> # Access concatenated emgfile for analysis
+        >>> for group in result['groups']:
+        ...     combined = group['concatenated']
+        ...     print(f"{group['name']}: {combined['NUMBER_OF_MUS']} total MUs")
+        ...     # Analyze all MUs together
+        ...     covisi_values = combined['ACCURACY'].values.flatten()
     """
     if not emgfiles:
         return {
@@ -847,11 +942,20 @@ def create_emgfile_groups(emgfiles, strategy='file_and_muscle'):
             }
         groupings[group_key]['files'].append(emgfile_entry)
 
-    # Filter out single-file groups (move to ungrouped)
+    # Filter out single-file groups (move to ungrouped) and optionally concatenate
     multi_file_groups = []
     for group_key, group_data in groupings.items():
         if len(group_data['files']) >= 2:
             group_data['count'] = len(group_data['files'])
+
+            # Concatenate emgfiles in this group if requested
+            if concatenate:
+                emgfile_data_list = [f['data'] for f in group_data['files']]
+                group_data['concatenated'] = concatenate_emgfiles(emgfile_data_list)
+                logger.debug(f"Concatenated {len(emgfile_data_list)} files in group '{group_data['name']}'")
+            else:
+                group_data['concatenated'] = None
+
             multi_file_groups.append(group_data)
         else:
             # Single file groups become ungrouped
