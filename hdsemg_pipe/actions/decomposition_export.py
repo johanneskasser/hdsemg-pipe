@@ -779,14 +779,23 @@ def concatenate_emgfiles(emgfile_list):
             except Exception as e:
                 logger.warning(f"Could not concatenate MUPULSES: {e}")
 
-        # Concatenate binary firing patterns (vertical stack: MUs × time)
+        # Concatenate binary firing patterns
+        # Note: BINARY_MUS_FIRING has shape (time_samples, n_MUs), so concatenate along axis 1 (columns)
         if 'BINARY_MUS_FIRING' in emgfile and 'BINARY_MUS_FIRING' in merged:
             try:
-                merged['BINARY_MUS_FIRING'] = np.vstack([
-                    merged['BINARY_MUS_FIRING'],
-                    emgfile['BINARY_MUS_FIRING']
-                ])
-            except ValueError as e:
+                if isinstance(merged['BINARY_MUS_FIRING'], pd.DataFrame):
+                    # DataFrame: concatenate columns (MUs)
+                    merged['BINARY_MUS_FIRING'] = pd.concat([
+                        merged['BINARY_MUS_FIRING'],
+                        emgfile['BINARY_MUS_FIRING']
+                    ], axis=1, ignore_index=True)
+                else:
+                    # numpy array: horizontal stack (add columns)
+                    merged['BINARY_MUS_FIRING'] = np.hstack([
+                        merged['BINARY_MUS_FIRING'],
+                        emgfile['BINARY_MUS_FIRING']
+                    ])
+            except Exception as e:
                 logger.warning(f"Could not concatenate BINARY_MUS_FIRING: {e}")
 
         # Concatenate accuracy/CoVISI values
