@@ -599,15 +599,17 @@ def compute_covisi_from_muedit_mat(
 
             distimeclean = edition["Distimeclean"]
 
-            # Handle different array structures
+            # Read the entire cell array first (proper way to handle HDF5 cell arrays)
             # MUedit stores as (ngrids x nMU) cell array of references
-            if distimeclean.ndim == 2:
-                n_grids, n_mus = distimeclean.shape
+            cell_array = distimeclean[()]
+
+            if cell_array.ndim == 2:
+                # Multi-grid case: use first grid (row 0)
+                n_grids, n_mus = cell_array.shape
                 for mu_idx in range(n_mus):
-                    # Get discharge times for this MU (from first grid)
-                    # Use [()] to force reading the scalar value from HDF5 dataset
-                    ref = distimeclean[0, mu_idx][()]
-                    # Check if it's any kind of h5py reference
+                    ref = cell_array[0, mu_idx]
+
+                    # Check if it's any kind of h5py reference and dereference
                     if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)):
                         data = np.array(f[ref]).flatten()
                     else:
@@ -619,16 +621,17 @@ def compute_covisi_from_muedit_mat(
 
                     discharge_times.append(data)
             else:
-                # Single grid case
-                for mu_idx in range(len(distimeclean)):
-                    # Use [()] to force reading the scalar value from HDF5 dataset
-                    ref = distimeclean[mu_idx][()]
-                    # Check if it's any kind of h5py reference
+                # Single grid case: 1D array of references
+                for mu_idx in range(len(cell_array)):
+                    ref = cell_array[mu_idx]
+
+                    # Check if it's any kind of h5py reference and dereference
                     if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)):
                         data = np.array(f[ref]).flatten()
                     else:
                         data = np.array(ref).flatten()
 
+                    # Convert from 1-based MATLAB to 0-based Python
                     if len(data) > 0:
                         data = data - 1
 
