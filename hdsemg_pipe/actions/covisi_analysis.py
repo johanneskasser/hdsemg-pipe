@@ -599,43 +599,62 @@ def compute_covisi_from_muedit_mat(
 
             distimeclean = edition["Distimeclean"]
 
-            # Read the entire cell array first (proper way to handle HDF5 cell arrays)
-            # MUedit stores as (ngrids x nMU) cell array of references
-            cell_array = distimeclean[()]
+            # Distimeclean has a nested structure:
+            # - It's an object array (typically 1x1) containing a reference
+            # - That reference points to the actual cell array of discharge times
+            top = distimeclean[()]
+            inner_ref = top.flat[0]  # Extract the single reference
 
-            if cell_array.ndim == 2:
-                # Multi-grid case: use first grid (row 0)
-                n_grids, n_mus = cell_array.shape
-                for mu_idx in range(n_mus):
-                    ref = cell_array[0, mu_idx]
+            # Check if inner_ref is a valid reference
+            if not isinstance(inner_ref, (h5py.Reference, h5py.h5r.Reference)):
+                raise ValueError(
+                    f"Expected reference in Distimeclean, got {type(inner_ref)}"
+                )
 
-                    # Check if it's any kind of h5py reference and dereference
-                    if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)):
-                        data = np.array(f[ref]).flatten()
+            # Dereference to get the actual cell array dataset
+            inner_cell_ds = f[inner_ref]
+
+            # Read the cell array using the helper function pattern from decomposition_export
+            def _is_valid_ref(ref):
+                """Check if an HDF5 reference is valid (non-null)."""
+                return isinstance(ref, (h5py.Reference, h5py.h5r.Reference)) and bool(ref)
+
+            def _cell_row_read(f_obj, ds):
+                """Read a MATLAB 1xN cell array dataset into a Python list of arrays."""
+                obj = ds[()]
+                if obj.ndim != 2:
+                    raise ValueError(f"Expected 2-D cell array, got {obj.ndim}D.")
+
+                # Normalize to a row
+                if obj.shape[0] == 1:
+                    refs = [obj[0, j] for j in range(obj.shape[1])]
+                elif obj.shape[1] == 1:
+                    refs = [obj[i, 0] for i in range(obj.shape[0])]
+                else:
+                    refs = [obj[0, j] for j in range(obj.shape[1])]
+
+                out = []
+                for r in refs:
+                    if _is_valid_ref(r):
+                        arr = np.array(f_obj[r])
+                        out.append(arr)
                     else:
-                        data = np.array(ref).flatten()
+                        out.append(None)
+                return out
 
+            # Read discharge times from the nested cell array
+            disc_nested = _cell_row_read(f, inner_cell_ds)
+
+            # Convert to 0-based indexing and store
+            for mu_timing in disc_nested:
+                if mu_timing is not None:
+                    data = np.squeeze(np.asarray(mu_timing, dtype='float64'))
                     # Convert from 1-based MATLAB to 0-based Python
-                    if len(data) > 0:
+                    if data.size > 0:
                         data = data - 1
-
                     discharge_times.append(data)
-            else:
-                # Single grid case: 1D array of references
-                for mu_idx in range(len(cell_array)):
-                    ref = cell_array[mu_idx]
-
-                    # Check if it's any kind of h5py reference and dereference
-                    if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)):
-                        data = np.array(f[ref]).flatten()
-                    else:
-                        data = np.array(ref).flatten()
-
-                    # Convert from 1-based MATLAB to 0-based Python
-                    if len(data) > 0:
-                        data = data - 1
-
-                    discharge_times.append(data)
+                else:
+                    discharge_times.append(np.array([]))
 
     except Exception as e:
         logger.error(f"Failed to read discharge times from {mat_path}: {e}")
