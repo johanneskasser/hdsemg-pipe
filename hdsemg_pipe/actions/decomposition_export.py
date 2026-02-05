@@ -758,12 +758,25 @@ def concatenate_emgfiles(emgfile_list):
     for idx, emgfile in enumerate(emgfile_list[1:], start=2):
         source_files.append(emgfile.get('FILENAME', f'unknown_{idx}'))
 
-        # Extend motor unit lists
+        # Concatenate IPTS (handle both DataFrame and list types)
         if 'IPTS' in emgfile and 'IPTS' in merged:
-            merged['IPTS'].extend(emgfile['IPTS'])
+            try:
+                if isinstance(merged['IPTS'], pd.DataFrame):
+                    merged['IPTS'] = pd.concat([merged['IPTS'], emgfile['IPTS']], ignore_index=True)
+                elif isinstance(merged['IPTS'], list):
+                    merged['IPTS'].extend(emgfile['IPTS'])
+            except Exception as e:
+                logger.warning(f"Could not concatenate IPTS: {e}")
 
+        # Concatenate MUPULSES (handle both DataFrame and list types)
         if 'MUPULSES' in emgfile and 'MUPULSES' in merged:
-            merged['MUPULSES'].extend(emgfile['MUPULSES'])
+            try:
+                if isinstance(merged['MUPULSES'], pd.DataFrame):
+                    merged['MUPULSES'] = pd.concat([merged['MUPULSES'], emgfile['MUPULSES']], ignore_index=True)
+                elif isinstance(merged['MUPULSES'], list):
+                    merged['MUPULSES'].extend(emgfile['MUPULSES'])
+            except Exception as e:
+                logger.warning(f"Could not concatenate MUPULSES: {e}")
 
         # Concatenate binary firing patterns (vertical stack: MUs × time)
         if 'BINARY_MUS_FIRING' in emgfile and 'BINARY_MUS_FIRING' in merged:
