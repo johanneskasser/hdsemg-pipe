@@ -607,22 +607,23 @@ def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
 
 def extract_file_basename_from_path(filename):
     """
-    Extract the file basename (participant_session identifier) from a filename.
+    Extract the file basename (complete experiment identifier) from a filename.
 
-    This function removes all suffixes and extracts the core file identifier,
-    typically consisting of the first 2 underscore-separated parts.
+    This function removes grid dimensions, muscle names, and suffixes to extract
+    the core experimental identifier (proband, block, condition, trial).
 
     Args:
-        filename (str): Filename to parse (e.g., 'bl3_trap1_8mm_5x13_VastusLateralisRight.json')
+        filename (str): Filename to parse
 
     Returns:
-        str: File basename (e.g., 'bl3_trap1')
+        str: File basename
 
     Example:
-        >>> extract_file_basename_from_path('bl3_trap1_8mm_5x13_2_VastusLateralisRight_covisi_filtered.json')
-        'bl3_trap1'
+        >>> extract_file_basename_from_path('1_20260202_112952_FT_Block1_Pyramid_1_10mm_4x8_2_VastusMedialisRight_covisi_filtered_cleaned.json')
+        '1_20260202_112952_FT_Block1_Pyramid_1'
     """
     import os
+    import re
 
     # Remove directory path
     name = os.path.basename(filename)
@@ -637,20 +638,32 @@ def extract_file_basename_from_path(filename):
         '_covisi_filtered_muedit.mat_edited',
         '_covisi_filtered_muedit',
         '_muedit.mat_edited',
+        '_covisi_filtered_cleaned',
         '_covisi_filtered',
         '_muedit',
         '_edited',
+        '_cleaned',
     ]
     for suffix in suffixes:
         if name.endswith(suffix):
             name = name[:-len(suffix)]
 
-    # Split by underscore and take first 2 parts as baseline
-    parts = name.split('_')
-    if len(parts) >= 2:
-        return '_'.join(parts[:2])
+    # Extract and remove muscle name (last CamelCase part)
+    muscle_name = extract_muscle_name_from_path(filename)
+    if muscle_name and name.endswith(muscle_name):
+        name = name[:-len(muscle_name)]
+        if name.endswith('_'):
+            name = name[:-1]
 
-    return parts[0] if parts else filename
+    # Remove grid dimension patterns (e.g., 10mm_4x8, 8mm_5x13)
+    # Pattern: Xmm_YxZ
+    name = re.sub(r'_\d+mm_\d+x\d+', '', name)
+
+    # Remove trailing single numbers (e.g., _2 for second grid)
+    if name and name[-1].isdigit() and len(name) > 1 and name[-2] == '_':
+        name = name[:-2]
+
+    return name if name else filename
 
 
 def extract_muscle_name_from_path(filename):

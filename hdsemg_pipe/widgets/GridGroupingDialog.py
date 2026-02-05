@@ -518,7 +518,8 @@ class GridGroupingDialog(QDialog):
         """
         Extract the file basename (without grid/muscle suffix).
 
-        Example: bl3_trap1_8mm_5x13_2_VastusLateralisRight.json -> bl3_trap1
+        Example: 1_20260202_112952_FT_Block1_Pyramid_1_10mm_4x8_2_VastusMedialisRight.json
+                 -> 1_20260202_112952_FT_Block1_Pyramid_1
         """
         import re
 
@@ -533,24 +534,32 @@ class GridGroupingDialog(QDialog):
             '_covisi_filtered_muedit.mat_edited',
             '_covisi_filtered_muedit',
             '_muedit.mat_edited',
+            '_covisi_filtered_cleaned',
             '_covisi_filtered',
             '_muedit',
             '_edited',
+            '_cleaned',
         ]
         for suffix in suffixes:
             if name.endswith(suffix):
                 name = name[:-len(suffix)]
 
-        # Split by underscore and find the first 2-3 parts that form the basename
-        # Pattern: [participant]_[session]_[optional_identifier]
-        parts = name.split('_')
+        # Extract and remove muscle name (last CamelCase part)
+        muscle_name = self.extract_muscle_name(filename)
+        if muscle_name and name.endswith(muscle_name):
+            name = name[:-len(muscle_name)]
+            if name.endswith('_'):
+                name = name[:-1]
 
-        # Take first 2 parts (e.g., bl3_trap1) as baseline
-        if len(parts) >= 2:
-            basename = '_'.join(parts[:2])
-            return basename
+        # Remove grid dimension patterns (e.g., 10mm_4x8, 8mm_5x13)
+        # Pattern: Xmm_YxZ
+        name = re.sub(r'_\d+mm_\d+x\d+', '', name)
 
-        return parts[0] if parts else filename
+        # Remove trailing single numbers (e.g., _2)
+        if name and name[-1].isdigit() and len(name) > 1 and name[-2] == '_':
+            name = name[:-2]
+
+        return name if name else filename
 
     def extract_muscle_name(self, filename):
         """
