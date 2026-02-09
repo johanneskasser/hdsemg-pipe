@@ -860,6 +860,7 @@ from workfolder_analysis_helper import plot_pipeline_overview, plot_covisi_compa
 try:
     from openhdemg.library import plotemg as plot
     from openhdemg.library import openfiles as emg
+    from openhdemg.library import muap
     from openhdemg.library import tools as tools
     OPENHDEMG_AVAILABLE = True
     print("✓ openhdemg available")
@@ -1307,7 +1308,7 @@ auf Motor Unit Eigenschaften.
         'source': '''### 5.1 MU Tracking across Conditions
 
 Track **identical motor units** from Pre-Intervention to Post-CON and Post-EXZ using
-2D cross-correlation of Spike-Triggered Averages (MUAP morphology matching via `emg.tracking()`).
+2D cross-correlation of Spike-Triggered Averages (MUAP morphology matching via `muap.tracking()`).
 
 This enables **paired statistical analysis** with significantly higher statistical power
 compared to unpaired tests.
@@ -1418,7 +1419,7 @@ if condition_result and OPENHDEMG_AVAILABLE:
                           f"({post_emg['NUMBER_OF_MUS']} MUs)")
 
                     try:
-                        track_res = emg.tracking(
+                        track_res = muap.tracking(
                             emgfile1=pre_emg,
                             emgfile2=post_emg,
                             **TRACKING_CONFIG,
