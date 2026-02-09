@@ -825,6 +825,9 @@ This notebook provides a starting point for analyzing the cleaned motor unit dat
 3. Motor Unit Visualizations
 4. Motor Unit Analysis
 5. Condition Comparison (CON vs EXZ)
+   - 5.1 MU Tracking across Conditions
+   - 5.2 Unpaired MU Property Overview
+   - 5.3 Paired Statistical Analysis
 6. Custom Analysis (template)
 7. Export Results'''
     })
@@ -838,6 +841,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 import json
+import re
+import os
+
+# Statistical tests (for paired analysis)
+from scipy import stats
 
 # Import helper module (generated alongside this notebook)
 import sys
@@ -1287,6 +1295,342 @@ auf Motor Unit Eigenschaften.
 | **DR at Derecruitment** | Entladungsrate bei Derekrutierung (pps) |
 | **CoV ISI** | Variationskoeffizient der Interspike-Intervalle (%) |
 | **SIL (Accuracy)** | Silhouette-Wert (Dekompositionsqualit\u00e4t) |'''
+    })
+
+    # ----------------------------------------------------------------
+    # 5.1 MU TRACKING ACROSS CONDITIONS
+    # ----------------------------------------------------------------
+
+    # MU Tracking subsection header (Markdown)
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''### 5.1 MU Tracking across Conditions
+
+Track **identical motor units** from Pre-Intervention to Post-CON and Post-EXZ using
+2D cross-correlation of Spike-Triggered Averages (MUAP morphology matching via `emg.tracking()`).
+
+This enables **paired statistical analysis** with significantly higher statistical power
+compared to unpaired tests.
+
+**Workflow:**
+1. Match individual EMG files between Pre and Post conditions by electrode grid
+2. Compute STAs and run 2D cross-correlation to identify the same MUs
+3. Extract paired MU properties (Pre vs Post) for tracked units
+4. Paired t-tests / Wilcoxon signed-rank tests with effect sizes'''
+    })
+
+    # Tracking Configuration (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# MU Tracking Configuration
+# ============================================================
+# Adjust these parameters for your electrode setup.
+# The GUI allows visual inspection of each matched MU pair.
+
+TRACKING_CONFIG = {
+    'matrixcode': "GR08MM1305",   # electrode array (GR08MM1305, GR04MM1305, GR10MM0808)
+    'orientation': 180,            # electrode orientation in degrees (0 or 180)
+    'derivation': "sd",            # single differential (sd), double differential (dd), or monopolar (mono)
+    'timewindow': 50,              # ms for STA computation
+    'threshold': 0.8,              # minimum normalized 2D XCC for match (0.75=lenient, 0.9=strict)
+    'filter': True,                # keep only the best match per MU
+    'exclude_belowthreshold': True,
+    'gui': True,                   # visual inspection of matches (set False for batch processing)
+    'show': False,
+    'multiprocessing': True,
+}
+
+# Comparisons to run: (name, pre_condition, post_condition)
+TRACKING_COMPARISONS = [
+    ('Pre_vs_PostCON', 'Pre_Intervention', 'Post_CON'),
+    ('Pre_vs_PostEXZ', 'Pre_Intervention', 'Post_EXZ'),
+]
+
+print("Tracking configuration:")
+for k, v in TRACKING_CONFIG.items():
+    print(f"  {k}: {v}")'''
+    })
+
+    # File Matching & Tracking Execution (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Run MU Tracking: Match files by grid, track MUs via MUAP morphology
+# ============================================================
+
+def get_grid_id(filename):
+    """Extract grid identifier (e.g., '10mm_4x8_2') from filename."""
+    match = re.search(r'(\\d+mm_\\d+x\\d+(?:_\\d+)?)', os.path.basename(filename))
+    return match.group(1) if match else 'unknown'
+
+# Build lookup: condition -> tracking_type -> muscle -> grid_id -> file_entry
+file_lookup = {}
+if condition_result:
+    for cond_name, cond_data in condition_result['conditions'].items():
+        file_lookup[cond_name] = {}
+        for tracking_type, groups in cond_data['tracking_types'].items():
+            file_lookup[cond_name][tracking_type] = {}
+            for group in groups:
+                muscle = group.get('muscle', 'Unknown')
+                if muscle not in file_lookup[cond_name][tracking_type]:
+                    file_lookup[cond_name][tracking_type][muscle] = {}
+                for file_entry in group.get('files', []):
+                    grid_id = get_grid_id(file_entry['filename'])
+                    file_lookup[cond_name][tracking_type][muscle][grid_id] = file_entry
+
+# Run tracking for each comparison
+tracking_results = []
+
+if condition_result and OPENHDEMG_AVAILABLE:
+    for comp_name, pre_cond, post_cond in TRACKING_COMPARISONS:
+        pre_data = file_lookup.get(pre_cond, {})
+        post_data = file_lookup.get(post_cond, {})
+
+        for tracking_type in sorted(pre_data.keys()):
+            if tracking_type not in post_data:
+                print(f"Skipping {tracking_type}: not in {post_cond}")
+                continue
+
+            for muscle in sorted(pre_data[tracking_type].keys()):
+                if muscle not in post_data.get(tracking_type, {}):
+                    print(f"Skipping {muscle}: not in {post_cond}/{tracking_type}")
+                    continue
+
+                pre_files = pre_data[tracking_type][muscle]
+                post_files = post_data[tracking_type][muscle]
+                common_grids = sorted(set(pre_files.keys()) & set(post_files.keys()))
+
+                if not common_grids:
+                    print(f"No matching grids for {comp_name} | {tracking_type} | {muscle}")
+                    continue
+
+                for grid_id in common_grids:
+                    pre_entry = pre_files[grid_id]
+                    post_entry = post_files[grid_id]
+                    pre_emg = pre_entry['data']
+                    post_emg = post_entry['data']
+
+                    print(f"\\nTracking: {comp_name} | {tracking_type} | {muscle} | Grid: {grid_id}")
+                    print(f"  Pre:  {os.path.basename(pre_entry['filename'])} "
+                          f"({pre_emg['NUMBER_OF_MUS']} MUs)")
+                    print(f"  Post: {os.path.basename(post_entry['filename'])} "
+                          f"({post_emg['NUMBER_OF_MUS']} MUs)")
+
+                    try:
+                        track_res = emg.tracking(
+                            emgfile1=pre_emg,
+                            emgfile2=post_emg,
+                            **TRACKING_CONFIG,
+                        )
+
+                        # Filter to included matches (GUI adds 'Inclusion' column)
+                        if 'Inclusion' in track_res.columns:
+                            matched = track_res[track_res['Inclusion'] == 'Included'].copy()
+                        else:
+                            matched = track_res.copy()
+
+                        tracking_results.append({
+                            'comparison': comp_name,
+                            'tracking_type': tracking_type,
+                            'muscle': muscle,
+                            'grid_id': grid_id,
+                            'pre_file': pre_entry['filename'],
+                            'post_file': post_entry['filename'],
+                            'pre_emgfile': pre_emg,
+                            'post_emgfile': post_emg,
+                            'tracking_df': track_res,
+                            'matched': matched,
+                            'n_matched': len(matched),
+                            'n_pre_mus': pre_emg['NUMBER_OF_MUS'],
+                            'n_post_mus': post_emg['NUMBER_OF_MUS'],
+                        })
+
+                        if len(matched) > 0:
+                            print(f"  -> {len(matched)} matched pairs "
+                                  f"(mean XCC: {matched['XCC'].mean():.3f})")
+                        else:
+                            print(f"  -> No matches above threshold {TRACKING_CONFIG['threshold']}")
+
+                    except Exception as e:
+                        print(f"  ERROR: {e}")
+
+    print(f"\\n{'='*60}")
+    print(f"Tracking complete:")
+    print(f"  Runs: {len(tracking_results)}")
+    print(f"  Total matched MU pairs: {sum(r['n_matched'] for r in tracking_results)}")
+else:
+    print("Tracking requires condition_result and openhdemg")'''
+    })
+
+    # Extract Paired MU Properties (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Extract paired MU properties for tracked motor units
+# ============================================================
+
+def extract_mu_properties(emgfile, mu_idx, fsamp, ref_signal, ref_max, sil_values):
+    """Extract properties for a single MU."""
+    mupulses = emgfile['MUPULSES'][mu_idx]
+    if len(mupulses) < 4:
+        return None
+
+    spikes = np.array(mupulses)
+    isi = np.diff(spikes) / fsamp  # seconds
+    isi = isi[isi > 0.01]  # remove artifacts < 10ms
+    if len(isi) < 2:
+        return None
+    inst_dr = 1.0 / isi  # pps
+
+    first_spike, last_spike = spikes[0], spikes[-1]
+    rt = (ref_signal[first_spike] / ref_max) * 100 if first_spike < len(ref_signal) else np.nan
+    drt = (ref_signal[last_spike] / ref_max) * 100 if last_spike < len(ref_signal) else np.nan
+
+    return {
+        'n_spikes': len(spikes),
+        'mean_dr': np.mean(inst_dr),
+        'peak_dr': np.max(inst_dr),
+        'cov_isi': (np.std(isi) / np.mean(isi)) * 100,
+        'rt_pct': rt,
+        'drt_pct': drt,
+        'dr_at_rec': np.mean(inst_dr[:min(5, len(inst_dr))]),
+        'dr_at_derec': np.mean(inst_dr[max(0, len(inst_dr)-5):]),
+        'sil': sil_values[mu_idx] if sil_values is not None and mu_idx < len(sil_values) else np.nan,
+    }
+
+
+paired_records = []
+
+for result in tracking_results:
+    pre_emg = result['pre_emgfile']
+    post_emg = result['post_emgfile']
+    fsamp = pre_emg['FSAMP']
+
+    pre_ref = pre_emg['REF_SIGNAL'].values.flatten()
+    post_ref = post_emg['REF_SIGNAL'].values.flatten()
+    pre_ref_max = pre_ref.max() if pre_ref.max() > 0 else 1.0
+    post_ref_max = post_ref.max() if post_ref.max() > 0 else 1.0
+
+    pre_sil = (pre_emg['ACCURACY'].values.flatten()
+               if 'ACCURACY' in pre_emg and pre_emg['ACCURACY'] is not None else None)
+    post_sil = (post_emg['ACCURACY'].values.flatten()
+                if 'ACCURACY' in post_emg and post_emg['ACCURACY'] is not None else None)
+
+    for _, row in result['matched'].iterrows():
+        mu_pre = int(row['MU_file1'])
+        mu_post = int(row['MU_file2'])
+        xcc = row['XCC']
+
+        pre_props = extract_mu_properties(pre_emg, mu_pre, fsamp, pre_ref, pre_ref_max, pre_sil)
+        post_props = extract_mu_properties(post_emg, mu_post, fsamp, post_ref, post_ref_max, post_sil)
+
+        if pre_props is None or post_props is None:
+            continue
+
+        record = {
+            'comparison': result['comparison'],
+            'tracking_type': result['tracking_type'],
+            'muscle': result['muscle'],
+            'grid_id': result['grid_id'],
+            'mu_pre_idx': mu_pre,
+            'mu_post_idx': mu_post,
+            'xcc': xcc,
+        }
+        for key in pre_props:
+            record[f'pre_{key}'] = pre_props[key]
+            record[f'post_{key}'] = post_props[key]
+            record[f'delta_{key}'] = post_props[key] - pre_props[key]
+
+        paired_records.append(record)
+
+df_paired = pd.DataFrame(paired_records)
+
+if len(df_paired) > 0:
+    print(f"Paired MU dataset: {len(df_paired)} tracked motor unit pairs")
+    n_con = len(df_paired[df_paired['comparison'] == 'Pre_vs_PostCON'])
+    n_exz = len(df_paired[df_paired['comparison'] == 'Pre_vs_PostEXZ'])
+    print(f"  Pre -> Post-CON: {n_con} pairs")
+    print(f"  Pre -> Post-EXZ: {n_exz} pairs")
+    print(f"  Muscles: {df_paired['muscle'].unique().tolist()}")
+    print(f"  Mean XCC: {df_paired['xcc'].mean():.3f} "
+          f"(range: {df_paired['xcc'].min():.3f} - {df_paired['xcc'].max():.3f})")
+    print()
+    print(df_paired.groupby(['comparison', 'tracking_type', 'muscle']).agg(
+        n_pairs=('xcc', 'count'),
+        mean_XCC=('xcc', 'mean'),
+        delta_DR=('delta_mean_dr', 'mean'),
+        delta_RT=('delta_rt_pct', 'mean'),
+    ).round(3))
+else:
+    print("No paired MU data - tracking found no matches or was skipped")'''
+    })
+
+    # Tracking quality plot (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Tracking Quality: XCC Distribution of Matched MU Pairs
+# ============================================================
+if len(df_paired) > 0:
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    # XCC histogram
+    ax = axes[0]
+    for comp, color, label in [('Pre_vs_PostCON', '#2563eb', 'Post-CON'),
+                                ('Pre_vs_PostEXZ', '#dc2626', 'Post-EXZ')]:
+        subset = df_paired[df_paired['comparison'] == comp]
+        if not subset.empty:
+            ax.hist(subset['xcc'], bins=15, alpha=0.5, color=color, edgecolor='black',
+                    linewidth=0.5, label=f'{label} (n={len(subset)})')
+    ax.set_xlabel('Normalized 2D Cross-Correlation (XCC)')
+    ax.set_ylabel('Count')
+    ax.set_title('Tracking Quality: XCC Distribution')
+    ax.axvline(TRACKING_CONFIG['threshold'], color='black', linestyle='--',
+               linewidth=1, label=f'Threshold ({TRACKING_CONFIG["threshold"]})')
+    ax.legend(fontsize=9)
+    ax.grid(alpha=0.3)
+
+    # XCC per muscle/tracking type
+    ax = axes[1]
+    plot_data = df_paired.groupby(['muscle', 'comparison'])['xcc'].apply(list)
+    x_pos = 0
+    xticks, xlabels = [], []
+    for muscle in sorted(df_paired['muscle'].unique()):
+        muscle_short = muscle.replace('Right', '').replace('Left', '')
+        for comp, color in [('Pre_vs_PostCON', '#2563eb'), ('Pre_vs_PostEXZ', '#dc2626')]:
+            vals = df_paired[(df_paired['muscle'] == muscle) &
+                             (df_paired['comparison'] == comp)]['xcc'].values
+            if len(vals) > 0:
+                bp = ax.boxplot([vals], positions=[x_pos], widths=0.6, patch_artist=True,
+                               medianprops=dict(color='black'))
+                bp['boxes'][0].set_facecolor(color)
+                bp['boxes'][0].set_alpha(0.6)
+                label = comp.replace('Pre_vs_Post', '')
+                xticks.append(x_pos)
+                xlabels.append(f'{muscle_short}\\n{label}')
+                x_pos += 1
+        x_pos += 0.5
+
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xlabels, fontsize=8)
+    ax.set_ylabel('XCC')
+    ax.set_title('XCC per Muscle & Comparison')
+    ax.grid(axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(WORKFOLDER / 'fig_tracking_quality.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("Saved: fig_tracking_quality.png")'''
+    })
+
+    # 5.2 Unpaired Overview subheader (Markdown)
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''### 5.2 Unpaired MU Property Overview
+
+Descriptive overview of **all** motor unit properties across conditions (not limited to tracked pairs).
+This uses the concatenated EMG files from `create_emgfile_groups()`.'''
     })
 
     # Extract MU Properties into DataFrame (Code)
@@ -1757,6 +2101,294 @@ if len(df_mu) > 0:
         plt.savefig(WORKFOLDER / f'fig_delta_con_exz_{tracking.lower()}.png', dpi=150, bbox_inches='tight')
         plt.show()
         print(f"Saved: fig_delta_con_exz_{tracking.lower()}.png")'''
+    })
+
+    # ----------------------------------------------------------------
+    # 5.3 PAIRED STATISTICAL ANALYSIS (TRACKED MUs)
+    # ----------------------------------------------------------------
+
+    # Paired Analysis subsection header (Markdown)
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''### 5.3 Paired Statistical Analysis (Tracked MUs)
+
+Statistical analysis using only **tracked (matched) motor units** from Pre to Post conditions.
+Paired tests exploit the within-subject design for higher statistical power.
+
+**Tests used:**
+- **Paired t-test** (parametric) - assumes normally distributed differences
+- **Wilcoxon signed-rank test** (non-parametric) - no distributional assumptions
+- **Cohen's d (paired)** - effect size: |d| < 0.2 small, 0.5 medium, 0.8 large'''
+    })
+
+    # Paired Statistical Tests (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Paired Statistical Tests: Tracked Motor Units
+# ============================================================
+if len(df_paired) > 0:
+    metrics = ['mean_dr', 'peak_dr', 'rt_pct', 'drt_pct', 'dr_at_rec', 'dr_at_derec', 'cov_isi']
+    metric_labels = {
+        'mean_dr': 'Mean DR (pps)',
+        'peak_dr': 'Peak DR (pps)',
+        'rt_pct': 'RT (%REF)',
+        'drt_pct': 'DRT (%REF)',
+        'dr_at_rec': 'DR@Rec (pps)',
+        'dr_at_derec': 'DR@Derec (pps)',
+        'cov_isi': 'CoV ISI (%)',
+    }
+
+    stat_records = []
+
+    print(f"{'='*100}")
+    print(f"  Paired Statistical Analysis (Tracked Motor Units)")
+    print(f"{'='*100}")
+
+    for tracking in sorted(df_paired['tracking_type'].unique()):
+        for muscle in sorted(df_paired['muscle'].unique()):
+            for comp in ['Pre_vs_PostCON', 'Pre_vs_PostEXZ']:
+                subset = df_paired[
+                    (df_paired['tracking_type'] == tracking) &
+                    (df_paired['muscle'] == muscle) &
+                    (df_paired['comparison'] == comp)
+                ]
+                if len(subset) < 3:
+                    continue
+
+                intervention = comp.replace('Pre_vs_Post', '')
+                print(f"\\n  {tracking} | {muscle} | {intervention} (n={len(subset)} pairs)")
+                print(f"  {'Metric':<18s} {'Pre':>10s} {'Post':>10s} "
+                      f"{'Delta':>10s} {'t':>7s} {'p(t)':>8s} "
+                      f"{'d':>7s} {'p(W)':>8s}")
+                print(f"  {'-'*18} {'-'*10} {'-'*10} "
+                      f"{'-'*10} {'-'*7} {'-'*8} "
+                      f"{'-'*7} {'-'*8}")
+
+                for metric in metrics:
+                    pre_vals = subset[f'pre_{metric}'].dropna()
+                    post_vals = subset[f'post_{metric}'].dropna()
+                    delta_vals = subset[f'delta_{metric}'].dropna()
+
+                    if len(delta_vals) < 3:
+                        continue
+
+                    # Paired t-test
+                    n = len(delta_vals)
+                    pre_matched = pre_vals.iloc[:n]
+                    post_matched = post_vals.iloc[:n]
+                    t_stat, p_ttest = stats.ttest_rel(pre_matched, post_matched)
+
+                    # Wilcoxon signed-rank test
+                    try:
+                        _, p_wilcox = stats.wilcoxon(delta_vals)
+                    except ValueError:
+                        p_wilcox = np.nan
+
+                    # Cohen's d (paired): mean_delta / sd_delta
+                    cohens_d = delta_vals.mean() / delta_vals.std() if delta_vals.std() > 0 else 0.0
+
+                    sig = '**' if p_ttest < 0.01 else ('*' if p_ttest < 0.05 else ' ')
+
+                    print(f"  {metric_labels[metric]:<18s} "
+                          f"{pre_matched.mean():>10.2f} {post_matched.mean():>10.2f} "
+                          f"{delta_vals.mean():>+10.2f} {t_stat:>7.2f} {p_ttest:>7.4f}{sig} "
+                          f"{cohens_d:>+6.2f} {p_wilcox:>8.4f}")
+
+                    stat_records.append({
+                        'tracking_type': tracking,
+                        'muscle': muscle,
+                        'comparison': comp,
+                        'metric': metric,
+                        'n_pairs': n,
+                        'pre_mean': pre_matched.mean(),
+                        'post_mean': post_matched.mean(),
+                        'delta_mean': delta_vals.mean(),
+                        'delta_sd': delta_vals.std(),
+                        't_stat': t_stat,
+                        'p_ttest': p_ttest,
+                        'cohens_d': cohens_d,
+                        'p_wilcoxon': p_wilcox,
+                    })
+
+    print(f"\\n  * p < 0.05, ** p < 0.01")
+
+    # Save statistical results
+    df_stats = pd.DataFrame(stat_records)
+    if len(df_stats) > 0:
+        stats_csv = WORKFOLDER / 'mu_paired_statistics.csv'
+        df_stats.to_csv(stats_csv, index=False)
+        print(f"\\nExported: {stats_csv.name}")
+else:
+    print("No paired data available for statistical analysis")'''
+    })
+
+    # Spaghetti / Slope Plots (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Figure 7: Spaghetti Plots - Individual MU Changes (Tracked Pairs)
+# ============================================================
+if len(df_paired) > 0:
+    key_metrics = ['mean_dr', 'rt_pct', 'peak_dr', 'cov_isi']
+    metric_labels = {
+        'mean_dr': 'Mean DR (pps)',
+        'rt_pct': 'RT (%REF)',
+        'peak_dr': 'Peak DR (pps)',
+        'cov_isi': 'CoV ISI (%)',
+    }
+
+    for tracking in sorted(df_paired['tracking_type'].unique()):
+        t_data = df_paired[df_paired['tracking_type'] == tracking]
+        if t_data.empty:
+            continue
+
+        muscles = sorted(t_data['muscle'].unique())
+        fig, axes = plt.subplots(len(muscles), len(key_metrics),
+                                 figsize=(4 * len(key_metrics), 5 * len(muscles)),
+                                 squeeze=False)
+
+        for row, muscle in enumerate(muscles):
+            m_data = t_data[t_data['muscle'] == muscle]
+
+            for col, metric in enumerate(key_metrics):
+                ax = axes[row, col]
+
+                for comp, color, label in [
+                    ('Pre_vs_PostCON', '#2563eb', 'CON'),
+                    ('Pre_vs_PostEXZ', '#dc2626', 'EXZ'),
+                ]:
+                    c_data = m_data[m_data['comparison'] == comp]
+                    if c_data.empty:
+                        continue
+
+                    pre_vals = c_data[f'pre_{metric}'].values
+                    post_vals = c_data[f'post_{metric}'].values
+
+                    # Individual MU lines (thin, transparent)
+                    for i in range(len(pre_vals)):
+                        ax.plot([0, 1], [pre_vals[i], post_vals[i]],
+                                color=color, alpha=0.25, linewidth=0.8)
+
+                    # Group mean +/- SEM (bold)
+                    pre_mean, post_mean = np.mean(pre_vals), np.mean(post_vals)
+                    pre_sem = np.std(pre_vals) / np.sqrt(len(pre_vals))
+                    post_sem = np.std(post_vals) / np.sqrt(len(post_vals))
+
+                    offset = -0.05 if comp == 'Pre_vs_PostCON' else 0.05
+                    ax.errorbar([0 + offset, 1 + offset], [pre_mean, post_mean],
+                                yerr=[pre_sem, post_sem],
+                                fmt='-o', color=color, linewidth=2.5, markersize=8,
+                                capsize=5, capthick=2, label=f'{label} (n={len(c_data)})',
+                                zorder=5)
+
+                ax.set_xticks([0, 1])
+                ax.set_xticklabels(['Pre', 'Post'])
+                if row == 0:
+                    ax.set_title(metric_labels[metric], fontsize=11, fontweight='bold')
+                muscle_short = muscle.replace('Right', '').replace('Left', '')
+                if col == 0:
+                    ax.set_ylabel(f'{muscle_short}\\n{metric_labels[metric]}', fontsize=10)
+                else:
+                    ax.set_ylabel(metric_labels[metric])
+                ax.legend(fontsize=8)
+                ax.grid(alpha=0.3)
+
+        fig.suptitle(f'{tracking} - Tracked MU Changes: Individual + Mean\\u00b1SEM',
+                     fontsize=14, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        plt.savefig(WORKFOLDER / f'fig_paired_spaghetti_{tracking.lower()}.png',
+                    dpi=150, bbox_inches='tight')
+        plt.show()
+        print(f"Saved: fig_paired_spaghetti_{tracking.lower()}.png")'''
+    })
+
+    # Paired Delta Comparison with Stats (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Figure 8: Paired Delta CON vs EXZ (Mean +/- SEM, with p-values)
+# ============================================================
+if len(df_paired) > 0:
+    key_metrics = ['mean_dr', 'peak_dr', 'rt_pct', 'cov_isi']
+    metric_labels = {
+        'mean_dr': '\\u0394 Mean DR (pps)',
+        'peak_dr': '\\u0394 Peak DR (pps)',
+        'rt_pct': '\\u0394 RT (%REF)',
+        'cov_isi': '\\u0394 CoV ISI (%)',
+    }
+
+    for tracking in sorted(df_paired['tracking_type'].unique()):
+        t_data = df_paired[df_paired['tracking_type'] == tracking]
+        if t_data.empty:
+            continue
+
+        fig, axes = plt.subplots(1, len(key_metrics), figsize=(4 * len(key_metrics), 5))
+        if len(key_metrics) == 1:
+            axes = [axes]
+
+        for ax, metric in zip(axes, key_metrics):
+            x_pos = 0
+            xticks, xlabels = [], []
+
+            for muscle in sorted(t_data['muscle'].unique()):
+                m_data = t_data[t_data['muscle'] == muscle]
+                muscle_short = muscle.replace('Right', '').replace('Left', '')
+
+                for comp, color, label in [
+                    ('Pre_vs_PostCON', '#2563eb', 'CON'),
+                    ('Pre_vs_PostEXZ', '#dc2626', 'EXZ'),
+                ]:
+                    deltas = m_data[m_data['comparison'] == comp][f'delta_{metric}'].dropna()
+                    if len(deltas) == 0:
+                        continue
+
+                    mean_val = deltas.mean()
+                    sem_val = deltas.sem()
+
+                    ax.bar(x_pos, mean_val, yerr=sem_val, color=color, alpha=0.7,
+                           edgecolor='black', linewidth=0.5, capsize=4, width=0.7)
+
+                    # Add individual data points
+                    jitter = np.random.normal(0, 0.08, len(deltas))
+                    ax.scatter(np.full(len(deltas), x_pos) + jitter, deltas.values,
+                              color=color, alpha=0.4, s=15, edgecolors='none', zorder=3)
+
+                    # Add p-value annotation
+                    pre_vals = m_data[m_data['comparison'] == comp][f'pre_{metric}'].dropna()
+                    post_vals = m_data[m_data['comparison'] == comp][f'post_{metric}'].dropna()
+                    if len(pre_vals) >= 3:
+                        n = min(len(pre_vals), len(post_vals))
+                        _, p = stats.ttest_rel(pre_vals.iloc[:n], post_vals.iloc[:n])
+                        sig = '***' if p < 0.001 else ('**' if p < 0.01 else ('*' if p < 0.05 else 'ns'))
+                        y_offset = sem_val + abs(mean_val) * 0.1 + 0.2
+                        y_pos = mean_val + y_offset if mean_val >= 0 else mean_val - y_offset
+                        ax.text(x_pos, y_pos, sig, ha='center', va='bottom' if mean_val >= 0 else 'top',
+                                fontsize=9, fontweight='bold')
+
+                    xticks.append(x_pos)
+                    xlabels.append(f'{muscle_short}\\n{label} (n={len(deltas)})')
+                    x_pos += 1
+                x_pos += 0.5  # gap between muscles
+
+            ax.set_xticks(xticks)
+            ax.set_xticklabels(xlabels, fontsize=8)
+            ax.axhline(0, color='black', linewidth=0.8)
+            ax.set_ylabel(metric_labels[metric], fontsize=10)
+            ax.grid(axis='y', alpha=0.3)
+
+        fig.suptitle(f'{tracking} - Paired \\u0394 CON vs EXZ (Mean\\u00b1SEM, Tracked MUs)',
+                     fontsize=13, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        plt.savefig(WORKFOLDER / f'fig_paired_delta_{tracking.lower()}.png',
+                    dpi=150, bbox_inches='tight')
+        plt.show()
+        print(f"Saved: fig_paired_delta_{tracking.lower()}.png")
+
+    # Export paired data
+    paired_csv = WORKFOLDER / 'mu_paired_tracking.csv'
+    df_paired.to_csv(paired_csv, index=False)
+    print(f"\\nExported: {paired_csv.name}")'''
     })
 
     # Section Header - Custom Analysis (Markdown)
