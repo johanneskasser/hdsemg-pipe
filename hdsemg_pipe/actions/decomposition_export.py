@@ -819,7 +819,7 @@ def concatenate_emgfiles(emgfile_list):
 
     logger.info(f"Concatenated {len(emgfile_list)} emgfiles: {merged['NUMBER_OF_MUS']} total MUs")
 
-    emg_tools.sort_mus(merged)
+    merged = emg_tools.sort_mus(merged)
 
     return merged
 
