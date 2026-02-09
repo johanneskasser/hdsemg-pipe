@@ -693,8 +693,9 @@ class ProtocolParser:
         condition = block_info['condition']
 
         # Determine tracking type from file_base
+        # Filenames use 'Trap' (short) or 'Trapezoid' (full) for trapezoid tracking
         tracking_type = 'Other'
-        if 'Trapezoid' in file_base:
+        if 'Trap' in file_base:
             tracking_type = 'Trapezoid'
         elif 'Pyramid' in file_base:
             tracking_type = 'Pyramid'
@@ -819,11 +820,11 @@ def get_notebook_cells(workfolder: str) -> List[Dict]:
 This notebook provides a starting point for analyzing the cleaned motor unit data from your processing pipeline.
 
 ## Contents
-1. Setup & Data Loading
-2. Pipeline Summary
-3. Protocol & Condition Grouping
-4. Motor Unit Visualizations
-5. Motor Unit Analysis
+1. Data Loading
+2. Protocol & Condition Grouping
+3. Motor Unit Visualizations
+4. Motor Unit Analysis
+5. Condition Comparison (CON vs EXZ)
 6. Custom Analysis (template)
 7. Export Results'''
     })
@@ -1262,10 +1263,506 @@ if post_report:
     print("Post-Validation: Quality verified after MUedit cleaning")'''
     })
 
-    # Cell 17: Section Header - Custom Analysis (Markdown)
+    # ================================================================
+    # CONDITION COMPARISON CELLS (CON vs EXZ)
+    # ================================================================
+
+    # Condition Comparison Header (Markdown)
     cells.append({
         'cell_type': 'markdown',
-        'source': '''## 5. Custom Analysis Section
+        'source': '''## 5. Condition Comparison: CON vs EXZ
+
+Analyse der Effekte akuter konzentrischer und exzentrischer Trainingsinterventionen
+auf Motor Unit Eigenschaften.
+
+### Analysierte MU-Parameter:
+| Parameter | Beschreibung |
+|---|---|
+| **MU Yield** | Anzahl identifizierter Motor Units |
+| **Mean Discharge Rate (DR)** | Mittlere Entladungsrate (pps) |
+| **Peak Discharge Rate** | Maximale Entladungsrate (pps) |
+| **Recruitment Threshold (RT)** | Kraft bei Erst-Rekrutierung (%REF) |
+| **Derecruitment Threshold (DRT)** | Kraft bei Derekrutierung (%REF) |
+| **DR at Recruitment** | Entladungsrate bei Rekrutierung (pps) |
+| **DR at Derecruitment** | Entladungsrate bei Derekrutierung (pps) |
+| **CoV ISI** | Variationskoeffizient der Interspike-Intervalle (%) |
+| **SIL (Accuracy)** | Silhouette-Wert (Dekompositionsqualit\u00e4t) |'''
+    })
+
+    # Extract MU Properties into DataFrame (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Extract MU properties from all conditions into a DataFrame
+# ============================================================
+
+CONDITION_ORDER = ['Baseline', 'Pre_Intervention', 'Post_CON', 'Post_EXZ', 'Post_Washout', 'Final']
+
+mu_records = []
+
+if condition_result and OPENHDEMG_AVAILABLE:
+    for cond_name, cond_data in condition_result['conditions'].items():
+        block = cond_data.get('block', '')
+        training_mode = cond_data.get('training_mode')
+
+        for tracking_type, groups in cond_data['tracking_types'].items():
+            for group in groups:
+                emgfile = group.get('concatenated')
+                if emgfile is None:
+                    continue
+
+                fsamp = emgfile['FSAMP']
+                n_mus = emgfile['NUMBER_OF_MUS']
+                ref_signal = emgfile['REF_SIGNAL'].values.flatten()
+                ref_max = ref_signal.max() if ref_signal.max() > 0 else 1.0
+
+                # SIL / Accuracy values
+                sil_values = None
+                if 'ACCURACY' in emgfile and emgfile['ACCURACY'] is not None:
+                    sil_values = emgfile['ACCURACY'].values.flatten()
+
+                for mu_idx in range(n_mus):
+                    mupulses = emgfile['MUPULSES'][mu_idx]
+                    if len(mupulses) < 4:
+                        continue
+
+                    spikes = np.array(mupulses)
+
+                    # ISI and firing rates
+                    isi = np.diff(spikes) / fsamp  # seconds
+                    isi = isi[isi > 0.01]  # remove artifacts < 10ms
+                    if len(isi) < 2:
+                        continue
+                    inst_dr = 1.0 / isi  # pps
+
+                    mean_dr = np.mean(inst_dr)
+                    peak_dr = np.max(inst_dr)
+                    cov_isi = (np.std(isi) / np.mean(isi)) * 100  # %
+
+                    # Recruitment & derecruitment
+                    first_spike = spikes[0]
+                    last_spike = spikes[-1]
+                    rt = (ref_signal[first_spike] / ref_max) * 100 if first_spike < len(ref_signal) else np.nan
+                    drt = (ref_signal[last_spike] / ref_max) * 100 if last_spike < len(ref_signal) else np.nan
+
+                    # DR at recruitment (first 5 ISIs) and derecruitment (last 5 ISIs)
+                    dr_at_rec = np.mean(inst_dr[:min(5, len(inst_dr))])
+                    dr_at_derec = np.mean(inst_dr[max(0, len(inst_dr)-5):])
+
+                    # SIL
+                    sil = sil_values[mu_idx] if sil_values is not None and mu_idx < len(sil_values) else np.nan
+
+                    mu_records.append({
+                        'condition': cond_name,
+                        'block': block,
+                        'training_mode': training_mode if training_mode else 'None',
+                        'tracking_type': tracking_type,
+                        'muscle': group.get('muscle', 'Unknown'),
+                        'group_name': group['name'],
+                        'mu_idx': mu_idx,
+                        'n_spikes': len(spikes),
+                        'mean_dr': mean_dr,
+                        'peak_dr': peak_dr,
+                        'cov_isi': cov_isi,
+                        'rt_pct': rt,
+                        'drt_pct': drt,
+                        'dr_at_rec': dr_at_rec,
+                        'dr_at_derec': dr_at_derec,
+                        'sil': sil,
+                    })
+
+    df_mu = pd.DataFrame(mu_records)
+    # Set condition as ordered categorical for correct plot ordering
+    df_mu['condition'] = pd.Categorical(df_mu['condition'], categories=CONDITION_ORDER, ordered=True)
+    df_mu = df_mu.sort_values('condition')
+
+    print(f"Extracted {len(df_mu)} motor units across {df_mu['condition'].nunique()} conditions")
+    print(f"Muscles: {df_mu['muscle'].unique().tolist()}")
+    print(f"Tracking types: {df_mu['tracking_type'].unique().tolist()}")
+    print()
+    print(df_mu.groupby(['condition', 'tracking_type', 'muscle']).agg(
+        n_MUs=('mu_idx', 'count'),
+        mean_DR=('mean_dr', 'mean'),
+        mean_RT=('rt_pct', 'mean'),
+    ).round(2))
+else:
+    df_mu = pd.DataFrame()
+    print("No condition data available")'''
+    })
+
+    # MU Yield across conditions (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Figure 1: Motor Unit Yield across Conditions
+# ============================================================
+if len(df_mu) > 0:
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
+
+    for ax, tracking in zip(axes, ['Trapezoid', 'Pyramid']):
+        subset = df_mu[df_mu['tracking_type'] == tracking]
+        if subset.empty:
+            ax.set_title(f'{tracking} (no data)')
+            continue
+
+        # Count MUs per condition and muscle
+        counts = subset.groupby(['condition', 'muscle']).size().unstack(fill_value=0)
+
+        counts.plot(kind='bar', ax=ax, width=0.7, edgecolor='black', linewidth=0.5)
+        ax.set_title(f'{tracking} Tracking', fontsize=13, fontweight='bold')
+        ax.set_xlabel('')
+        ax.set_ylabel('Number of Motor Units')
+        ax.tick_params(axis='x', rotation=35)
+        ax.legend(title='Muscle', fontsize=8)
+        ax.grid(axis='y', alpha=0.3)
+
+        # Highlight CON/EXZ blocks
+        for i, label in enumerate(ax.get_xticklabels()):
+            txt = label.get_text()
+            if 'Post_CON' in txt:
+                label.set_color('#2563eb')
+                label.set_fontweight('bold')
+            elif 'Post_EXZ' in txt:
+                label.set_color('#dc2626')
+                label.set_fontweight('bold')
+
+    fig.suptitle('Motor Unit Yield per Condition', fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.savefig(WORKFOLDER / 'fig_mu_yield_conditions.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("Saved: fig_mu_yield_conditions.png")'''
+    })
+
+    # Mean Discharge Rate comparison (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Figure 2: Mean Discharge Rate across Conditions (Boxplot)
+# ============================================================
+if len(df_mu) > 0:
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
+
+    for ax, tracking in zip(axes, ['Trapezoid', 'Pyramid']):
+        subset = df_mu[df_mu['tracking_type'] == tracking]
+        if subset.empty:
+            ax.set_title(f'{tracking} (no data)')
+            continue
+
+        # Boxplot: one box per condition, colored by muscle
+        muscles = subset['muscle'].unique()
+        conditions = [c for c in CONDITION_ORDER if c in subset['condition'].values]
+        n_conds = len(conditions)
+        width = 0.35
+        x = np.arange(n_conds)
+
+        for j, muscle in enumerate(muscles):
+            muscle_data = subset[subset['muscle'] == muscle]
+            bp_data = [muscle_data[muscle_data['condition'] == c]['mean_dr'].dropna().values
+                       for c in conditions]
+            positions = x + (j - 0.5 * (len(muscles) - 1)) * width
+            bp = ax.boxplot(bp_data, positions=positions, widths=width * 0.85,
+                           patch_artist=True, showfliers=True, medianprops=dict(color='black'))
+            color = '#3b82f6' if j == 0 else '#f97316'
+            for patch in bp['boxes']:
+                patch.set_facecolor(color)
+                patch.set_alpha(0.6)
+            # Legend proxy
+            ax.plot([], [], 's', color=color, alpha=0.6, markersize=10, label=muscle)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(conditions, rotation=35, ha='right')
+        ax.set_title(f'{tracking} Tracking', fontsize=13, fontweight='bold')
+        ax.set_ylabel('Mean Discharge Rate (pps)')
+        ax.legend(title='Muscle', fontsize=8)
+        ax.grid(axis='y', alpha=0.3)
+
+    fig.suptitle('Mean Discharge Rate across Conditions', fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.savefig(WORKFOLDER / 'fig_mean_dr_conditions.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("Saved: fig_mean_dr_conditions.png")'''
+    })
+
+    # Recruitment Threshold comparison (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Figure 3: Recruitment Threshold across Conditions (Boxplot)
+# ============================================================
+if len(df_mu) > 0:
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
+
+    for ax, tracking in zip(axes, ['Trapezoid', 'Pyramid']):
+        subset = df_mu[df_mu['tracking_type'] == tracking]
+        if subset.empty:
+            ax.set_title(f'{tracking} (no data)')
+            continue
+
+        muscles = subset['muscle'].unique()
+        conditions = [c for c in CONDITION_ORDER if c in subset['condition'].values]
+        n_conds = len(conditions)
+        width = 0.35
+        x = np.arange(n_conds)
+
+        for j, muscle in enumerate(muscles):
+            muscle_data = subset[subset['muscle'] == muscle]
+            bp_data = [muscle_data[muscle_data['condition'] == c]['rt_pct'].dropna().values
+                       for c in conditions]
+            positions = x + (j - 0.5 * (len(muscles) - 1)) * width
+            bp = ax.boxplot(bp_data, positions=positions, widths=width * 0.85,
+                           patch_artist=True, showfliers=True, medianprops=dict(color='black'))
+            color = '#3b82f6' if j == 0 else '#f97316'
+            for patch in bp['boxes']:
+                patch.set_facecolor(color)
+                patch.set_alpha(0.6)
+            ax.plot([], [], 's', color=color, alpha=0.6, markersize=10, label=muscle)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(conditions, rotation=35, ha='right')
+        ax.set_title(f'{tracking} Tracking', fontsize=13, fontweight='bold')
+        ax.set_ylabel('Recruitment Threshold (%REF)')
+        ax.legend(title='Muscle', fontsize=8)
+        ax.grid(axis='y', alpha=0.3)
+
+    fig.suptitle('Recruitment Threshold across Conditions', fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.savefig(WORKFOLDER / 'fig_rt_conditions.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("Saved: fig_rt_conditions.png")'''
+    })
+
+    # Timeline / Line Plot for all metrics (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Figure 4: Timeline Plot - MU Properties across Blocks
+# ============================================================
+if len(df_mu) > 0:
+    metrics = {
+        'mean_dr': ('Mean Discharge Rate (pps)', '#2563eb'),
+        'peak_dr': ('Peak Discharge Rate (pps)', '#7c3aed'),
+        'rt_pct': ('Recruitment Threshold (%REF)', '#059669'),
+        'drt_pct': ('Derecruitment Threshold (%REF)', '#d97706'),
+    }
+
+    for tracking in ['Trapezoid', 'Pyramid']:
+        subset = df_mu[df_mu['tracking_type'] == tracking]
+        if subset.empty:
+            continue
+
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+        for ax, (metric, (label, color)) in zip(axes.flat, metrics.items()):
+            for muscle in subset['muscle'].unique():
+                m_data = subset[subset['muscle'] == muscle]
+                conditions = [c for c in CONDITION_ORDER if c in m_data['condition'].values]
+
+                means = [m_data[m_data['condition'] == c][metric].mean() for c in conditions]
+                sems = [m_data[m_data['condition'] == c][metric].sem() for c in conditions]
+
+                style = '-o' if 'Lateralis' in muscle else '-s'
+                ax.errorbar(range(len(conditions)), means, yerr=sems, fmt=style,
+                           capsize=4, capthick=1.5, linewidth=2, markersize=7,
+                           label=muscle, alpha=0.85)
+
+            ax.set_xticks(range(len(conditions)))
+            ax.set_xticklabels(conditions, rotation=35, ha='right', fontsize=9)
+            ax.set_ylabel(label, fontsize=10)
+            ax.legend(fontsize=8)
+            ax.grid(alpha=0.3)
+
+            # Shade training periods
+            for i, c in enumerate(conditions):
+                if 'Post_CON' in c:
+                    ax.axvspan(i - 0.4, i + 0.4, alpha=0.08, color='blue')
+                elif 'Post_EXZ' in c:
+                    ax.axvspan(i - 0.4, i + 0.4, alpha=0.08, color='red')
+
+        fig.suptitle(f'{tracking} Tracking - MU Properties Timeline (Mean \\u00b1 SEM)',
+                     fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        plt.savefig(WORKFOLDER / f'fig_timeline_{tracking.lower()}.png', dpi=150, bbox_inches='tight')
+        plt.show()
+        print(f"Saved: fig_timeline_{tracking.lower()}.png")'''
+    })
+
+    # RT vs DR Scatter (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Figure 5: Recruitment Threshold vs Discharge Rate (Onion Skin)
+# ============================================================
+if len(df_mu) > 0:
+    focus_conditions = ['Pre_Intervention', 'Post_CON', 'Post_EXZ']
+    cond_colors = {'Pre_Intervention': '#6b7280', 'Post_CON': '#2563eb', 'Post_EXZ': '#dc2626'}
+    cond_markers = {'Pre_Intervention': 'o', 'Post_CON': 's', 'Post_EXZ': '^'}
+
+    for tracking in ['Trapezoid', 'Pyramid']:
+        subset = df_mu[(df_mu['tracking_type'] == tracking) &
+                       (df_mu['condition'].isin(focus_conditions))]
+        if subset.empty:
+            continue
+
+        muscles = subset['muscle'].unique()
+        fig, axes = plt.subplots(1, len(muscles), figsize=(7 * len(muscles), 6), squeeze=False)
+
+        for ax, muscle in zip(axes[0], muscles):
+            m_data = subset[subset['muscle'] == muscle]
+
+            for cond in focus_conditions:
+                c_data = m_data[m_data['condition'] == cond]
+                if c_data.empty:
+                    continue
+                ax.scatter(c_data['rt_pct'], c_data['mean_dr'],
+                          c=cond_colors[cond], marker=cond_markers[cond],
+                          s=60, alpha=0.7, edgecolors='black', linewidth=0.5,
+                          label=cond)
+
+            ax.set_xlabel('Recruitment Threshold (%REF)', fontsize=11)
+            ax.set_ylabel('Mean Discharge Rate (pps)', fontsize=11)
+            ax.set_title(f'{muscle}', fontsize=12, fontweight='bold')
+            ax.legend(fontsize=9)
+            ax.grid(alpha=0.3)
+
+        fig.suptitle(f'{tracking} - RT vs DR (Onion Skin Pattern)',
+                     fontsize=14, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        plt.savefig(WORKFOLDER / f'fig_rt_vs_dr_{tracking.lower()}.png', dpi=150, bbox_inches='tight')
+        plt.show()
+        print(f"Saved: fig_rt_vs_dr_{tracking.lower()}.png")'''
+    })
+
+    # Summary statistics table (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Table: Summary Statistics per Condition
+# ============================================================
+if len(df_mu) > 0:
+    summary_cols = ['mean_dr', 'peak_dr', 'rt_pct', 'drt_pct', 'dr_at_rec', 'dr_at_derec', 'cov_isi', 'sil']
+    col_labels = {
+        'mean_dr': 'Mean DR (pps)',
+        'peak_dr': 'Peak DR (pps)',
+        'rt_pct': 'RT (%REF)',
+        'drt_pct': 'DRT (%REF)',
+        'dr_at_rec': 'DR@Rec (pps)',
+        'dr_at_derec': 'DR@Derec (pps)',
+        'cov_isi': 'CoV ISI (%)',
+        'sil': 'SIL',
+    }
+
+    for tracking in ['Trapezoid', 'Pyramid']:
+        subset = df_mu[df_mu['tracking_type'] == tracking]
+        if subset.empty:
+            continue
+
+        print(f"\\n{'='*80}")
+        print(f"  {tracking} Tracking - Summary Statistics (Mean \\u00b1 SD)")
+        print(f"{'='*80}")
+
+        for muscle in sorted(subset['muscle'].unique()):
+            m_data = subset[subset['muscle'] == muscle]
+            print(f"\\n  {muscle}:")
+            print(f"  {'Condition':<20s} {'n':>4s}", end='')
+            for col in summary_cols:
+                print(f"  {col_labels[col]:>14s}", end='')
+            print()
+            print(f"  {'-'*20} {'-'*4}", end='')
+            for _ in summary_cols:
+                print(f"  {'-'*14}", end='')
+            print()
+
+            for cond in CONDITION_ORDER:
+                c_data = m_data[m_data['condition'] == cond]
+                if c_data.empty:
+                    continue
+                n = len(c_data)
+                marker = ' *' if cond in ['Post_CON', 'Post_EXZ'] else '  '
+                print(f"{marker}{cond:<20s} {n:>4d}", end='')
+                for col in summary_cols:
+                    vals = c_data[col].dropna()
+                    if len(vals) > 0:
+                        print(f"  {vals.mean():>6.1f}\\u00b1{vals.std():>5.1f}", end='')
+                    else:
+                        print(f"  {'N/A':>14s}", end='')
+                print()
+
+    # Export full DataFrame to CSV
+    csv_path = WORKFOLDER / 'mu_properties_by_condition.csv'
+    df_mu.to_csv(csv_path, index=False)
+    print(f"\\nExported: {csv_path.name}")'''
+    })
+
+    # CON vs EXZ direct comparison (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Figure 6: Direct CON vs EXZ Comparison (Pre -> Post delta)
+# ============================================================
+if len(df_mu) > 0:
+    # Calculate condition means per muscle/tracking for Pre vs Post comparisons
+    key_metrics = ['mean_dr', 'peak_dr', 'rt_pct', 'cov_isi']
+    metric_labels = {
+        'mean_dr': '\\u0394 Mean DR (pps)',
+        'peak_dr': '\\u0394 Peak DR (pps)',
+        'rt_pct': '\\u0394 RT (%REF)',
+        'cov_isi': '\\u0394 CoV ISI (%)',
+    }
+
+    for tracking in ['Trapezoid', 'Pyramid']:
+        subset = df_mu[df_mu['tracking_type'] == tracking]
+        if subset.empty:
+            continue
+
+        fig, axes = plt.subplots(1, len(key_metrics), figsize=(4 * len(key_metrics), 5))
+
+        for ax, metric in zip(axes, key_metrics):
+            bars_data = []
+            bar_labels = []
+            bar_colors = []
+
+            for muscle in sorted(subset['muscle'].unique()):
+                m_data = subset[subset['muscle'] == muscle]
+                pre = m_data[m_data['condition'] == 'Pre_Intervention'][metric].dropna()
+                post_con = m_data[m_data['condition'] == 'Post_CON'][metric].dropna()
+                post_exz = m_data[m_data['condition'] == 'Post_EXZ'][metric].dropna()
+
+                pre_mean = pre.mean() if len(pre) > 0 else np.nan
+                muscle_short = muscle.replace('Right', '').replace('Left', '')
+
+                if len(post_con) > 0 and not np.isnan(pre_mean):
+                    delta_con = post_con.mean() - pre_mean
+                    bars_data.append(delta_con)
+                    bar_labels.append(f'{muscle_short}\\nCON')
+                    bar_colors.append('#2563eb')
+
+                if len(post_exz) > 0 and not np.isnan(pre_mean):
+                    delta_exz = post_exz.mean() - pre_mean
+                    bars_data.append(delta_exz)
+                    bar_labels.append(f'{muscle_short}\\nEXZ')
+                    bar_colors.append('#dc2626')
+
+            if bars_data:
+                x = np.arange(len(bars_data))
+                ax.bar(x, bars_data, color=bar_colors, alpha=0.7, edgecolor='black', linewidth=0.5)
+                ax.set_xticks(x)
+                ax.set_xticklabels(bar_labels, fontsize=8)
+                ax.axhline(0, color='black', linewidth=0.8, linestyle='-')
+                ax.set_ylabel(metric_labels[metric], fontsize=10)
+                ax.grid(axis='y', alpha=0.3)
+
+        fig.suptitle(f'{tracking} - Change from Pre-Intervention (Post - Pre)',
+                     fontsize=13, fontweight='bold', y=1.02)
+        plt.tight_layout()
+        plt.savefig(WORKFOLDER / f'fig_delta_con_exz_{tracking.lower()}.png', dpi=150, bbox_inches='tight')
+        plt.show()
+        print(f"Saved: fig_delta_con_exz_{tracking.lower()}.png")'''
+    })
+
+    # Section Header - Custom Analysis (Markdown)
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''## 6. Custom Analysis Section
 
 **Template for your own analysis**
 
@@ -1298,7 +1795,7 @@ if len(emgfiles) > 0:
     # Cell 19: Section Header - Export (Markdown)
     cells.append({
         'cell_type': 'markdown',
-        'source': '''## 6. Export Results
+        'source': '''## 7. Export Results
 
 Save your analysis results to files for publication or further processing.'''
     })
