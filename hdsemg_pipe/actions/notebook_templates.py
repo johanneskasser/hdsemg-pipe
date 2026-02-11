@@ -826,10 +826,11 @@ This notebook provides a starting point for analyzing the cleaned motor unit dat
 4. Motor Unit Analysis
 5. Condition Comparison (CON vs EXZ)
    - 5.1 MU Tracking across Conditions
-   - 5.2 Unpaired MU Property Overview
-   - 5.3 Paired Statistical Analysis
-6. Custom Analysis (template)
-7. Export Results'''
+   - 5.2 Unpaired MU Property Overview (+ Plateau Selection)
+   - 5.3 Paired Statistical Analysis (+ Washout Check)
+6. PIC Analysis (Pyramids - Delta F Method)
+7. Custom Analysis (template)
+8. Export Results'''
     })
 
     # Cell 2: Setup & Imports (Code)
@@ -2105,6 +2106,196 @@ if len(df_mu) > 0:
     })
 
     # ----------------------------------------------------------------
+    # PLATEAU SELECTION FOR TRAPEZOID DR ANALYSIS
+    # ----------------------------------------------------------------
+
+    # Plateau Selection Header (Markdown)
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''#### 5.2.1 Plateau Selection for Trapezoid Trials
+
+**Wichtig für DR-Analyse:** Bei Trapezoid-Aufgaben sollte die Discharge Rate nur aus dem
+**Plateau-Bereich** berechnet werden, nicht aus dem gesamten Signal.
+
+Diese Zelle ermöglicht die manuelle Auswahl des Plateau-Bereichs für jede Trapezoid-Datei.
+Die DR wird dann nur für Spikes innerhalb dieses Zeitfensters neu berechnet.
+
+**Workflow:**
+1. Interaktive Auswahl des Plateau-Bereichs (klicke Start + Ende)
+2. Neuberechnung der DR nur für Plateau-Spikes
+3. Speicherung der Plateau-Bereiche für spätere Verwendung'''
+    })
+
+    # Plateau Selection Function (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Plateau Selection for Trapezoid Trials
+# ============================================================
+
+def select_plateau_interactive(emgfile, title="Trapezoid Plateau Selection"):
+    """
+    Interactive plateau region selection for trapezoid trials.
+
+    Returns:
+        plateau_start_idx (int): Start index of plateau
+        plateau_end_idx (int): End index of plateau
+    """
+    ref_signal = emgfile['REF_SIGNAL'].values.flatten()
+    fsamp = emgfile['FSAMP']
+    time = np.arange(len(ref_signal)) / fsamp
+
+    fig, ax = plt.subplots(figsize=(15, 5))
+    ax.plot(time, ref_signal, 'b-', linewidth=1.0)
+    ax.set_xlabel('Time (s)', fontsize=12)
+    ax.set_ylabel('Reference Signal (Force)', fontsize=12)
+    ax.set_title(f'{title}\\n\\nKlicke ZWEI Punkte: Start und Ende des Plateaus',
+                 fontsize=13, fontweight='bold')
+    ax.grid(alpha=0.4)
+    ax.axhline(ref_signal.max() * 0.9, color='gray', linestyle='--', alpha=0.5,
+               label='90% max')
+    ax.legend()
+    plt.tight_layout()
+
+    print("\\n" + "="*60)
+    print("INTERAKTIVE AUSWAHL:")
+    print("  1. Klicke auf den START des Plateaus")
+    print("  2. Klicke auf das ENDE des Plateaus")
+    print("="*60)
+
+    try:
+        points = plt.ginput(2, timeout=0)
+        if len(points) == 2:
+            t_start, t_end = sorted([p[0] for p in points])
+            idx_start = int(t_start * fsamp)
+            idx_end = int(t_end * fsamp)
+
+            # Visualize selection
+            ax.axvspan(t_start, t_end, alpha=0.3, color='green', label='Plateau')
+            ax.legend()
+            plt.draw()
+            plt.pause(0.5)
+
+            print(f"\\n✓ Plateau ausgewählt: {t_start:.2f}s - {t_end:.2f}s")
+            print(f"  Indices: {idx_start} - {idx_end}")
+            print(f"  Duration: {t_end - t_start:.2f}s")
+
+            plt.close()
+            return idx_start, idx_end
+        else:
+            print("⚠ Fehler: Es wurden nicht 2 Punkte ausgewählt")
+            plt.close()
+            return None, None
+    except Exception as e:
+        print(f"⚠ Fehler bei Auswahl: {e}")
+        plt.close()
+        return None, None
+
+
+def recalculate_dr_plateau(emgfile, plateau_start, plateau_end):
+    """
+    Recalculate MU properties using only spikes within plateau region.
+
+    Returns:
+        dict with keys: 'mean_dr', 'peak_dr', 'cov_isi' for each MU
+    """
+    fsamp = emgfile['FSAMP']
+    n_mus = emgfile['NUMBER_OF_MUS']
+
+    plateau_results = []
+
+    for mu_idx in range(n_mus):
+        mupulses = emgfile['MUPULSES'][mu_idx]
+
+        # Filter spikes within plateau
+        plateau_spikes = [sp for sp in mupulses if plateau_start <= sp <= plateau_end]
+
+        if len(plateau_spikes) < 4:
+            plateau_results.append({
+                'mu_idx': mu_idx,
+                'n_spikes': len(plateau_spikes),
+                'mean_dr': np.nan,
+                'peak_dr': np.nan,
+                'cov_isi': np.nan,
+            })
+            continue
+
+        # Calculate ISI and DR from plateau spikes only
+        spikes = np.array(plateau_spikes)
+        isi = np.diff(spikes) / fsamp
+        isi = isi[isi > 0.01]  # remove artifacts
+
+        if len(isi) < 2:
+            plateau_results.append({
+                'mu_idx': mu_idx,
+                'n_spikes': len(plateau_spikes),
+                'mean_dr': np.nan,
+                'peak_dr': np.nan,
+                'cov_isi': np.nan,
+            })
+            continue
+
+        inst_dr = 1.0 / isi
+
+        plateau_results.append({
+            'mu_idx': mu_idx,
+            'n_spikes': len(plateau_spikes),
+            'mean_dr': np.mean(inst_dr),
+            'peak_dr': np.max(inst_dr),
+            'cov_isi': (np.std(isi) / np.mean(isi)) * 100,
+        })
+
+    return pd.DataFrame(plateau_results)
+
+
+# Example: Select plateau for first trapezoid file
+print("\\nPlateau-Auswahl für Trapezoid-Dateien")
+print("="*60)
+print("\\nHinweis: Dieser Code zeigt ein Beispiel. Du kannst ihn für")
+print("jede Trapezoid-Datei einzeln ausführen und die Ergebnisse speichern.")
+print()
+
+# Storage for plateau regions (filename -> (start, end))
+plateau_regions = {}
+
+# Example: Interactive selection for the first trapezoid file
+# Uncomment and modify to use:
+# if condition_result and OPENHDEMG_AVAILABLE:
+#     # Find first trapezoid file
+#     for cond_name, cond_data in condition_result['conditions'].items():
+#         for tracking_type, groups in cond_data['tracking_types'].items():
+#             if 'Trap' not in tracking_type:
+#                 continue
+#             for group in groups:
+#                 for file_entry in group.get('files', []):
+#                     filename = file_entry['filename']
+#                     emgfile = file_entry['data']
+#
+#                     print(f"\\nDatei: {os.path.basename(filename)}")
+#
+#                     # Interactive selection
+#                     start_idx, end_idx = select_plateau_interactive(
+#                         emgfile,
+#                         title=f"Plateau für {os.path.basename(filename)}"
+#                     )
+#
+#                     if start_idx is not None:
+#                         plateau_regions[filename] = (start_idx, end_idx)
+#
+#                         # Recalculate DR for plateau
+#                         plateau_dr = recalculate_dr_plateau(emgfile, start_idx, end_idx)
+#                         print("\\nPlateau DR results:")
+#                         print(plateau_dr.to_string(index=False))
+#
+#                     break  # Remove to process all files
+#                 break
+#             break
+
+print("\\n💡 Tipp: Aktiviere den Code-Block oben für interaktive Plateau-Auswahl")
+print("   Die ausgewählten Bereiche werden in `plateau_regions` gespeichert")'''
+    })
+
+    # ----------------------------------------------------------------
     # 5.3 PAIRED STATISTICAL ANALYSIS (TRACKED MUs)
     # ----------------------------------------------------------------
 
@@ -2392,10 +2583,373 @@ if len(df_paired) > 0:
     print(f"\\nExported: {paired_csv.name}")'''
     })
 
+    # ----------------------------------------------------------------
+    # WASHOUT VERIFICATION
+    # ----------------------------------------------------------------
+
+    # Washout Check Header (Markdown)
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''#### 5.3.1 Washout Verification
+
+**Prüfung der Washout-Wirksamkeit:** Vergleich der MU-Eigenschaften zwischen
+**Pre_Intervention** (Block2, vor Training 1) und **Post_Washout** (Block4, vor Training 2).
+
+Wenn der Washout erfolgreich war, sollten beide Messzeitpunkte ähnliche Werte aufweisen.
+Signifikante Unterschiede deuten auf unvollständige Erholung hin.'''
+    })
+
+    # Washout Verification Analysis (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Washout Verification: Pre_Intervention vs Post_Washout
+# ============================================================
+
+if len(df_mu) > 0 and 'Pre_Intervention' in df_mu['condition'].values and 'Post_Washout' in df_mu['condition'].values:
+
+    pre_int = df_mu[df_mu['condition'] == 'Pre_Intervention']
+    post_wash = df_mu[df_mu['condition'] == 'Post_Washout']
+
+    print(f"{'='*80}")
+    print(f"  WASHOUT VERIFICATION")
+    print(f"{'='*80}")
+    print(f"\\nPre_Intervention (Block2): n={len(pre_int)} MUs")
+    print(f"Post_Washout (Block4):     n={len(post_wash)} MUs")
+
+    # Statistical comparison
+    metrics = ['mean_dr', 'peak_dr', 'rt_pct', 'drt_pct', 'cov_isi']
+    metric_labels = {
+        'mean_dr': 'Mean DR (pps)',
+        'peak_dr': 'Peak DR (pps)',
+        'rt_pct': 'RT (%REF)',
+        'drt_pct': 'DRT (%REF)',
+        'cov_isi': 'CoV ISI (%)',
+    }
+
+    print(f"\\n{'Metric':<18s} {'Pre_Int':>12s} {'Post_Wash':>12s} {'Diff':>10s} {'t':>7s} {'p':>8s}")
+    print(f"{'-'*18} {'-'*12} {'-'*12} {'-'*10} {'-'*7} {'-'*8}")
+
+    for metric in metrics:
+        pre_vals = pre_int[metric].dropna()
+        post_vals = post_wash[metric].dropna()
+
+        if len(pre_vals) > 0 and len(post_vals) > 0:
+            pre_mean = pre_vals.mean()
+            post_mean = post_vals.mean()
+            diff = post_mean - pre_mean
+
+            # Unpaired t-test (different MUs at each timepoint)
+            t_stat, p_val = stats.ttest_ind(pre_vals, post_vals)
+
+            sig = '**' if p_val < 0.01 else ('*' if p_val < 0.05 else '')
+
+            print(f"{metric_labels[metric]:<18s} {pre_mean:>12.2f} {post_mean:>12.2f} "
+                  f"{diff:>+10.2f} {t_stat:>7.2f} {p_val:>7.4f}{sig}")
+
+    print(f"\\n* p < 0.05, ** p < 0.01")
+    print(f"\\n{'='*80}")
+
+    # Visualization
+    fig, axes = plt.subplots(1, len(metrics), figsize=(4*len(metrics), 5))
+    if len(metrics) == 1:
+        axes = [axes]
+
+    for ax, metric in zip(axes, metrics):
+        data_to_plot = []
+        labels = []
+
+        for tracking in sorted(df_mu['tracking_type'].unique()):
+            for muscle in sorted(df_mu['muscle'].unique()):
+                muscle_short = muscle.replace('Right', '').replace('Left', '')
+
+                pre_data = df_mu[(df_mu['condition'] == 'Pre_Intervention') &
+                                 (df_mu['tracking_type'] == tracking) &
+                                 (df_mu['muscle'] == muscle)][metric].dropna()
+
+                post_data = df_mu[(df_mu['condition'] == 'Post_Washout') &
+                                  (df_mu['tracking_type'] == tracking) &
+                                  (df_mu['muscle'] == muscle)][metric].dropna()
+
+                if len(pre_data) > 0:
+                    data_to_plot.append(pre_data.values)
+                    labels.append(f'{muscle_short}\\n{tracking[:4]}\\nPre')
+
+                if len(post_data) > 0:
+                    data_to_plot.append(post_data.values)
+                    labels.append(f'{muscle_short}\\n{tracking[:4]}\\nWash')
+
+        if data_to_plot:
+            bp = ax.boxplot(data_to_plot, labels=labels, patch_artist=True)
+            for i, patch in enumerate(bp['boxes']):
+                color = '#3b82f6' if 'Pre' in labels[i] else '#10b981'
+                patch.set_facecolor(color)
+                patch.set_alpha(0.6)
+
+            ax.set_ylabel(metric_labels[metric])
+            ax.set_title(metric_labels[metric], fontsize=11, fontweight='bold')
+            ax.tick_params(axis='x', labelsize=8, rotation=45)
+            ax.grid(axis='y', alpha=0.3)
+
+    fig.suptitle('Washout Verification: Pre_Intervention vs Post_Washout',
+                 fontsize=13, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.savefig(WORKFOLDER / 'fig_washout_verification.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("Saved: fig_washout_verification.png")
+
+else:
+    print("Washout verification requires Pre_Intervention and Post_Washout data")'''
+    })
+
+    # ================================================================
+    # SECTION 6: PIC ANALYSIS (PYRAMIDS)
+    # ================================================================
+
+    # PIC Analysis Section Header (Markdown)
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''## 6. PIC Analysis (Persistent Inward Currents)
+
+Analyse von **Persistent Inward Currents (PICs)** aus **Pyramid**-Kontraktionen.
+
+PICs können die neuronale Erregbarkeit verstärken und sind wichtig für die Aufrechterhaltung
+der motorischen Aktivität. Sie werden durch paired motor unit analysis geschätzt.
+
+**Methoden:**
+- **Delta F (ΔF)**: Änderung der Control-MU Firing Rate zwischen Test-MU Rekrutierung und Derekrutierung
+- Basiert auf Gorassini et al. (2002) und Skarabot et al. (2023)
+
+**Voraussetzungen:**
+- Openhdemg library mit PIC-Modul installiert
+- Pyramid-Aufnahmen (langsame Rampen-Kontraktionen)'''
+    })
+
+    # SVR Fitting for Pyramid Trials (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# SVR Fitting: Smooth Discharge Rate Estimates
+# ============================================================
+# Support Vector Regression (SVR) liefert geglättete DR-Schätzungen,
+# die für Delta F-Berechnung benötigt werden.
+
+if not OPENHDEMG_AVAILABLE:
+    print("⚠ openhdemg not available - PIC analysis requires openhdemg")
+else:
+    from openhdemg.library import tools as emg_tools
+    from openhdemg.library import pic as emg_pic
+
+    # Select pyramid files for PIC analysis
+    pyramid_files = []
+
+    if condition_result:
+        for cond_name, cond_data in condition_result['conditions'].items():
+            for tracking_type, groups in cond_data['tracking_types'].items():
+                if 'Pyramid' not in tracking_type:
+                    continue
+                for group in groups:
+                    emgfile = group.get('concatenated')
+                    if emgfile and emgfile['NUMBER_OF_MUS'] >= 2:
+                        pyramid_files.append({
+                            'condition': cond_name,
+                            'muscle': group.get('muscle', 'Unknown'),
+                            'emgfile': emgfile,
+                            'name': group.get('name', 'Unknown'),
+                        })
+
+    print(f"Found {len(pyramid_files)} pyramid files with >= 2 MUs")
+
+    # Compute SVR fits for each pyramid file
+    svr_results = []
+
+    for pf in pyramid_files:
+        emgfile = pf['emgfile']
+        print(f"\\nSVR fitting: {pf['condition']} | {pf['muscle']}")
+        print(f"  MUs: {emgfile['NUMBER_OF_MUS']}")
+
+        try:
+            # Sort MUs by recruitment threshold
+            emgfile_sorted = emg.sort_mus(emgfile=emgfile)
+
+            # Compute SVR smooth fits
+            svrfits = emg_tools.compute_svr(
+                emgfile_sorted,
+                gammain=1/1.6,
+                regparam=1/0.370,
+                endpointweights_numpulses=5,
+                endpointweights_magnitude=5,
+                discontfiring_dur=1.0,
+            )
+
+            svr_results.append({
+                'condition': pf['condition'],
+                'muscle': pf['muscle'],
+                'name': pf['name'],
+                'emgfile': emgfile_sorted,
+                'svrfits': svrfits,
+            })
+
+            print(f"  ✓ SVR fitting successful")
+
+        except Exception as e:
+            print(f"  ✗ SVR fitting failed: {e}")
+
+    print(f"\\n✓ SVR fitting complete: {len(svr_results)} files processed")'''
+    })
+
+    # Delta F Computation (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Delta F Computation
+# ============================================================
+
+deltaf_results = []
+
+if OPENHDEMG_AVAILABLE and len(svr_results) > 0:
+    for svr_res in svr_results:
+        emgfile = svr_res['emgfile']
+        smoothfits = svr_res['svrfits']['gensvr']
+
+        print(f"\\nDelta F: {svr_res['condition']} | {svr_res['muscle']}")
+
+        try:
+            # Compute delta F (test unit average method)
+            delta_f = emg_pic.compute_deltaf(
+                emgfile=emgfile,
+                smoothfits=smoothfits,
+                average_method="test_unit_average",
+                normalisation="False",
+                recruitment_difference_cutoff=1.0,
+                corr_cutoff=0.7,
+                controlunitmodulation_cutoff=0.5,
+                clean=True,
+            )
+
+            # Also compute all MU pairs
+            delta_f_all = emg_pic.compute_deltaf(
+                emgfile=emgfile,
+                smoothfits=smoothfits,
+                average_method="all",
+                normalisation="False",
+                recruitment_difference_cutoff=1.0,
+                corr_cutoff=0.7,
+                controlunitmodulation_cutoff=0.5,
+                clean=True,
+            )
+
+            deltaf_results.append({
+                'condition': svr_res['condition'],
+                'muscle': svr_res['muscle'],
+                'name': svr_res['name'],
+                'delta_f': delta_f,
+                'delta_f_all': delta_f_all,
+                'emgfile': emgfile,
+            })
+
+            # Display results
+            valid_df = delta_f.dropna()
+            print(f"  Valid delta F: {len(valid_df)}/{len(delta_f)} MUs")
+            if len(valid_df) > 0:
+                print(f"  Mean ΔF: {valid_df['dF'].mean():.3f} Hz")
+                print(f"  Range: {valid_df['dF'].min():.3f} - {valid_df['dF'].max():.3f} Hz")
+                print()
+                print(valid_df.to_string(index=False))
+
+        except Exception as e:
+            print(f"  ✗ Delta F computation failed: {e}")
+
+    print(f"\\n✓ Delta F complete: {len(deltaf_results)} files processed")
+else:
+    print("No SVR results available for Delta F computation")'''
+    })
+
+    # Delta F Visualization (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Figure 9: Delta F Results Visualization
+# ============================================================
+
+if len(deltaf_results) > 0:
+    # Collect all delta F values
+    all_df_records = []
+
+    for df_res in deltaf_results:
+        delta_f = df_res['delta_f']
+        for _, row in delta_f.iterrows():
+            if not np.isnan(row['dF']):
+                all_df_records.append({
+                    'condition': df_res['condition'],
+                    'muscle': df_res['muscle'],
+                    'MU': row['MU'],
+                    'dF': row['dF'],
+                })
+
+    df_deltaf = pd.DataFrame(all_df_records)
+
+    if len(df_deltaf) > 0:
+        print(f"\\nDelta F dataset: {len(df_deltaf)} valid MUs")
+
+        # Figure: Delta F by condition and muscle
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+        # Boxplot by condition
+        ax = axes[0]
+        conditions = sorted(df_deltaf['condition'].unique())
+        data_by_cond = [df_deltaf[df_deltaf['condition'] == c]['dF'].values
+                        for c in conditions]
+        bp = ax.boxplot(data_by_cond, labels=conditions, patch_artist=True)
+        for patch in bp['boxes']:
+            patch.set_facecolor('#9333ea')
+            patch.set_alpha(0.6)
+        ax.set_ylabel('Delta F (Hz)', fontsize=12)
+        ax.set_title('Delta F by Condition', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+        ax.tick_params(axis='x', rotation=45)
+
+        # Boxplot by muscle
+        ax = axes[1]
+        muscles = sorted(df_deltaf['muscle'].unique())
+        data_by_muscle = [df_deltaf[df_deltaf['muscle'] == m]['dF'].values
+                          for m in muscles]
+        muscle_labels = [m.replace('Right', '').replace('Left', '') for m in muscles]
+        bp = ax.boxplot(data_by_muscle, labels=muscle_labels, patch_artist=True)
+        for patch in bp['boxes']:
+            patch.set_facecolor('#9333ea')
+            patch.set_alpha(0.6)
+        ax.set_ylabel('Delta F (Hz)', fontsize=12)
+        ax.set_title('Delta F by Muscle', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(WORKFOLDER / 'fig_deltaf_pyramids.png', dpi=150, bbox_inches='tight')
+        plt.show()
+        print("Saved: fig_deltaf_pyramids.png")
+
+        # Export delta F results
+        deltaf_csv = WORKFOLDER / 'mu_deltaf_pyramids.csv'
+        df_deltaf.to_csv(deltaf_csv, index=False)
+        print(f"\\nExported: {deltaf_csv.name}")
+
+        # Summary statistics
+        print(f"\\n{'='*60}")
+        print("Delta F Summary Statistics")
+        print(f"{'='*60}")
+        summary = df_deltaf.groupby(['condition', 'muscle'])['dF'].agg(['count', 'mean', 'std', 'min', 'max'])
+        print(summary.round(3))
+
+    else:
+        print("No valid delta F values to visualize")
+else:
+    print("No delta F results available")'''
+    })
+
     # Section Header - Custom Analysis (Markdown)
     cells.append({
         'cell_type': 'markdown',
-        'source': '''## 6. Custom Analysis Section
+        'source': '''## 7. Custom Analysis Section
 
 **Template for your own analysis**
 
@@ -2428,7 +2982,7 @@ if len(emgfiles) > 0:
     # Cell 19: Section Header - Export (Markdown)
     cells.append({
         'cell_type': 'markdown',
-        'source': '''## 7. Export Results
+        'source': '''## 8. Export Results
 
 Save your analysis results to files for publication or further processing.'''
     })
