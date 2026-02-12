@@ -2117,13 +2117,15 @@ if len(df_mu) > 0:
 **Wichtig für DR-Analyse:** Bei Trapezoid-Aufgaben sollte die Discharge Rate nur aus dem
 **Plateau-Bereich** berechnet werden, nicht aus dem gesamten Signal.
 
-Diese Zelle ermöglicht die manuelle Auswahl des Plateau-Bereichs für jede Trapezoid-Datei.
-Die DR wird dann nur für Spikes innerhalb dieses Zeitfensters neu berechnet.
-
 **Workflow:**
-1. Interaktive Auswahl des Plateau-Bereichs (klicke Start + Ende)
-2. Neuberechnung der DR nur für Plateau-Spikes
-3. Speicherung der Plateau-Bereiche für spätere Verwendung'''
+1. Wähle EINE Trapezoid-Datei als Referenz
+2. Interaktive Auswahl des Plateau-Bereichs (klicke Start + Ende)
+3. **Automatische Anwendung** auf ALLE anderen Trapezoid-Dateien (relative Zeit)
+4. Neuberechnung der DR nur für Plateau-Spikes
+
+**Modi:**
+- `mode='relative'`: Plateau als % der Signaldauer (empfohlen für standardisierte Protokolle)
+- `mode='absolute'`: Plateau als absolute Zeitpunkte in Sekunden'''
     })
 
     # Plateau Selection Function (Code)
@@ -2248,51 +2250,259 @@ def recalculate_dr_plateau(emgfile, plateau_start, plateau_end):
     return pd.DataFrame(plateau_results)
 
 
-# Example: Select plateau for first trapezoid file
+def apply_plateau_to_all_trapezoids(condition_result, reference_file,
+                                      plateau_start_idx, plateau_end_idx,
+                                      mode='relative'):
+    """
+    Apply plateau selection from reference file to ALL trapezoid files.
+
+    Args:
+        condition_result: Dict from create_condition_groups()
+        reference_file: The emgfile dict used for interactive selection
+        plateau_start_idx: Start index from reference file
+        plateau_end_idx: End index from reference file
+        mode: 'relative' (% of signal) or 'absolute' (seconds)
+
+    Returns:
+        dict: {filename: {'start_idx': int, 'end_idx': int, 'dr_results': DataFrame}}
+    """
+    ref_fsamp = reference_file['FSAMP']
+    ref_duration = len(reference_file['REF_SIGNAL']) / ref_fsamp
+
+    # Calculate reference plateau in time
+    ref_start_time = plateau_start_idx / ref_fsamp
+    ref_end_time = plateau_end_idx / ref_fsamp
+
+    if mode == 'relative':
+        # Store as percentage of total duration
+        start_pct = ref_start_time / ref_duration
+        end_pct = ref_end_time / ref_duration
+        print(f"\\n📊 Plateau-Definition (relativ):")
+        print(f"   Start: {start_pct*100:.1f}% der Signaldauer")
+        print(f"   Ende:  {end_pct*100:.1f}% der Signaldauer")
+    else:
+        # Store as absolute time
+        print(f"\\n📊 Plateau-Definition (absolut):")
+        print(f"   Start: {ref_start_time:.2f}s")
+        print(f"   Ende:  {ref_end_time:.2f}s")
+
+    results = {}
+    trapezoid_count = 0
+
+    # Iterate through all conditions and trapezoid files
+    for cond_name, cond_data in condition_result['conditions'].items():
+        for tracking_type, groups in cond_data['tracking_types'].items():
+            # Only process Trapezoid files
+            if 'Trap' not in tracking_type:
+                continue
+
+            for group in groups:
+                for file_entry in group.get('files', []):
+                    filename = file_entry['filename']
+                    emgfile = file_entry['data']
+                    fsamp = emgfile['FSAMP']
+                    signal_duration = len(emgfile['REF_SIGNAL']) / fsamp
+
+                    # Calculate plateau indices for this file
+                    if mode == 'relative':
+                        start_idx = int(start_pct * signal_duration * fsamp)
+                        end_idx = int(end_pct * signal_duration * fsamp)
+                    else:
+                        start_idx = int(ref_start_time * fsamp)
+                        end_idx = int(ref_end_time * fsamp)
+
+                    # Ensure indices are within bounds
+                    start_idx = max(0, start_idx)
+                    end_idx = min(len(emgfile['REF_SIGNAL']), end_idx)
+
+                    # Recalculate DR for this plateau
+                    dr_results = recalculate_dr_plateau(emgfile, start_idx, end_idx)
+
+                    results[filename] = {
+                        'start_idx': start_idx,
+                        'end_idx': end_idx,
+                        'start_time': start_idx / fsamp,
+                        'end_time': end_idx / fsamp,
+                        'duration': (end_idx - start_idx) / fsamp,
+                        'condition': cond_name,
+                        'tracking_type': tracking_type,
+                        'dr_results': dr_results
+                    }
+
+                    trapezoid_count += 1
+
+    print(f"\\n✓ Plateau angewendet auf {trapezoid_count} Trapezoid-Dateien")
+    return results
+
+
+# ============================================================
+# WORKFLOW: Select plateau once, apply to all trapezoids
+# ============================================================
 print("\\nPlateau-Auswahl für Trapezoid-Dateien")
 print("="*60)
-print("\\nHinweis: Dieser Code zeigt ein Beispiel. Du kannst ihn für")
-print("jede Trapezoid-Datei einzeln ausführen und die Ergebnisse speichern.")
+print("\\n💡 Workflow:")
+print("   1. Wähle EINE Trapezoid-Datei als Referenz")
+print("   2. Interaktive Auswahl des Plateaus")
+print("   3. Automatische Anwendung auf ALLE anderen Trapezoid-Dateien")
 print()
 
-# Storage for plateau regions (filename -> (start, end))
-plateau_regions = {}
+# Storage for all plateau results
+plateau_results_all = {}
 
-# Example: Interactive selection for the first trapezoid file
-# Uncomment and modify to use:
+# STEP 1: Select ONE reference trapezoid file and select plateau interactively
+# Uncomment and run to use:
+#
 # if condition_result and OPENHDEMG_AVAILABLE:
-#     # Find first trapezoid file
+#     # Find first trapezoid file as reference
+#     reference_file = None
+#     reference_filename = None
+#
 #     for cond_name, cond_data in condition_result['conditions'].items():
 #         for tracking_type, groups in cond_data['tracking_types'].items():
 #             if 'Trap' not in tracking_type:
 #                 continue
 #             for group in groups:
 #                 for file_entry in group.get('files', []):
-#                     filename = file_entry['filename']
-#                     emgfile = file_entry['data']
-#
-#                     print(f"\\nDatei: {os.path.basename(filename)}")
-#
-#                     # Interactive selection
-#                     start_idx, end_idx = select_plateau_interactive(
-#                         emgfile,
-#                         title=f"Plateau für {os.path.basename(filename)}"
-#                     )
-#
-#                     if start_idx is not None:
-#                         plateau_regions[filename] = (start_idx, end_idx)
-#
-#                         # Recalculate DR for plateau
-#                         plateau_dr = recalculate_dr_plateau(emgfile, start_idx, end_idx)
-#                         print("\\nPlateau DR results:")
-#                         print(plateau_dr.to_string(index=False))
-#
-#                     break  # Remove to process all files
+#                     reference_filename = file_entry['filename']
+#                     reference_file = file_entry['data']
+#                     break
+#                 if reference_file:
+#                     break
+#             if reference_file:
 #                 break
+#         if reference_file:
 #             break
+#
+#     if reference_file:
+#         print(f"\\n📂 Referenz-Datei: {os.path.basename(reference_filename)}")
+#         print(f"   Signal-Dauer: {len(reference_file['REF_SIGNAL']) / reference_file['FSAMP']:.1f}s")
+#
+#         # Interactive plateau selection
+#         start_idx, end_idx = select_plateau_interactive(
+#             reference_file,
+#             title=f"Referenz-Plateau: {os.path.basename(reference_filename)}"
+#         )
+#
+#         if start_idx is not None:
+#             # STEP 2: Apply to ALL trapezoid files
+#             print("\\n🔄 Wende Plateau auf alle Trapezoid-Dateien an...")
+#
+#             plateau_results_all = apply_plateau_to_all_trapezoids(
+#                 condition_result=condition_result,
+#                 reference_file=reference_file,
+#                 plateau_start_idx=start_idx,
+#                 plateau_end_idx=end_idx,
+#                 mode='relative'  # or 'absolute'
+#             )
+#
+#             # Summary
+#             print(f"\\n✅ Plateau-Berechnung abgeschlossen!")
+#             print(f"   {len(plateau_results_all)} Trapezoid-Dateien verarbeitet")
+#
+#             # Show example results
+#             print("\\n📊 Beispiel DR-Ergebnisse (erste Datei):")
+#             example_file = list(plateau_results_all.keys())[0]
+#             example_result = plateau_results_all[example_file]
+#             print(f"\\n   Datei: {os.path.basename(example_file)}")
+#             print(f"   Plateau: {example_result['start_time']:.2f}s - {example_result['end_time']:.2f}s")
+#             print(f"   Dauer: {example_result['duration']:.2f}s")
+#             print("\\n   DR Statistics:")
+#             print(example_result['dr_results'][['mu_idx', 'mean_dr', 'peak_dr', 'cov_isi']].head().to_string(index=False))
+#
+#     else:
+#         print("\\n⚠ Keine Trapezoid-Dateien gefunden")
 
-print("\\n💡 Tipp: Aktiviere den Code-Block oben für interaktive Plateau-Auswahl")
-print("   Die ausgewählten Bereiche werden in `plateau_regions` gespeichert")'''
+print("\\n💡 Tipp: Aktiviere den Code-Block oben für Plateau-Auswahl")
+print("   Das Plateau wird automatisch auf ALLE Trapezoid-Dateien angewendet!")
+print("   Ergebnisse werden in `plateau_results_all` gespeichert")'''
+    })
+
+    # Plateau Results - Visualization and Export
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''#### 5.2.2 Plateau DR - Visualisierung und Export
+
+Verwendung der Plateau-basierten DR-Ergebnisse für weitere Analysen.'''
+    })
+
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Visualize and Export Plateau DR Results
+# ============================================================
+
+if plateau_results_all:
+    print(f"\\n{'='*80}")
+    print(f"  Plateau DR - Zusammenfassung")
+    print(f"{'='*80}")
+
+    # Collect all DR results into a single DataFrame
+    plateau_dr_list = []
+
+    for filename, result in plateau_results_all.items():
+        dr_df = result['dr_results'].copy()
+        dr_df['filename'] = os.path.basename(filename)
+        dr_df['condition'] = result['condition']
+        dr_df['tracking_type'] = result['tracking_type']
+        dr_df['plateau_start'] = result['start_time']
+        dr_df['plateau_end'] = result['end_time']
+        dr_df['plateau_duration'] = result['duration']
+        plateau_dr_list.append(dr_df)
+
+    df_plateau = pd.concat(plateau_dr_list, ignore_index=True)
+
+    print(f"\\n📊 Plateau DR Daten:")
+    print(f"   Total MUs: {len(df_plateau)}")
+    print(f"   Conditions: {df_plateau['condition'].nunique()}")
+    print(f"   Files: {df_plateau['filename'].nunique()}")
+
+    # Summary statistics by condition
+    print(f"\\n📈 Mean DR by Condition (Plateau only):")
+    summary = df_plateau.groupby('condition')['mean_dr'].agg(['count', 'mean', 'std'])
+    print(summary.to_string())
+
+    # Visualization: DR comparison across conditions
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Mean DR by condition
+    ax = axes[0]
+    conditions = sorted(df_plateau['condition'].unique())
+    for cond in conditions:
+        data = df_plateau[df_plateau['condition'] == cond]['mean_dr'].dropna()
+        ax.boxplot([data], positions=[conditions.index(cond)], widths=0.5,
+                   patch_artist=True, showmeans=True)
+    ax.set_xticks(range(len(conditions)))
+    ax.set_xticklabels(conditions, rotation=45, ha='right')
+    ax.set_ylabel('Mean DR (pps)', fontsize=12)
+    ax.set_title('Plateau Mean DR by Condition', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+
+    # Peak DR by condition
+    ax = axes[1]
+    for cond in conditions:
+        data = df_plateau[df_plateau['condition'] == cond]['peak_dr'].dropna()
+        ax.boxplot([data], positions=[conditions.index(cond)], widths=0.5,
+                   patch_artist=True, showmeans=True)
+    ax.set_xticks(range(len(conditions)))
+    ax.set_xticklabels(conditions, rotation=45, ha='right')
+    ax.set_ylabel('Peak DR (pps)', fontsize=12)
+    ax.set_title('Plateau Peak DR by Condition', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(paths.workfolder, 'fig_plateau_dr_comparison.png'),
+                dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"\\n✓ Saved: fig_plateau_dr_comparison.png")
+
+    # Export to CSV
+    output_csv = os.path.join(paths.workfolder, 'mu_plateau_dr_trapezoids.csv')
+    df_plateau.to_csv(output_csv, index=False)
+    print(f"✓ Exported: mu_plateau_dr_trapezoids.csv ({len(df_plateau)} rows)")
+
+else:
+    print("\\n⚠ Keine Plateau-Ergebnisse verfügbar.")
+    print("   Führe die vorherige Zelle aus, um Plateaus zu definieren.")'''
     })
 
     # ----------------------------------------------------------------
@@ -2770,10 +2980,11 @@ else:
 
         try:
             # Sort MUs by recruitment threshold
-            emgfile_sorted = emg.sort_mus(emgfile=emgfile)
+            emgfile_sorted = tools.sort_mus(emgfile=emgfile)
 
             # Compute SVR smooth fits
-            svrfits = emg_tools.compute_svr(
+            svrfits = emg_to
+            ols.compute_svr(
                 emgfile_sorted,
                 gammain=1/1.6,
                 regparam=1/0.370,
