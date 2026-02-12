@@ -795,6 +795,229 @@ class ProtocolParser:
             print(f"Unmatched: {{len(unmatched)}} group(s) could not be assigned to a condition")
             for group in unmatched:
                 print(f"  - {{group.get('name', 'unknown')}}")
+
+
+# ============================================================================
+# PLATEAU SELECTION FOR TRAPEZOID TRIALS
+# ============================================================================
+
+def select_plateau_interactive(emgfile, title="Trapezoid Plateau Selection"):
+    """
+    Interactive plateau region selection for trapezoid trials.
+
+    Requires: matplotlib with interactive backend (widget or notebook)
+    Install: pip install ipympl
+
+    Args:
+        emgfile: openhdemg emgfile dict
+        title: Plot title
+
+    Returns:
+        tuple: (plateau_start_idx, plateau_end_idx) or (None, None) if failed
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    ref_signal = emgfile['REF_SIGNAL'].values.flatten()
+    fsamp = emgfile['FSAMP']
+    time = np.arange(len(ref_signal)) / fsamp
+
+    fig, ax = plt.subplots(figsize=(15, 5))
+    ax.plot(time, ref_signal, 'b-', linewidth=1.0)
+    ax.set_xlabel('Time (s)', fontsize=12)
+    ax.set_ylabel('Reference Signal (Force)', fontsize=12)
+    ax.set_title(f'{{title}}\\n\\nKlicke ZWEI Punkte: Start und Ende des Plateaus',
+                 fontsize=13, fontweight='bold')
+    ax.grid(alpha=0.4)
+    ax.axhline(ref_signal.max() * 0.9, color='gray', linestyle='--', alpha=0.5,
+               label='90% max')
+    ax.legend()
+    plt.tight_layout()
+
+    print("\\n" + "="*60)
+    print("INTERAKTIVE AUSWAHL:")
+    print("  1. Klicke auf den START des Plateaus")
+    print("  2. Klicke auf das ENDE des Plateaus")
+    print("="*60)
+
+    try:
+        points = plt.ginput(2, timeout=0)
+        if len(points) == 2:
+            t_start, t_end = sorted([p[0] for p in points])
+            idx_start = int(t_start * fsamp)
+            idx_end = int(t_end * fsamp)
+
+            # Visualize selection
+            ax.axvspan(t_start, t_end, alpha=0.3, color='green', label='Plateau')
+            ax.legend()
+            plt.draw()
+            plt.pause(0.5)
+
+            print(f"\\n✓ Plateau ausgewählt: {{t_start:.2f}}s - {{t_end:.2f}}s")
+            print(f"  Indices: {{idx_start}} - {{idx_end}}")
+            print(f"  Duration: {{t_end - t_start:.2f}}s")
+
+            plt.close()
+            return idx_start, idx_end
+        else:
+            print("⚠ Fehler: Es wurden nicht 2 Punkte ausgewählt")
+            plt.close()
+            return None, None
+    except Exception as e:
+        print(f"⚠ Fehler bei Auswahl: {{e}}")
+        plt.close()
+        return None, None
+
+
+def recalculate_dr_plateau(emgfile, plateau_start, plateau_end):
+    """
+    Recalculate MU properties using only spikes within plateau region.
+
+    Args:
+        emgfile: openhdemg emgfile dict
+        plateau_start: Start index of plateau
+        plateau_end: End index of plateau
+
+    Returns:
+        DataFrame with columns: mu_idx, n_spikes, mean_dr, peak_dr, cov_isi
+    """
+    import numpy as np
+    import pandas as pd
+
+    fsamp = emgfile['FSAMP']
+    n_mus = emgfile['NUMBER_OF_MUS']
+
+    plateau_results = []
+
+    for mu_idx in range(n_mus):
+        mupulses = emgfile['MUPULSES'][mu_idx]
+
+        # Filter spikes within plateau
+        plateau_spikes = [sp for sp in mupulses if plateau_start <= sp <= plateau_end]
+
+        if len(plateau_spikes) < 4:
+            plateau_results.append({{
+                'mu_idx': mu_idx,
+                'n_spikes': len(plateau_spikes),
+                'mean_dr': np.nan,
+                'peak_dr': np.nan,
+                'cov_isi': np.nan,
+            }})
+            continue
+
+        # Calculate ISI and DR from plateau spikes only
+        spikes = np.array(plateau_spikes)
+        isi = np.diff(spikes) / fsamp
+        isi = isi[isi > 0.01]  # remove artifacts
+
+        if len(isi) < 2:
+            plateau_results.append({{
+                'mu_idx': mu_idx,
+                'n_spikes': len(plateau_spikes),
+                'mean_dr': np.nan,
+                'peak_dr': np.nan,
+                'cov_isi': np.nan,
+            }})
+            continue
+
+        inst_dr = 1.0 / isi
+
+        plateau_results.append({{
+            'mu_idx': mu_idx,
+            'n_spikes': len(plateau_spikes),
+            'mean_dr': np.mean(inst_dr),
+            'peak_dr': np.max(inst_dr),
+            'cov_isi': (np.std(isi) / np.mean(isi)) * 100,
+        }})
+
+    return pd.DataFrame(plateau_results)
+
+
+def apply_plateau_to_all_trapezoids(condition_result, reference_file,
+                                      plateau_start_idx, plateau_end_idx,
+                                      mode='relative'):
+    """
+    Apply plateau selection from reference file to ALL trapezoid files.
+
+    Args:
+        condition_result: Dict from ProtocolParser.create_condition_groups()
+        reference_file: The emgfile dict used for interactive selection
+        plateau_start_idx: Start index from reference file
+        plateau_end_idx: End index from reference file
+        mode: 'relative' (% of signal) or 'absolute' (seconds)
+
+    Returns:
+        dict: {{filename: {{'start_idx': int, 'end_idx': int, 'dr_results': DataFrame}}}}
+    """
+    import numpy as np
+
+    ref_fsamp = reference_file['FSAMP']
+    ref_duration = len(reference_file['REF_SIGNAL']) / ref_fsamp
+
+    # Calculate reference plateau in time
+    ref_start_time = plateau_start_idx / ref_fsamp
+    ref_end_time = plateau_end_idx / ref_fsamp
+
+    if mode == 'relative':
+        # Store as percentage of total duration
+        start_pct = ref_start_time / ref_duration
+        end_pct = ref_end_time / ref_duration
+        print(f"\\n📊 Plateau-Definition (relativ):")
+        print(f"   Start: {{start_pct*100:.1f}}% der Signaldauer")
+        print(f"   Ende:  {{end_pct*100:.1f}}% der Signaldauer")
+    else:
+        # Store as absolute time
+        print(f"\\n📊 Plateau-Definition (absolut):")
+        print(f"   Start: {{ref_start_time:.2f}}s")
+        print(f"   Ende:  {{ref_end_time:.2f}}s")
+
+    results = {{}}
+    trapezoid_count = 0
+
+    # Iterate through all conditions and trapezoid files
+    for cond_name, cond_data in condition_result['conditions'].items():
+        for tracking_type, groups in cond_data['tracking_types'].items():
+            # Only process Trapezoid files
+            if 'Trap' not in tracking_type:
+                continue
+
+            for group in groups:
+                for file_entry in group.get('files', []):
+                    filename = file_entry['filename']
+                    emgfile = file_entry['data']
+                    fsamp = emgfile['FSAMP']
+                    signal_duration = len(emgfile['REF_SIGNAL']) / fsamp
+
+                    # Calculate plateau indices for this file
+                    if mode == 'relative':
+                        start_idx = int(start_pct * signal_duration * fsamp)
+                        end_idx = int(end_pct * signal_duration * fsamp)
+                    else:
+                        start_idx = int(ref_start_time * fsamp)
+                        end_idx = int(ref_end_time * fsamp)
+
+                    # Ensure indices are within bounds
+                    start_idx = max(0, start_idx)
+                    end_idx = min(len(emgfile['REF_SIGNAL']), end_idx)
+
+                    # Recalculate DR for this plateau
+                    dr_results = recalculate_dr_plateau(emgfile, start_idx, end_idx)
+
+                    results[filename] = {{
+                        'start_idx': start_idx,
+                        'end_idx': end_idx,
+                        'start_time': start_idx / fsamp,
+                        'end_time': end_idx / fsamp,
+                        'duration': (end_idx - start_idx) / fsamp,
+                        'condition': cond_name,
+                        'tracking_type': tracking_type,
+                        'dr_results': dr_results
+                    }}
+
+                    trapezoid_count += 1
+
+    print(f"\\n✓ Plateau angewendet auf {{trapezoid_count}} Trapezoid-Dateien")
+    return results
 '''
 
 
@@ -833,7 +1056,18 @@ This notebook provides a starting point for analyzing the cleaned motor unit dat
 8. Export Results'''
     })
 
-    # Cell 2: Setup & Imports (Code)
+    # Cell 2: Install ipympl for interactive plotting (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# Install ipympl for interactive matplotlib backend (required for plateau selection)
+# Run this cell once - if already installed, it will skip
+!pip install ipympl --quiet
+
+print("✓ ipympl installation check complete")
+print("  This enables interactive plotting for plateau selection in trapezoid trials")'''
+    })
+
+    # Cell 3: Setup & Imports (Code)
     cells.append({
         'cell_type': 'code',
         'source': '''# Standard libraries
@@ -2151,208 +2385,11 @@ except:
         print("   Install with: pip install ipympl")
         print("   Or manually run: %matplotlib widget")
 
-def select_plateau_interactive(emgfile, title="Trapezoid Plateau Selection"):
-    """
-    Interactive plateau region selection for trapezoid trials.
+# Note: Plateau selection functions are defined in helper.py
+# - select_plateau_interactive(emgfile, title)
+# - recalculate_dr_plateau(emgfile, plateau_start, plateau_end)
+# - apply_plateau_to_all_trapezoids(condition_result, reference_file, ...)
 
-    Returns:
-        plateau_start_idx (int): Start index of plateau
-        plateau_end_idx (int): End index of plateau
-    """
-    ref_signal = emgfile['REF_SIGNAL'].values.flatten()
-    fsamp = emgfile['FSAMP']
-    time = np.arange(len(ref_signal)) / fsamp
-
-    fig, ax = plt.subplots(figsize=(15, 5))
-    ax.plot(time, ref_signal, 'b-', linewidth=1.0)
-    ax.set_xlabel('Time (s)', fontsize=12)
-    ax.set_ylabel('Reference Signal (Force)', fontsize=12)
-    ax.set_title(f'{title}\\n\\nKlicke ZWEI Punkte: Start und Ende des Plateaus',
-                 fontsize=13, fontweight='bold')
-    ax.grid(alpha=0.4)
-    ax.axhline(ref_signal.max() * 0.9, color='gray', linestyle='--', alpha=0.5,
-               label='90% max')
-    ax.legend()
-    plt.tight_layout()
-
-    print("\\n" + "="*60)
-    print("INTERAKTIVE AUSWAHL:")
-    print("  1. Klicke auf den START des Plateaus")
-    print("  2. Klicke auf das ENDE des Plateaus")
-    print("="*60)
-
-    try:
-        points = plt.ginput(2, timeout=0)
-        if len(points) == 2:
-            t_start, t_end = sorted([p[0] for p in points])
-            idx_start = int(t_start * fsamp)
-            idx_end = int(t_end * fsamp)
-
-            # Visualize selection
-            ax.axvspan(t_start, t_end, alpha=0.3, color='green', label='Plateau')
-            ax.legend()
-            plt.draw()
-            plt.pause(0.5)
-
-            print(f"\\n✓ Plateau ausgewählt: {t_start:.2f}s - {t_end:.2f}s")
-            print(f"  Indices: {idx_start} - {idx_end}")
-            print(f"  Duration: {t_end - t_start:.2f}s")
-
-            plt.close()
-            return idx_start, idx_end
-        else:
-            print("⚠ Fehler: Es wurden nicht 2 Punkte ausgewählt")
-            plt.close()
-            return None, None
-    except Exception as e:
-        print(f"⚠ Fehler bei Auswahl: {e}")
-        plt.close()
-        return None, None
-
-
-def recalculate_dr_plateau(emgfile, plateau_start, plateau_end):
-    """
-    Recalculate MU properties using only spikes within plateau region.
-
-    Returns:
-        dict with keys: 'mean_dr', 'peak_dr', 'cov_isi' for each MU
-    """
-    fsamp = emgfile['FSAMP']
-    n_mus = emgfile['NUMBER_OF_MUS']
-
-    plateau_results = []
-
-    for mu_idx in range(n_mus):
-        mupulses = emgfile['MUPULSES'][mu_idx]
-
-        # Filter spikes within plateau
-        plateau_spikes = [sp for sp in mupulses if plateau_start <= sp <= plateau_end]
-
-        if len(plateau_spikes) < 4:
-            plateau_results.append({
-                'mu_idx': mu_idx,
-                'n_spikes': len(plateau_spikes),
-                'mean_dr': np.nan,
-                'peak_dr': np.nan,
-                'cov_isi': np.nan,
-            })
-            continue
-
-        # Calculate ISI and DR from plateau spikes only
-        spikes = np.array(plateau_spikes)
-        isi = np.diff(spikes) / fsamp
-        isi = isi[isi > 0.01]  # remove artifacts
-
-        if len(isi) < 2:
-            plateau_results.append({
-                'mu_idx': mu_idx,
-                'n_spikes': len(plateau_spikes),
-                'mean_dr': np.nan,
-                'peak_dr': np.nan,
-                'cov_isi': np.nan,
-            })
-            continue
-
-        inst_dr = 1.0 / isi
-
-        plateau_results.append({
-            'mu_idx': mu_idx,
-            'n_spikes': len(plateau_spikes),
-            'mean_dr': np.mean(inst_dr),
-            'peak_dr': np.max(inst_dr),
-            'cov_isi': (np.std(isi) / np.mean(isi)) * 100,
-        })
-
-    return pd.DataFrame(plateau_results)
-
-
-def apply_plateau_to_all_trapezoids(condition_result, reference_file,
-                                      plateau_start_idx, plateau_end_idx,
-                                      mode='relative'):
-    """
-    Apply plateau selection from reference file to ALL trapezoid files.
-
-    Args:
-        condition_result: Dict from create_condition_groups()
-        reference_file: The emgfile dict used for interactive selection
-        plateau_start_idx: Start index from reference file
-        plateau_end_idx: End index from reference file
-        mode: 'relative' (% of signal) or 'absolute' (seconds)
-
-    Returns:
-        dict: {filename: {'start_idx': int, 'end_idx': int, 'dr_results': DataFrame}}
-    """
-    ref_fsamp = reference_file['FSAMP']
-    ref_duration = len(reference_file['REF_SIGNAL']) / ref_fsamp
-
-    # Calculate reference plateau in time
-    ref_start_time = plateau_start_idx / ref_fsamp
-    ref_end_time = plateau_end_idx / ref_fsamp
-
-    if mode == 'relative':
-        # Store as percentage of total duration
-        start_pct = ref_start_time / ref_duration
-        end_pct = ref_end_time / ref_duration
-        print(f"\\n📊 Plateau-Definition (relativ):")
-        print(f"   Start: {start_pct*100:.1f}% der Signaldauer")
-        print(f"   Ende:  {end_pct*100:.1f}% der Signaldauer")
-    else:
-        # Store as absolute time
-        print(f"\\n📊 Plateau-Definition (absolut):")
-        print(f"   Start: {ref_start_time:.2f}s")
-        print(f"   Ende:  {ref_end_time:.2f}s")
-
-    results = {}
-    trapezoid_count = 0
-
-    # Iterate through all conditions and trapezoid files
-    for cond_name, cond_data in condition_result['conditions'].items():
-        for tracking_type, groups in cond_data['tracking_types'].items():
-            # Only process Trapezoid files
-            if 'Trap' not in tracking_type:
-                continue
-
-            for group in groups:
-                for file_entry in group.get('files', []):
-                    filename = file_entry['filename']
-                    emgfile = file_entry['data']
-                    fsamp = emgfile['FSAMP']
-                    signal_duration = len(emgfile['REF_SIGNAL']) / fsamp
-
-                    # Calculate plateau indices for this file
-                    if mode == 'relative':
-                        start_idx = int(start_pct * signal_duration * fsamp)
-                        end_idx = int(end_pct * signal_duration * fsamp)
-                    else:
-                        start_idx = int(ref_start_time * fsamp)
-                        end_idx = int(ref_end_time * fsamp)
-
-                    # Ensure indices are within bounds
-                    start_idx = max(0, start_idx)
-                    end_idx = min(len(emgfile['REF_SIGNAL']), end_idx)
-
-                    # Recalculate DR for this plateau
-                    dr_results = recalculate_dr_plateau(emgfile, start_idx, end_idx)
-
-                    results[filename] = {
-                        'start_idx': start_idx,
-                        'end_idx': end_idx,
-                        'start_time': start_idx / fsamp,
-                        'end_time': end_idx / fsamp,
-                        'duration': (end_idx - start_idx) / fsamp,
-                        'condition': cond_name,
-                        'tracking_type': tracking_type,
-                        'dr_results': dr_results
-                    }
-
-                    trapezoid_count += 1
-
-    print(f"\\n✓ Plateau angewendet auf {trapezoid_count} Trapezoid-Dateien")
-    return results
-
-
-# ============================================================
-# WORKFLOW: Select plateau once, apply to all trapezoids
 # ============================================================
 print("\\nPlateau-Auswahl für Trapezoid-Dateien")
 print("="*60)
