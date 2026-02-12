@@ -384,7 +384,6 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         if len(muedit_files) > 0 and not self.mu_check_cache and not self.is_scanning:
             self.indexing_needed = True
             self.btn_index_motor_units.setVisible(True)
-            logger.info(f"Fast scan complete: {len(muedit_files)} MUEdit files, {len(edited_files)} edited files. Motor unit indexing available.")
         else:
             self.indexing_needed = False
             self.btn_index_motor_units.setVisible(False)

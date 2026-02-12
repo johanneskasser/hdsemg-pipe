@@ -2119,13 +2119,16 @@ if len(df_mu) > 0:
 
 **Workflow:**
 1. Wähle EINE Trapezoid-Datei als Referenz
-2. Interaktive Auswahl des Plateau-Bereichs (klicke Start + Ende)
+2. Interaktive Auswahl des Plateau-Bereichs (klicke Start + Ende im Plot)
 3. **Automatische Anwendung** auf ALLE anderen Trapezoid-Dateien (relative Zeit)
 4. Neuberechnung der DR nur für Plateau-Spikes
 
 **Modi:**
 - `mode='relative'`: Plateau als % der Signaldauer (empfohlen für standardisierte Protokolle)
-- `mode='absolute'`: Plateau als absolute Zeitpunkte in Sekunden'''
+- `mode='absolute'`: Plateau als absolute Zeitpunkte in Sekunden
+
+**Hinweis:** Die nächste Zelle aktiviert automatisch das interaktive matplotlib Backend (`%matplotlib widget`).
+Falls es nicht funktioniert, installiere: `pip install ipympl`'''
     })
 
     # Plateau Selection Function (Code)
@@ -2134,6 +2137,19 @@ if len(df_mu) > 0:
         'source': '''# ============================================================
 # Plateau Selection for Trapezoid Trials
 # ============================================================
+
+# IMPORTANT: Enable interactive matplotlib backend for ginput() to work
+try:
+    get_ipython().run_line_magic('matplotlib', 'widget')
+    print("✓ Interactive backend enabled (%matplotlib widget)")
+except:
+    try:
+        get_ipython().run_line_magic('matplotlib', 'notebook')
+        print("✓ Interactive backend enabled (%matplotlib notebook)")
+    except:
+        print("⚠ Warning: Interactive backend not available.")
+        print("   Install with: pip install ipympl")
+        print("   Or manually run: %matplotlib widget")
 
 def select_plateau_interactive(emgfile, title="Trapezoid Plateau Selection"):
     """
@@ -2350,71 +2366,68 @@ print()
 plateau_results_all = {}
 
 # STEP 1: Select ONE reference trapezoid file and select plateau interactively
-# Uncomment and run to use:
-#
-# if condition_result and OPENHDEMG_AVAILABLE:
-#     # Find first trapezoid file as reference
-#     reference_file = None
-#     reference_filename = None
-#
-#     for cond_name, cond_data in condition_result['conditions'].items():
-#         for tracking_type, groups in cond_data['tracking_types'].items():
-#             if 'Trap' not in tracking_type:
-#                 continue
-#             for group in groups:
-#                 for file_entry in group.get('files', []):
-#                     reference_filename = file_entry['filename']
-#                     reference_file = file_entry['data']
-#                     break
-#                 if reference_file:
-#                     break
-#             if reference_file:
-#                 break
-#         if reference_file:
-#             break
-#
-#     if reference_file:
-#         print(f"\\n📂 Referenz-Datei: {os.path.basename(reference_filename)}")
-#         print(f"   Signal-Dauer: {len(reference_file['REF_SIGNAL']) / reference_file['FSAMP']:.1f}s")
-#
-#         # Interactive plateau selection
-#         start_idx, end_idx = select_plateau_interactive(
-#             reference_file,
-#             title=f"Referenz-Plateau: {os.path.basename(reference_filename)}"
-#         )
-#
-#         if start_idx is not None:
-#             # STEP 2: Apply to ALL trapezoid files
-#             print("\\n🔄 Wende Plateau auf alle Trapezoid-Dateien an...")
-#
-#             plateau_results_all = apply_plateau_to_all_trapezoids(
-#                 condition_result=condition_result,
-#                 reference_file=reference_file,
-#                 plateau_start_idx=start_idx,
-#                 plateau_end_idx=end_idx,
-#                 mode='relative'  # or 'absolute'
-#             )
-#
-#             # Summary
-#             print(f"\\n✅ Plateau-Berechnung abgeschlossen!")
-#             print(f"   {len(plateau_results_all)} Trapezoid-Dateien verarbeitet")
-#
-#             # Show example results
-#             print("\\n📊 Beispiel DR-Ergebnisse (erste Datei):")
-#             example_file = list(plateau_results_all.keys())[0]
-#             example_result = plateau_results_all[example_file]
-#             print(f"\\n   Datei: {os.path.basename(example_file)}")
-#             print(f"   Plateau: {example_result['start_time']:.2f}s - {example_result['end_time']:.2f}s")
-#             print(f"   Dauer: {example_result['duration']:.2f}s")
-#             print("\\n   DR Statistics:")
-#             print(example_result['dr_results'][['mu_idx', 'mean_dr', 'peak_dr', 'cov_isi']].head().to_string(index=False))
-#
-#     else:
-#         print("\\n⚠ Keine Trapezoid-Dateien gefunden")
+if condition_result and OPENHDEMG_AVAILABLE:
+    # Find first trapezoid file as reference
+    reference_file = None
+    reference_filename = None
 
-print("\\n💡 Tipp: Aktiviere den Code-Block oben für Plateau-Auswahl")
-print("   Das Plateau wird automatisch auf ALLE Trapezoid-Dateien angewendet!")
-print("   Ergebnisse werden in `plateau_results_all` gespeichert")'''
+    for cond_name, cond_data in condition_result['conditions'].items():
+        for tracking_type, groups in cond_data['tracking_types'].items():
+            if 'Trap' not in tracking_type:
+                continue
+            for group in groups:
+                for file_entry in group.get('files', []):
+                    reference_filename = file_entry['filename']
+                    reference_file = file_entry['data']
+                    break
+                if reference_file:
+                    break
+            if reference_file:
+                break
+        if reference_file:
+            break
+
+    if reference_file:
+        print(f"\\n📂 Referenz-Datei: {os.path.basename(reference_filename)}")
+        print(f"   Signal-Dauer: {len(reference_file['REF_SIGNAL']) / reference_file['FSAMP']:.1f}s")
+
+        # Interactive plateau selection
+        start_idx, end_idx = select_plateau_interactive(
+            reference_file,
+            title=f"Referenz-Plateau: {os.path.basename(reference_filename)}"
+        )
+
+        if start_idx is not None:
+            # STEP 2: Apply to ALL trapezoid files
+            print("\\n🔄 Wende Plateau auf alle Trapezoid-Dateien an...")
+
+            plateau_results_all = apply_plateau_to_all_trapezoids(
+                condition_result=condition_result,
+                reference_file=reference_file,
+                plateau_start_idx=start_idx,
+                plateau_end_idx=end_idx,
+                mode='relative'  # or 'absolute'
+            )
+
+            # Summary
+            print(f"\\n✅ Plateau-Berechnung abgeschlossen!")
+            print(f"   {len(plateau_results_all)} Trapezoid-Dateien verarbeitet")
+
+            # Show example results
+            print("\\n📊 Beispiel DR-Ergebnisse (erste Datei):")
+            example_file = list(plateau_results_all.keys())[0]
+            example_result = plateau_results_all[example_file]
+            print(f"\\n   Datei: {os.path.basename(example_file)}")
+            print(f"   Plateau: {example_result['start_time']:.2f}s - {example_result['end_time']:.2f}s")
+            print(f"   Dauer: {example_result['duration']:.2f}s")
+            print("\\n   DR Statistics:")
+            print(example_result['dr_results'][['mu_idx', 'mean_dr', 'peak_dr', 'cov_isi']].head().to_string(index=False))
+        else:
+            print("\\n⚠ Plateau-Auswahl abgebrochen oder fehlgeschlagen")
+    else:
+        print("\\n⚠ Keine Trapezoid-Dateien gefunden")
+else:
+    print("\\n⚠ Keine Conditions oder openhdemg nicht verfügbar")'''
     })
 
     # Plateau Results - Visualization and Export
