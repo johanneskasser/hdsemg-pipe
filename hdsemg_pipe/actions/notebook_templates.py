@@ -803,10 +803,10 @@ class ProtocolParser:
 
 def select_plateau_interactive(emgfile, title="Trapezoid Plateau Selection"):
     """
-    Interactive plateau region selection for trapezoid trials.
+    Manual plateau region selection for trapezoid trials.
 
-    Requires: matplotlib with interactive backend (widget or notebook)
-    Install: pip install ipympl
+    Shows the reference signal, then asks for start/end time input,
+    then displays confirmation plot with highlighted plateau.
 
     Args:
         emgfile: openhdemg emgfile dict
@@ -821,51 +821,71 @@ def select_plateau_interactive(emgfile, title="Trapezoid Plateau Selection"):
     ref_signal = emgfile['REF_SIGNAL'].values.flatten()
     fsamp = emgfile['FSAMP']
     time = np.arange(len(ref_signal)) / fsamp
+    duration = len(ref_signal) / fsamp
 
+    # STEP 1: Show reference signal
     fig, ax = plt.subplots(figsize=(15, 5))
     ax.plot(time, ref_signal, 'b-', linewidth=1.0)
     ax.set_xlabel('Time (s)', fontsize=12)
     ax.set_ylabel('Reference Signal (Force)', fontsize=12)
-    ax.set_title(f'{{title}}\\n\\nKlicke ZWEI Punkte: Start und Ende des Plateaus',
+    ax.set_title(f'{{title}}\\n\\nSignal-Dauer: {{duration:.1f}}s - Identifiziere das Plateau',
                  fontsize=13, fontweight='bold')
     ax.grid(alpha=0.4)
     ax.axhline(ref_signal.max() * 0.9, color='gray', linestyle='--', alpha=0.5,
                label='90% max')
     ax.legend()
     plt.tight_layout()
+    plt.show()
 
+    # STEP 2: Manual input
     print("\\n" + "="*60)
-    print("INTERAKTIVE AUSWAHL:")
-    print("  1. Klicke auf den START des Plateaus")
-    print("  2. Klicke auf das ENDE des Plateaus")
+    print("MANUELLE PLATEAU-AUSWAHL:")
+    print(f"  Signal-Dauer: {{duration:.1f}}s")
+    print("  Gib Start- und End-Zeit des Plateaus ein (in Sekunden)")
     print("="*60)
 
     try:
-        points = plt.ginput(2, timeout=0)
-        if len(points) == 2:
-            t_start, t_end = sorted([p[0] for p in points])
-            idx_start = int(t_start * fsamp)
-            idx_end = int(t_end * fsamp)
+        t_start = float(input("Start-Zeit (s): "))
+        t_end = float(input("End-Zeit (s): "))
 
-            # Visualize selection
-            ax.axvspan(t_start, t_end, alpha=0.3, color='green', label='Plateau')
-            ax.legend()
-            plt.draw()
-            plt.pause(0.5)
-
-            print(f"\\n✓ Plateau ausgewählt: {{t_start:.2f}}s - {{t_end:.2f}}s")
-            print(f"  Indices: {{idx_start}} - {{idx_end}}")
-            print(f"  Duration: {{t_end - t_start:.2f}}s")
-
-            plt.close()
-            return idx_start, idx_end
-        else:
-            print("⚠ Fehler: Es wurden nicht 2 Punkte ausgewählt")
-            plt.close()
+        # Validate input
+        if t_start < 0 or t_end > duration or t_start >= t_end:
+            print(f"⚠ Ungültige Eingabe: Start={{t_start:.2f}}s, Ende={{t_end:.2f}}s")
+            print(f"  Muss sein: 0 ≤ Start < Ende ≤ {{duration:.1f}}s")
             return None, None
+
+        idx_start = int(t_start * fsamp)
+        idx_end = int(t_end * fsamp)
+
+        # STEP 3: Confirmation plot with highlighted plateau
+        fig, ax = plt.subplots(figsize=(15, 5))
+        ax.plot(time, ref_signal, 'b-', linewidth=1.0)
+        ax.axvspan(t_start, t_end, alpha=0.3, color='green', label=f'Plateau ({{t_end - t_start:.1f}}s)')
+        ax.axvline(t_start, color='green', linestyle='--', linewidth=2, alpha=0.7)
+        ax.axvline(t_end, color='green', linestyle='--', linewidth=2, alpha=0.7)
+        ax.set_xlabel('Time (s)', fontsize=12)
+        ax.set_ylabel('Reference Signal (Force)', fontsize=12)
+        ax.set_title(f'{{title}} - Bestätigung\\n\\nPlateau: {{t_start:.2f}}s - {{t_end:.2f}}s',
+                     fontsize=13, fontweight='bold')
+        ax.grid(alpha=0.4)
+        ax.legend()
+        plt.tight_layout()
+        plt.show()
+
+        print(f"\\n✓ Plateau ausgewählt: {{t_start:.2f}}s - {{t_end:.2f}}s")
+        print(f"  Indices: {{idx_start}} - {{idx_end}}")
+        print(f"  Duration: {{t_end - t_start:.2f}}s")
+
+        return idx_start, idx_end
+
+    except ValueError as e:
+        print(f"⚠ Eingabefehler: {{e}}")
+        return None, None
+    except KeyboardInterrupt:
+        print("\\n⚠ Abgebrochen durch Benutzer")
+        return None, None
     except Exception as e:
-        print(f"⚠ Fehler bei Auswahl: {{e}}")
-        plt.close()
+        print(f"⚠ Fehler: {{e}}")
         return None, None
 
 
@@ -1056,18 +1076,7 @@ This notebook provides a starting point for analyzing the cleaned motor unit dat
 8. Export Results'''
     })
 
-    # Cell 2: Install ipympl for interactive plotting (Code)
-    cells.append({
-        'cell_type': 'code',
-        'source': '''# Install ipympl for interactive matplotlib backend (required for plateau selection)
-# Run this cell once - if already installed, it will skip
-!pip install ipympl --quiet
-
-print("✓ ipympl installation check complete")
-print("  This enables interactive plotting for plateau selection in trapezoid trials")'''
-    })
-
-    # Cell 3: Setup & Imports (Code)
+    # Cell 2: Setup & Imports (Code)
     cells.append({
         'cell_type': 'code',
         'source': '''# Standard libraries
@@ -2352,44 +2361,28 @@ if len(df_mu) > 0:
 **Plateau-Bereich** berechnet werden, nicht aus dem gesamten Signal.
 
 **Workflow:**
-1. Wähle EINE Trapezoid-Datei als Referenz
-2. Interaktive Auswahl des Plateau-Bereichs (klicke Start + Ende im Plot)
-3. **Automatische Anwendung** auf ALLE anderen Trapezoid-Dateien (relative Zeit)
-4. Neuberechnung der DR nur für Plateau-Spikes
+1. Referenzsignal wird angezeigt
+2. **Manuelle Eingabe:** Gib Start- und End-Zeit des Plateaus ein (z.B. "5.2" und "12.8")
+3. Bestätigungs-Plot zeigt das markierte Plateau
+4. **Automatische Anwendung** auf ALLE anderen Trapezoid-Dateien (relative Zeit)
 
 **Modi:**
 - `mode='relative'`: Plateau als % der Signaldauer (empfohlen für standardisierte Protokolle)
 - `mode='absolute'`: Plateau als absolute Zeitpunkte in Sekunden
 
-**Hinweis:** Die nächste Zelle aktiviert automatisch das interaktive matplotlib Backend (`%matplotlib widget`).
-Falls es nicht funktioniert, installiere: `pip install ipympl`'''
+**Vorteil manuelle Eingabe:** Funktioniert mit jedem matplotlib Backend, keine zusätzlichen Pakete nötig!'''
     })
 
     # Plateau Selection Function (Code)
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
-# Plateau Selection for Trapezoid Trials
+# Plateau Selection for Trapezoid Trials (Manual Input)
 # ============================================================
-
-# IMPORTANT: Enable interactive matplotlib backend for ginput() to work
-try:
-    get_ipython().run_line_magic('matplotlib', 'widget')
-    print("✓ Interactive backend enabled (%matplotlib widget)")
-except:
-    try:
-        get_ipython().run_line_magic('matplotlib', 'notebook')
-        print("✓ Interactive backend enabled (%matplotlib notebook)")
-    except:
-        print("⚠ Warning: Interactive backend not available.")
-        print("   Install with: pip install ipympl")
-        print("   Or manually run: %matplotlib widget")
-
-# Note: Plateau selection functions are defined in helper.py
-# - select_plateau_interactive(emgfile, title)
+# Note: Plateau selection functions are defined in helper.py:
+# - select_plateau_interactive(emgfile, title) - shows plot, asks for manual input
 # - recalculate_dr_plateau(emgfile, plateau_start, plateau_end)
 # - apply_plateau_to_all_trapezoids(condition_result, reference_file, ...)
-
 # ============================================================
 print("\\nPlateau-Auswahl für Trapezoid-Dateien")
 print("="*60)
