@@ -1036,8 +1036,108 @@ def apply_plateau_to_all_trapezoids(condition_result, reference_file,
 
                     trapezoid_count += 1
 
-    print(f"\\n✓ Plateau angewendet auf {{trapezoid_count}} Trapezoid-Dateien")
+    print(f"\\n✓ Plateau applied to {{trapezoid_count}} trapezoid files")
     return results
+
+
+# ============================================================================
+# PLOT & DATA EXPORT HELPERS
+# ============================================================================
+
+def create_analysis_folders(workfolder):
+    """
+    Create organized analysis subfolder structure.
+
+    Args:
+        workfolder: Path to workfolder
+
+    Returns:
+        dict: Mapping of folder names to Path objects
+    """
+    from pathlib import Path
+
+    analysis_root = Path(workfolder) / 'analysis'
+
+    subfolders = {{
+        'comparisons': analysis_root / 'comparisons',
+        'timelines': analysis_root / 'timelines',
+        'tracking': analysis_root / 'tracking',
+        'plateau': analysis_root / 'plateau',
+        'washout': analysis_root / 'washout',
+        'pic': analysis_root / 'pic',
+        'exploratory': analysis_root / 'exploratory',
+        'data': analysis_root / 'data'
+    }}
+
+    # Create all folders
+    for folder_path in subfolders.values():
+        folder_path.mkdir(parents=True, exist_ok=True)
+
+    return subfolders
+
+
+def save_plot_to_analysis(fig, filename, subfolder='', dpi=150):
+    """
+    Save matplotlib figure to analysis subfolder.
+
+    Args:
+        fig: matplotlib Figure object (if None, just returns path for CSV saving)
+        filename: Name of file to save
+        subfolder: Subfolder within analysis/ (e.g., 'comparisons', 'timelines')
+        dpi: Resolution for PNG export
+
+    Returns:
+        Path: Full path to saved file
+    """
+    from pathlib import Path
+    import matplotlib.pyplot as plt
+
+    # Build path
+    analysis_root = Path.cwd() / 'analysis'
+    if subfolder:
+        save_dir = analysis_root / subfolder
+    else:
+        save_dir = analysis_root
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    save_path = save_dir / filename
+
+    # Save figure if provided
+    if fig is not None:
+        fig.savefig(save_path, dpi=dpi, bbox_inches='tight')
+        plt.close(fig)  # Free memory
+
+    return save_path
+
+
+def export_consolidated_csv(df_list, output_name='motor_unit_analysis_complete.csv'):
+    """
+    Export consolidated CSV to analysis/data/ folder.
+
+    Args:
+        df_list: List of DataFrames to concatenate
+        output_name: Filename for output CSV
+
+    Returns:
+        tuple: (save_path, row_count)
+    """
+    import pandas as pd
+    from pathlib import Path
+
+    # Concatenate all DataFrames
+    if len(df_list) == 1:
+        df_consolidated = df_list[0]
+    else:
+        df_consolidated = pd.concat(df_list, ignore_index=True, sort=False)
+
+    # Save to data subfolder
+    data_dir = Path.cwd() / 'analysis' / 'data'
+    data_dir.mkdir(parents=True, exist_ok=True)
+    save_path = data_dir / output_name
+
+    df_consolidated.to_csv(save_path, index=False)
+
+    return save_path, len(df_consolidated)
 '''
 
 
@@ -1099,6 +1199,8 @@ if str(WORKFOLDER) not in sys.path:
 
 from workfolder_analysis_helper import WorkfolderPaths, MetadataReader, PipelineSummary, ProtocolParser
 from workfolder_analysis_helper import plot_pipeline_overview, plot_covisi_comparison
+from workfolder_analysis_helper import select_plateau_interactive, recalculate_dr_plateau, apply_plateau_to_all_trapezoids
+from workfolder_analysis_helper import create_analysis_folders, save_plot_to_analysis, export_consolidated_csv
 
 # openhdemg (optional but recommended)
 try:
@@ -1125,6 +1227,10 @@ plt.rcParams['font.size'] = 10'''
 paths = WorkfolderPaths(WORKFOLDER)
 reader = MetadataReader(paths)
 summary = PipelineSummary(paths, reader)
+
+# Create organized analysis folder structure
+analysis_folders = create_analysis_folders(WORKFOLDER)
+print(f"✓ Created analysis folder structure: {len(analysis_folders)} subfolders")
 
 # List available files
 final_files = paths.list_final_json_files()
@@ -1469,11 +1575,7 @@ if OPENHDEMG_AVAILABLE and len(emgfiles) > 0:
     # Create DataFrame for easy analysis
     df_properties = pd.DataFrame(properties_list)
     print(df_properties.describe())
-
-    # Save to CSV
-    output_csv = WORKFOLDER / "motor_unit_properties.csv"
-    df_properties.to_csv(output_csv, index=False)
-    print(f"\\n✓ Properties saved to: {output_csv}")'''
+    print(f"\\n✓ Motor unit properties extracted: {len(df_properties)} MUs")'''
     })
 
     # Cell 16: Quality Metrics Comparison (Code)
@@ -1864,9 +1966,8 @@ if len(df_paired) > 0:
     ax.grid(axis='y', alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(WORKFOLDER / 'fig_tracking_quality.png', dpi=150, bbox_inches='tight')
-    plt.show()
-    print("Saved: fig_tracking_quality.png")'''
+    save_path = save_plot_to_analysis(plt.gcf(), 'fig_tracking_quality.png', 'tracking')
+    print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")'''
     })
 
     # 5.2 Unpaired Overview subheader (Markdown)
@@ -2017,9 +2118,8 @@ if len(df_mu) > 0:
 
     fig.suptitle('Motor Unit Yield per Condition', fontsize=14, fontweight='bold', y=1.02)
     plt.tight_layout()
-    plt.savefig(WORKFOLDER / 'fig_mu_yield_conditions.png', dpi=150, bbox_inches='tight')
-    plt.show()
-    print("Saved: fig_mu_yield_conditions.png")'''
+    save_path = save_plot_to_analysis(fig, 'fig_mu_yield_conditions.png', 'comparisons')
+    print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")'''
     })
 
     # Mean Discharge Rate comparison (Code)
@@ -2067,9 +2167,8 @@ if len(df_mu) > 0:
 
     fig.suptitle('Mean Discharge Rate across Conditions', fontsize=14, fontweight='bold', y=1.02)
     plt.tight_layout()
-    plt.savefig(WORKFOLDER / 'fig_mean_dr_conditions.png', dpi=150, bbox_inches='tight')
-    plt.show()
-    print("Saved: fig_mean_dr_conditions.png")'''
+    save_path = save_plot_to_analysis(fig, 'fig_mean_dr_conditions.png', 'comparisons')
+    print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")'''
     })
 
     # Recruitment Threshold comparison (Code)
@@ -2115,9 +2214,8 @@ if len(df_mu) > 0:
 
     fig.suptitle('Recruitment Threshold across Conditions', fontsize=14, fontweight='bold', y=1.02)
     plt.tight_layout()
-    plt.savefig(WORKFOLDER / 'fig_rt_conditions.png', dpi=150, bbox_inches='tight')
-    plt.show()
-    print("Saved: fig_rt_conditions.png")'''
+    save_path = save_plot_to_analysis(fig, 'fig_rt_conditions.png', 'comparisons')
+    print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")'''
     })
 
     # Timeline / Line Plot for all metrics (Code)
@@ -2170,18 +2268,18 @@ if len(df_mu) > 0:
         fig.suptitle(f'{tracking} Tracking - MU Properties Timeline (Mean \\u00b1 SEM)',
                      fontsize=14, fontweight='bold')
         plt.tight_layout()
-        plt.savefig(WORKFOLDER / f'fig_timeline_{tracking.lower()}.png', dpi=150, bbox_inches='tight')
-        plt.show()
-        print(f"Saved: fig_timeline_{tracking.lower()}.png")'''
+        save_path = save_plot_to_analysis(fig, f'fig_timeline_{tracking.lower()}.png', 'timelines')
+        print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")'''
     })
 
-    # RT vs DR Scatter (Code)
+    # RT vs DR Scatter (Code) - EXPLORATORY (commented out)
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
-# Figure 5: Recruitment Threshold vs Discharge Rate (Onion Skin)
+# EXPLORATORY: Recruitment Threshold vs Discharge Rate (Onion Skin)
 # ============================================================
-if len(df_mu) > 0:
+# Uncomment to generate this exploratory plot (set to True):
+if False and len(df_mu) > 0:
     focus_conditions = ['Pre_Intervention', 'Post_CON', 'Post_EXZ']
     cond_colors = {'Pre_Intervention': '#6b7280', 'Post_CON': '#2563eb', 'Post_EXZ': '#dc2626'}
     cond_markers = {'Pre_Intervention': 'o', 'Post_CON': 's', 'Post_EXZ': '^'}
@@ -2216,9 +2314,8 @@ if len(df_mu) > 0:
         fig.suptitle(f'{tracking} - RT vs DR (Onion Skin Pattern)',
                      fontsize=14, fontweight='bold', y=1.02)
         plt.tight_layout()
-        plt.savefig(WORKFOLDER / f'fig_rt_vs_dr_{tracking.lower()}.png', dpi=150, bbox_inches='tight')
-        plt.show()
-        print(f"Saved: fig_rt_vs_dr_{tracking.lower()}.png")'''
+        save_path = save_plot_to_analysis(fig, f'fig_rt_vs_dr_{tracking.lower()}.png', 'exploratory')
+        print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")'''
     })
 
     # Summary statistics table (Code)
@@ -2276,19 +2373,18 @@ if len(df_mu) > 0:
                         print(f"  {'N/A':>14s}", end='')
                 print()
 
-    # Export full DataFrame to CSV
-    csv_path = WORKFOLDER / 'mu_properties_by_condition.csv'
-    df_mu.to_csv(csv_path, index=False)
-    print(f"\\nExported: {csv_path.name}")'''
+    # DataFrame will be included in consolidated CSV export later
+    print(f"\\n✓ MU properties by condition ready: {len(df_mu)} entries")'''
     })
 
-    # CON vs EXZ direct comparison (Code)
+    # CON vs EXZ direct comparison (Code) - EXPLORATORY (commented out)
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
-# Figure 6: Direct CON vs EXZ Comparison (Pre -> Post delta)
+# EXPLORATORY: Direct CON vs EXZ Comparison (Pre -> Post delta)
 # ============================================================
-if len(df_mu) > 0:
+# Uncomment to generate this exploratory plot (set to True):
+if False and len(df_mu) > 0:
     # Calculate condition means per muscle/tracking for Pre vs Post comparisons
     key_metrics = ['mean_dr', 'peak_dr', 'rt_pct', 'cov_isi']
     metric_labels = {
@@ -2343,9 +2439,8 @@ if len(df_mu) > 0:
         fig.suptitle(f'{tracking} - Change from Pre-Intervention (Post - Pre)',
                      fontsize=13, fontweight='bold', y=1.02)
         plt.tight_layout()
-        plt.savefig(WORKFOLDER / f'fig_delta_con_exz_{tracking.lower()}.png', dpi=150, bbox_inches='tight')
-        plt.show()
-        print(f"Saved: fig_delta_con_exz_{tracking.lower()}.png")'''
+        save_path = save_plot_to_analysis(fig, f'fig_delta_con_exz_{tracking.lower()}.png', 'exploratory')
+        print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")'''
     })
 
     # ----------------------------------------------------------------
@@ -2364,13 +2459,13 @@ if len(df_mu) > 0:
 1. Referenzsignal wird angezeigt
 2. **Manuelle Eingabe:** Gib Start- und End-Zeit des Plateaus ein (z.B. "5.2" und "12.8")
 3. Bestätigungs-Plot zeigt das markierte Plateau
-4. **Automatische Anwendung** auf ALLE anderen Trapezoid-Dateien (relative Zeit)
+4. **Automatische Anwendung** auf ALLE anderen Trapezoid files (relative Zeit)
 
 **Modi:**
 - `mode='relative'`: Plateau als % der Signaldauer (empfohlen für standardisierte Protokolle)
 - `mode='absolute'`: Plateau als absolute Zeitpunkte in Sekunden
 
-**Vorteil manuelle Eingabe:** Funktioniert mit jedem matplotlib Backend, keine zusätzlichen Pakete nötig!'''
+**Manual input advantage:** Works with any matplotlib backend, no additional packages required!'''
     })
 
     # Plateau Selection Function (Code)
@@ -2384,12 +2479,12 @@ if len(df_mu) > 0:
 # - recalculate_dr_plateau(emgfile, plateau_start, plateau_end)
 # - apply_plateau_to_all_trapezoids(condition_result, reference_file, ...)
 # ============================================================
-print("\\nPlateau-Auswahl für Trapezoid-Dateien")
+print("\\nPlateau Selection für Trapezoid files")
 print("="*60)
 print("\\n💡 Workflow:")
 print("   1. Wähle EINE Trapezoid-Datei als Referenz")
 print("   2. Interaktive Auswahl des Plateaus")
-print("   3. Automatische Anwendung auf ALLE anderen Trapezoid-Dateien")
+print("   3. Automatische Anwendung auf ALLE anderen Trapezoid files")
 print()
 
 # Storage for all plateau results
@@ -2429,7 +2524,7 @@ if condition_result and OPENHDEMG_AVAILABLE:
 
         if start_idx is not None:
             # STEP 2: Apply to ALL trapezoid files
-            print("\\n🔄 Wende Plateau auf alle Trapezoid-Dateien an...")
+            print("\\n🔄 Wende Plateau auf alle Trapezoid files an...")
 
             plateau_results_all = apply_plateau_to_all_trapezoids(
                 condition_result=condition_result,
@@ -2441,7 +2536,7 @@ if condition_result and OPENHDEMG_AVAILABLE:
 
             # Summary
             print(f"\\n✅ Plateau-Berechnung abgeschlossen!")
-            print(f"   {len(plateau_results_all)} Trapezoid-Dateien verarbeitet")
+            print(f"   {len(plateau_results_all)} Trapezoid files verarbeitet")
 
             # Show example results
             print("\\n📊 Beispiel DR-Ergebnisse (erste Datei):")
@@ -2453,11 +2548,11 @@ if condition_result and OPENHDEMG_AVAILABLE:
             print("\\n   DR Statistics:")
             print(example_result['dr_results'][['mu_idx', 'mean_dr', 'peak_dr', 'cov_isi']].head().to_string(index=False))
         else:
-            print("\\n⚠ Plateau-Auswahl abgebrochen oder fehlgeschlagen")
+            print("\\n⚠ Plateau Selection cancelled or failed")
     else:
-        print("\\n⚠ Keine Trapezoid-Dateien gefunden")
+        print("\\n⚠ No trapezoid files found")
 else:
-    print("\\n⚠ Keine Conditions oder openhdemg nicht verfügbar")'''
+    print("\\n⚠ No conditions available or openhdemg not installed")'''
     })
 
     # Plateau Results - Visualization and Export
@@ -2533,19 +2628,15 @@ if plateau_results_all:
     ax.grid(axis='y', alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(paths.workfolder, 'fig_plateau_dr_comparison.png'),
-                dpi=300, bbox_inches='tight')
-    plt.show()
-    print(f"\\n✓ Saved: fig_plateau_dr_comparison.png")
+    save_path = save_plot_to_analysis(fig, 'fig_plateau_dr_comparison.png', 'plateau')
+    print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")
 
-    # Export to CSV
-    output_csv = os.path.join(paths.workfolder, 'mu_plateau_dr_trapezoids.csv')
-    df_plateau.to_csv(output_csv, index=False)
-    print(f"✓ Exported: mu_plateau_dr_trapezoids.csv ({len(df_plateau)} rows)")
+    # Plateau data will be included in consolidated CSV export later
+    print(f"✓ Plateau analysis complete: {len(df_plateau)} trapezoid MUs")
 
 else:
-    print("\\n⚠ Keine Plateau-Ergebnisse verfügbar.")
-    print("   Führe die vorherige Zelle aus, um Plateaus zu definieren.")'''
+    print("\\n⚠ No plateau results available.")
+    print("   Run the previous cell, to define plateaus.")'''
     })
 
     # ----------------------------------------------------------------
@@ -2661,20 +2752,21 @@ if len(df_paired) > 0:
     # Save statistical results
     df_stats = pd.DataFrame(stat_records)
     if len(df_stats) > 0:
-        stats_csv = WORKFOLDER / 'mu_paired_statistics.csv'
-        df_stats.to_csv(stats_csv, index=False)
-        print(f"\\nExported: {stats_csv.name}")
+        stats_path = save_plot_to_analysis(None, 'statistical_tests.csv', 'data')
+        df_stats.to_csv(stats_path, index=False)
+        print(f"\\n✓ Exported: {stats_path.relative_to(WORKFOLDER)}")
 else:
     print("No paired data available for statistical analysis")'''
     })
 
-    # Spaghetti / Slope Plots (Code)
+    # Spaghetti / Slope Plots (Code) - EXPLORATORY (commented out)
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
-# Figure 7: Spaghetti Plots - Individual MU Changes (Tracked Pairs)
+# EXPLORATORY: Spaghetti Plots - Individual MU Changes (Tracked Pairs)
 # ============================================================
-if len(df_paired) > 0:
+# Uncomment to generate this exploratory plot (set to True):
+if False and len(df_paired) > 0:
     key_metrics = ['mean_dr', 'rt_pct', 'peak_dr', 'cov_isi']
     metric_labels = {
         'mean_dr': 'Mean DR (pps)',
@@ -2742,19 +2834,18 @@ if len(df_paired) > 0:
         fig.suptitle(f'{tracking} - Tracked MU Changes: Individual + Mean\\u00b1SEM',
                      fontsize=14, fontweight='bold', y=1.02)
         plt.tight_layout()
-        plt.savefig(WORKFOLDER / f'fig_paired_spaghetti_{tracking.lower()}.png',
-                    dpi=150, bbox_inches='tight')
-        plt.show()
-        print(f"Saved: fig_paired_spaghetti_{tracking.lower()}.png")'''
+        save_path = save_plot_to_analysis(fig, f'fig_paired_spaghetti_{tracking.lower()}.png', 'exploratory')
+        print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")'''
     })
 
-    # Paired Delta Comparison with Stats (Code)
+    # Paired Delta Comparison with Stats (Code) - EXPLORATORY (commented out)
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
-# Figure 8: Paired Delta CON vs EXZ (Mean +/- SEM, with p-values)
+# EXPLORATORY: Paired Delta CON vs EXZ (Mean +/- SEM, with p-values)
 # ============================================================
-if len(df_paired) > 0:
+# Uncomment to generate this exploratory plot (set to True):
+if False and len(df_paired) > 0:
     key_metrics = ['mean_dr', 'peak_dr', 'rt_pct', 'cov_isi']
     metric_labels = {
         'mean_dr': '\\u0394 Mean DR (pps)',
@@ -2825,15 +2916,11 @@ if len(df_paired) > 0:
         fig.suptitle(f'{tracking} - Paired \\u0394 CON vs EXZ (Mean\\u00b1SEM, Tracked MUs)',
                      fontsize=13, fontweight='bold', y=1.02)
         plt.tight_layout()
-        plt.savefig(WORKFOLDER / f'fig_paired_delta_{tracking.lower()}.png',
-                    dpi=150, bbox_inches='tight')
-        plt.show()
-        print(f"Saved: fig_paired_delta_{tracking.lower()}.png")
+        save_path = save_plot_to_analysis(fig, f'fig_paired_delta_{tracking.lower()}.png', 'exploratory')
+        print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")
 
-    # Export paired data
-    paired_csv = WORKFOLDER / 'mu_paired_tracking.csv'
-    df_paired.to_csv(paired_csv, index=False)
-    print(f"\\nExported: {paired_csv.name}")'''
+    # Paired tracking data will be included in consolidated CSV export later
+    print(f"\\n✓ Paired tracking analysis complete: {len(df_paired)} tracked MUs")'''
     })
 
     # ----------------------------------------------------------------
@@ -2947,9 +3034,8 @@ if len(df_mu) > 0 and 'Pre_Intervention' in df_mu['condition'].values and 'Post_
     fig.suptitle('Washout Verification: Pre_Intervention vs Post_Washout',
                  fontsize=13, fontweight='bold', y=1.02)
     plt.tight_layout()
-    plt.savefig(WORKFOLDER / 'fig_washout_verification.png', dpi=150, bbox_inches='tight')
-    plt.show()
-    print("Saved: fig_washout_verification.png")
+    save_path = save_plot_to_analysis(fig, 'fig_washout_verification.png', 'washout')
+    print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")
 
 else:
     print("Washout verification requires Pre_Intervention and Post_Washout data")'''
@@ -3023,11 +3109,10 @@ else:
 
         try:
             # Sort MUs by recruitment threshold
-            emgfile_sorted = tools.sort_mus(emgfile=emgfile)
+            emgfile_sorted = emg_tools.sort_mus(emgfile=emgfile)
 
             # Compute SVR smooth fits
-            svrfits = emg_to
-            ols.compute_svr(
+            svrfits = emg_tools.compute_svr(
                 emgfile_sorted,
                 gammain=1/1.6,
                 regparam=1/0.370,
@@ -3178,14 +3263,11 @@ if len(deltaf_results) > 0:
         ax.grid(axis='y', alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(WORKFOLDER / 'fig_deltaf_pyramids.png', dpi=150, bbox_inches='tight')
-        plt.show()
-        print("Saved: fig_deltaf_pyramids.png")
+        save_path = save_plot_to_analysis(fig, 'fig_deltaf_pyramids.png', 'pic')
+        print(f"✓ Saved: {save_path.relative_to(WORKFOLDER)}")
 
-        # Export delta F results
-        deltaf_csv = WORKFOLDER / 'mu_deltaf_pyramids.csv'
-        df_deltaf.to_csv(deltaf_csv, index=False)
-        print(f"\\nExported: {deltaf_csv.name}")
+        # Delta F data will be included in consolidated CSV export later
+        print(f"\\n✓ PIC (Delta F) analysis complete: {len(df_deltaf)} comparisons")
 
         # Summary statistics
         print(f"\\n{'='*60}")
@@ -3198,6 +3280,87 @@ if len(deltaf_results) > 0:
         print("No valid delta F values to visualize")
 else:
     print("No delta F results available")'''
+    })
+
+    # ================================================================
+    # CONSOLIDATED DATA EXPORT
+    # ================================================================
+
+    # Consolidated Export Header (Markdown)
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''## 6.5. Consolidated Data Export
+
+Export all motor unit data to a single CSV file for cross-patient statistical analysis.'''
+    })
+
+    # Consolidated Export (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Consolidated CSV Export
+# ============================================================
+
+df_parts = []
+
+# 1. Basic MU properties (if available)
+if 'df_properties' in locals() and df_properties is not None:
+    df_parts.append(df_properties)
+
+# 2. Properties by condition
+if 'df_mu' in locals() and df_mu is not None:
+    df_parts.append(df_mu)
+
+# 3. Paired tracking data (if available)
+if 'df_paired' in locals() and df_paired is not None:
+    # Add tracking flag
+    df_paired_export = df_paired.copy()
+    df_paired_export['Is_Tracked'] = True
+    df_parts.append(df_paired_export)
+
+# 4. Plateau analysis (trapezoids, if available)
+if 'df_plateau' in locals() and df_plateau is not None:
+    df_parts.append(df_plateau)
+
+# 5. Delta F (PIC analysis, pyramids, if available)
+if 'df_deltaf' in locals() and df_deltaf is not None:
+    df_parts.append(df_deltaf)
+
+# Merge all per-MU data
+if df_parts:
+    # Concatenate with outer join to keep all columns
+    df_complete = pd.concat(df_parts, ignore_index=True, sort=False)
+
+    # Remove exact duplicates (prefer later entries with more complete data)
+    df_complete = df_complete.drop_duplicates(
+        subset=['File', 'MU_Index'] if 'File' in df_complete.columns and 'MU_Index' in df_complete.columns else None,
+        keep='last'
+    )
+
+    # Export consolidated CSV
+    output_path, row_count = export_consolidated_csv(
+        [df_complete],
+        output_name='motor_unit_analysis_complete.csv'
+    )
+
+    print(f"\\n{'='*60}")
+    print(f"CONSOLIDATED EXPORT")
+    print(f"{'='*60}")
+    print(f"  File: {output_path.relative_to(WORKFOLDER)}")
+    print(f"  Rows: {row_count} motor units")
+    print(f"  Columns: {len(df_complete.columns)}")
+
+    # Summary by key dimensions
+    if 'Condition' in df_complete.columns:
+        print(f"  Conditions: {df_complete['Condition'].nunique()}")
+    if 'Muscle' in df_complete.columns:
+        print(f"  Muscles: {df_complete['Muscle'].nunique()}")
+    if 'tracking_type' in df_complete.columns:
+        print(f"  Tracking types: {df_complete['tracking_type'].nunique()}")
+
+    print(f"{'='*60}")
+else:
+    print("⚠ No data available for consolidated export")'''
     })
 
     # Section Header - Custom Analysis (Markdown)
@@ -3231,6 +3394,52 @@ if len(emgfiles) > 0:
     #         pass
 
     print("Custom analysis placeholder - add your code here")'''
+    })
+
+    # ================================================================
+    # ANALYSIS SUMMARY
+    # ================================================================
+
+    # Analysis Summary Header (Markdown)
+    cells.append({
+        'cell_type': 'markdown',
+        'source': '''## 7.5. Analysis Summary
+
+Overview of all generated files and results.'''
+    })
+
+    # Analysis Summary (Code)
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# Analysis Summary
+# ============================================================
+
+print("\\n" + "="*60)
+print("ANALYSIS COMPLETE")
+print("="*60)
+
+# List all generated files
+analysis_dir = Path(WORKFOLDER) / 'analysis'
+
+if analysis_dir.exists():
+    print("\\nGenerated files:")
+
+    for subfolder in ['comparisons', 'timelines', 'tracking', 'plateau', 'washout', 'pic', 'data', 'exploratory']:
+        folder_path = analysis_dir / subfolder
+        if folder_path.exists():
+            files = list(folder_path.glob('*'))
+            if files:
+                print(f"\\n  {subfolder}/")
+                for f in sorted(files):
+                    size_kb = f.stat().st_size / 1024
+                    print(f"    - {f.name} ({size_kb:.1f} KB)")
+
+    print("\\n" + "="*60)
+    print(f"All results saved to: {analysis_dir}")
+    print("="*60)
+else:
+    print("⚠ Analysis directory not found")'''
     })
 
     # Cell 19: Section Header - Export (Markdown)
