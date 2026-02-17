@@ -9,6 +9,7 @@ from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.theme import Colors, Fonts, Spacing, BorderRadius
 from hdsemg_pipe.ui_elements.toast import toast_manager
+from hdsemg_pipe.actions.process_log import write_step_status
 
 
 class WizardStepWidget(QWidget):
@@ -201,6 +202,7 @@ class WizardStepWidget(QWidget):
 
         self.step_completed = True
         global_state.complete_widget(f"step{self.step_index}")
+        write_step_status(f"step{self.step_index}", "completed")
 
         # Always emit signal to trigger navigation (main.py checks if navigation is needed)
         self.stepCompleted.emit(self.step_index)
@@ -220,6 +222,7 @@ class WizardStepWidget(QWidget):
 
         self.step_completed = True
         global_state.skip_widget(f"step{self.step_index}")
+        write_step_status(f"step{self.step_index}", "skipped")
         self.stepCompleted.emit(self.step_index)
 
     def setActionButtonsEnabled(self, enabled, override=False):

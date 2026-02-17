@@ -137,8 +137,9 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.skipped_files = {}  # Dict: file_path -> skip_reason
         self.last_file_count = 0
 
-        # Cache for motor unit checks (to avoid re-scanning files every time)
-        self.mu_check_cache = {}
+        # Cache for motor unit checks (to avoid re-scanning files every time).
+        # None = never populated; {} = populated but no files with MUs found.
+        self.mu_check_cache = None
         self.scan_worker = None
         self.is_scanning = False
         self.indexing_needed = False  # Flag to track if manual indexing is needed
@@ -380,8 +381,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.muedit_files = muedit_files
         self.edited_files = edited_files
 
-        # Show indexing button if we have files but no cache and not currently scanning
-        if len(muedit_files) > 0 and not self.mu_check_cache and not self.is_scanning:
+        # Show indexing button only when cache has never been populated (None = never scanned)
+        if len(muedit_files) > 0 and self.mu_check_cache is None and not self.is_scanning:
             self.indexing_needed = True
             self.btn_index_motor_units.setVisible(True)
         else:
@@ -499,7 +500,10 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
     def _on_new_files_scan_complete(self, cache_update):
         """Handle completion of new files scan."""
         self.is_scanning = False
-        self.mu_check_cache.update(cache_update)
+        if self.mu_check_cache is None:
+            self.mu_check_cache = cache_update
+        else:
+            self.mu_check_cache.update(cache_update)
         logger.info(f"New files scan complete, cache updated with {len(cache_update)} entries")
 
         # Trigger another scan to update UI
@@ -535,8 +539,9 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             self._scan_files_fast()
             return
 
-        # If cache is empty and we're not already scanning, start initial scan
-        if not self.mu_check_cache and not self.is_scanning:
+        # If cache has never been populated and we're not already scanning, start initial scan.
+        # None = never scanned; {} = scanned but no MU files found (don't re-scan).
+        if self.mu_check_cache is None and not self.is_scanning:
             self._start_initial_scan()
             return
 

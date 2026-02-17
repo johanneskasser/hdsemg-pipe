@@ -2,6 +2,7 @@ import os
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.enum.FolderNames import FolderNames
+from hdsemg_pipe.actions.process_log import read_process_log
 from hdsemg_pipe.actions.skip_marker import check_skip_marker
 from hdsemg_pipe.state.global_state import global_state
 from PyQt5.QtWidgets import QMessageBox, QFileDialog
@@ -132,6 +133,10 @@ def reconstruct_folder_state(folderpath):
     except Exception as e:
         logger.info(f"Skipping final results reconstruction: {e}")
 
+    # Apply process log overrides: use the recorded statuses as the authoritative
+    # source of truth, correcting any mis-detected statuses from file-based checks.
+    _apply_process_log_overrides(folderpath)
+
     msg_box = _show_restore_success(folderpath)
     msg_box.exec_()
     folder_content_widget.update_folder_content()
@@ -161,6 +166,13 @@ def reconstruct_folder_state(folderpath):
         if main_window and hasattr(main_window, 'progress_indicator'):
             main_window.progress_indicator.refreshStates()
             logger.info("Progress indicator refreshed after reconstruction")
+
+        # Re-run check() on every step so their UIs reflect the restored state.
+        # This is equivalent to checkAllSteps() and ensures steps like
+        # FileQualitySelection populate their file lists after reconstruction.
+        if main_window and hasattr(main_window, 'checkAllSteps'):
+            main_window.checkAllSteps()
+            logger.info("All step UIs refreshed after reconstruction")
 
     return next_step
 
@@ -565,6 +577,62 @@ def _final_results():
     else:
         logger.warning("Final results widget not found in global state.")
         raise ValueError("Final results widget not found in global state.")
+
+
+def _apply_process_log_overrides(folderpath: str) -> None:
+    """Override step statuses with the values recorded in the process log.
+
+    The process log (``hdsemg-pipe-process.log``) is written by
+    ``WizardStepWidget.complete_step()`` / ``skip_step()`` and is the
+    authoritative record of what the user actually did.  When the log exists,
+    it is used for ALL steps:
+
+    * Steps **in** the log → status from log (completed / skipped).
+    * Steps **absent** from the log → revert to pending.  The file-based
+      reconstruction may have incorrectly marked them as "skipped" (e.g. when
+      the user stopped partway through and the destination folder is empty).
+
+    For workfolders without a process log the function returns early and the
+    file-based reconstruction result is kept as-is (backwards compatibility).
+    """
+    log = read_process_log(folderpath)
+    steps = log.get("steps", {})
+
+    if not steps:
+        logger.info("Process log: no entries found — keeping file-based reconstruction results")
+        return
+
+    logger.info("Process log: applying overrides (%d recorded steps)", len(steps))
+
+    for step_num in range(1, 14):
+        step_key = f"step{step_num}"
+        if step_key not in global_state.widgets:
+            continue
+
+        step_data = steps.get(step_key)
+        log_status = step_data.get("status") if step_data else None
+
+        is_completed = global_state.is_widget_completed(step_key)
+        is_skipped = global_state.is_widget_skipped(step_key)
+
+        if log_status == "completed":
+            if not (is_completed and not is_skipped):
+                global_state.widgets[step_key]["completed_step"] = True
+                global_state.widgets[step_key]["skipped"] = False
+                logger.info("Process log override: %s → completed", step_key)
+
+        elif log_status == "skipped":
+            if not (is_completed and is_skipped):
+                global_state.widgets[step_key]["completed_step"] = True
+                global_state.widgets[step_key]["skipped"] = True
+                logger.info("Process log override: %s → skipped", step_key)
+
+        else:
+            # Step not recorded in log → was never done; revert to pending.
+            if is_completed:
+                global_state.widgets[step_key]["completed_step"] = False
+                global_state.widgets[step_key]["skipped"] = False
+                logger.info("Process log override: %s → pending (not in log)", step_key)
 
 
 

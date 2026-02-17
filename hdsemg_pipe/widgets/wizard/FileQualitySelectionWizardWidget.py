@@ -288,7 +288,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         # Instance variables must be set before super().__init__ calls create_buttons()
         self._file_items: Dict[str, _FileListItem] = {}
         self._signal_cache: Dict[str, Tuple] = {}
-        self._rms_cache: Dict[str, Optional[float]] = {}
+        self._rms_cache: Dict[str, Optional[Tuple[float, float]]] = {}
         self._score_cache: Dict[str, Optional[float]] = {}
         self._current_file: Optional[str] = None
         self._rms_df: Optional[pd.DataFrame] = None
@@ -512,9 +512,11 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             self.setActionButtonsEnabled(False)
             return
 
-        if not global_state.line_noise_cleaned_files:
+        step4_done = (global_state.is_widget_completed("step4")
+                      or global_state.is_widget_skipped("step4"))
+        if not step4_done:
             self.additional_information_label.setText(
-                "Complete the RMS Quality Analysis step first."
+                "Complete or skip the RMS Quality Analysis step first."
             )
             self.setActionButtonsEnabled(False)
             return
@@ -582,30 +584,48 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
 
     def _load_rms_csv(self):
         self._rms_df = None
+        self._rms_cache.clear()  # Invalidate cache so stale Nones don't persist
         try:
             csv_path = os.path.join(
                 global_state.get_analysis_path(), "rms_analysis_report.csv"
             )
             if os.path.exists(csv_path):
                 self._rms_df = pd.read_csv(csv_path)
-                logger.debug("Loaded RMS report CSV.")
+                logger.debug(
+                    "Loaded RMS report CSV (%d rows, files: %s)",
+                    len(self._rms_df),
+                    self._rms_df["file_name"].unique().tolist() if "file_name" in self._rms_df.columns else "?",
+                )
+            else:
+                logger.debug("RMS report CSV not found at %s", csv_path)
         except Exception as e:
             logger.warning(f"Could not load RMS CSV: {e}")
 
-    def _get_rms_for_file(self, file_path: str) -> Optional[float]:
+    def _get_rms_for_file(self, file_path: str) -> Optional[Tuple[float, float]]:
+        """Return (mean_rms, std_rms) in µV across all channels/grids, or None."""
         if file_path in self._rms_cache:
             return self._rms_cache[file_path]
         if self._rms_df is None:
-            self._rms_cache[file_path] = None
+            # Don't cache: CSV may appear later when check() reloads it
             return None
         filename = os.path.basename(file_path)
         rows = self._rms_df[self._rms_df["file_name"] == filename]
         if rows.empty:
+            # Fallback: match by stem in case extension differs
+            stem = os.path.splitext(filename)[0]
+            rows = self._rms_df[
+                self._rms_df["file_name"].str.startswith(stem + ".")
+                | (self._rms_df["file_name"] == stem)
+            ]
+        if rows.empty:
+            logger.debug("RMS CSV: no rows matched for %s", filename)
             self._rms_cache[file_path] = None
             return None
-        val = float(rows["rms_uv"].mean())
-        self._rms_cache[file_path] = val
-        return val
+        mean_val = float(rows["rms_uv"].mean())
+        std_val = float(rows["rms_uv"].std(ddof=1)) if len(rows) > 1 else 0.0
+        result = (mean_val, std_val)
+        self._rms_cache[file_path] = result
+        return result
 
     # ------------------------------------------------------------------
     # Signal loading
@@ -648,23 +668,21 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         required = None
         performed = None
 
-        ref_indices = getattr(grid, 'ref_indices', None) or []
-
+        # requested_path_idx / performed_path_idx are direct column indices
+        # into emgfile.data (same convention as crop_roi.py).
         req_idx = getattr(grid, 'requested_path_idx', None)
-        if req_idx is not None and ref_indices and req_idx < len(ref_indices):
+        if req_idx is not None:
             try:
-                col = ref_indices[req_idx]
-                required = np.array(emg.data[:, col], dtype=float)
+                required = np.array(emg.data[:, req_idx], dtype=float)
             except Exception as e:
                 warnings.append(f"Could not read required path: {e}")
         else:
             warnings.append("No required path signal defined.")
 
         perf_idx = getattr(grid, 'performed_path_idx', None)
-        if perf_idx is not None and ref_indices and perf_idx < len(ref_indices):
+        if perf_idx is not None:
             try:
-                col = ref_indices[perf_idx]
-                performed = np.array(emg.data[:, col], dtype=float)
+                performed = np.array(emg.data[:, perf_idx], dtype=float)
             except Exception as e:
                 warnings.append(f"Could not read performed path: {e}")
         else:
@@ -710,13 +728,15 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._score_cache[file_path] = score
 
         # RMS
-        rms = self._get_rms_for_file(file_path)
+        rms_result = self._get_rms_for_file(file_path)
+        rms_mean = rms_result[0] if rms_result is not None else None
+        rms_std = rms_result[1] if rms_result is not None else None
 
         # Update status dot colour in the list (prefer deviation score if available)
         if score is not None:
             dot_color = _score_to_label_color(score)[1]
-        elif rms is not None and not np.isnan(rms):
-            dot_color = _rms_to_label_color(rms)[1]
+        elif rms_mean is not None and not np.isnan(rms_mean):
+            dot_color = _rms_to_label_color(rms_mean)[1]
         else:
             dot_color = Colors.GRAY_300
         if file_path in self._file_items:
@@ -729,10 +749,14 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         else:
             self._deviation_card.reset_card()
 
-        # RMS card
-        if rms is not None and not np.isnan(rms):
-            rlabel, rcolor = _rms_to_label_color(rms)
-            self._rms_card.update_card(f"{rms:.1f} µV", rlabel, rcolor)
+        # RMS card — show mean ± std across all channels/grids
+        if rms_mean is not None and not np.isnan(rms_mean):
+            rlabel, rcolor = _rms_to_label_color(rms_mean)
+            if rms_std is not None and not np.isnan(rms_std) and rms_std > 0:
+                value_text = f"{rms_mean:.1f} ± {rms_std:.1f} µV"
+            else:
+                value_text = f"{rms_mean:.1f} µV"
+            self._rms_card.update_card(value_text, rlabel, rcolor)
         else:
             self._rms_card.reset_card()
 
