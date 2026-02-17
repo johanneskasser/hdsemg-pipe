@@ -7,7 +7,9 @@ which files to include in further analysis.
 
 import json
 import os
-from typing import Dict, Optional, Tuple
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -170,7 +172,95 @@ class _FileListItem(QWidget):
         self.selection_changed.emit(self._file_path, checked)
 
 
-# (no card class — stats are displayed as flat labels in the right panel)
+# ---------------------------------------------------------------------------
+# Grouping helpers
+# ---------------------------------------------------------------------------
+
+def _get_group_key(filename: str) -> str:
+    """Strip trailing _N number from the stem to get the group key.
+
+    e.g. ``Block1_Pyramid_3.mat`` → ``Block1_Pyramid``
+    Files without a trailing number form their own singleton group.
+    """
+    stem = Path(filename).stem.rstrip('.')   # handle accidental double dots
+    return re.sub(r'_\d+$', '', stem)
+
+
+def _shorten_group_labels(group_keys: List[str]) -> Dict[str, str]:
+    """Return a human-readable label for each group key by stripping the
+    shared filename prefix (proband/date/time/protocol).
+
+    e.g. ``2_20260216_130218_FT_Block1_Pyramid`` → ``Block1 Pyramid``
+    """
+    if not group_keys:
+        return {}
+    common = os.path.commonprefix(group_keys)
+    # Trim to last underscore so we don't cut mid-word
+    if '_' in common:
+        common = common[:common.rfind('_') + 1]
+    result = {}
+    for key in group_keys:
+        unique = key[len(common):]
+        result[key] = unique.replace('_', ' ').strip() or key
+    return result
+
+
+# ---------------------------------------------------------------------------
+# _GroupHeader
+# ---------------------------------------------------------------------------
+
+class _GroupHeader(QWidget):
+    """Section header row shown above each file group.
+
+    Displays a short group label on the left and a coloured ``selected/total``
+    counter on the right.
+    """
+
+    def __init__(self, label: str, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {Colors.BG_TERTIARY};
+                border-radius: {BorderRadius.SM};
+            }}
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(Spacing.SM, Spacing.XS, Spacing.SM, Spacing.XS)
+        layout.setSpacing(Spacing.XS)
+
+        lbl = QLabel(label.upper())
+        lbl.setStyleSheet(f"""
+            QLabel {{
+                color: {Colors.TEXT_SECONDARY};
+                font-size: {Fonts.SIZE_XS};
+                font-weight: {Fonts.WEIGHT_SEMIBOLD};
+                letter-spacing: 0.5px;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        layout.addWidget(lbl, 1)
+
+        self._counter = QLabel("")
+        self._counter.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._counter.setStyleSheet(
+            f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};"
+            f"font-weight:{Fonts.WEIGHT_MEDIUM};background:transparent;border:none;"
+        )
+        layout.addWidget(self._counter)
+
+    def update_counter(self, selected: int, total: int):
+        self._counter.setText(f"{selected}/{total}")
+        if selected == 0:
+            color = Colors.RED_500
+        elif selected == total:
+            color = Colors.GREEN_500
+        else:
+            color = Colors.ORANGE_500
+        self._counter.setStyleSheet(
+            f"color:{color};font-size:{Fonts.SIZE_XS};"
+            f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +278,11 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._score_cache: Dict[str, Optional[float]] = {}
         self._current_file: Optional[str] = None
         self._rms_df: Optional[pd.DataFrame] = None
+        # Grouping state
+        self._grouped_mode: bool = True
+        self._last_grouped_mode: Optional[bool] = None
+        self._group_file_map: Dict[str, List[str]] = {}   # group_key → [file_paths]
+        self._group_headers: Dict[str, _GroupHeader] = {}  # group_key → header widget
 
         super().__init__(
             step_index=5,
@@ -239,7 +334,13 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(Spacing.SM)
 
-        # Header
+        # Header row: "FILES" label + grouping toggle
+        hdr_row = QWidget()
+        hdr_row.setStyleSheet("background:transparent;")
+        hdr_layout = QHBoxLayout(hdr_row)
+        hdr_layout.setContentsMargins(0, 0, 0, 0)
+        hdr_layout.setSpacing(Spacing.SM)
+
         hdr = QLabel("FILES")
         hdr.setStyleSheet(f"""
             QLabel {{
@@ -247,9 +348,21 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
                 font-size: {Fonts.SIZE_XS};
                 font-weight: {Fonts.WEIGHT_SEMIBOLD};
                 letter-spacing: 0.6px;
+                background: transparent;
+                border: none;
             }}
         """)
-        layout.addWidget(hdr)
+        hdr_layout.addWidget(hdr, 1)
+
+        self._toggle_group_btn = QPushButton("Group")
+        self._toggle_group_btn.setCheckable(True)
+        self._toggle_group_btn.setChecked(True)
+        self._toggle_group_btn.setFixedHeight(20)
+        self._toggle_group_btn.setStyleSheet(self._group_btn_style(True))
+        self._toggle_group_btn.toggled.connect(self._on_toggle_grouping)
+        hdr_layout.addWidget(self._toggle_group_btn)
+
+        layout.addWidget(hdr_row)
 
         # Scrollable file list
         scroll = QScrollArea()
@@ -473,7 +586,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
     # ------------------------------------------------------------------
 
     def _populate_file_list(self):
-        """Read all .mat files from disk and populate the list."""
+        """Read all .mat files from disk and (re)populate the list."""
         cleaned_path = global_state.get_line_noise_cleaned_path()
         try:
             all_files = sorted([
@@ -491,32 +604,95 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             )
             return
 
-        # Skip repopulation if files haven't changed
-        if set(self._file_items.keys()) == set(all_files):
+        # Rebuild if files changed OR grouping mode changed
+        mode_changed = self._grouped_mode != self._last_grouped_mode
+        if set(self._file_items.keys()) == set(all_files) and not mode_changed:
             return
 
-        # Remove existing items (preserve the trailing stretch)
+        self._last_grouped_mode = self._grouped_mode
+
+        # Clear existing items (preserve the trailing stretch)
         while self._list_layout.count() > 1:
             item = self._list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._file_items.clear()
+        self._group_headers.clear()
+        self._group_file_map.clear()
         self._current_file = None
 
-        # Load previously saved selection
         saved_selection = self._load_saved_selection()
 
-        for fp in all_files:
-            list_item = _FileListItem(fp, self._list_container)
-            if saved_selection is not None:
-                list_item.set_checked(fp in saved_selection)
-            list_item.clicked.connect(self._on_file_selected)
-            list_item.selection_changed.connect(self._on_selection_changed)
-            # Insert before the trailing stretch
-            self._list_layout.insertWidget(self._list_layout.count() - 1, list_item)
-            self._file_items[fp] = list_item
+        if self._grouped_mode:
+            self._populate_grouped(all_files, saved_selection)
+        else:
+            self._populate_flat(all_files, saved_selection)
 
         # Auto-select happens in check() after _load_rms_csv() so RMS data is available
+
+    def _populate_flat(self, all_files: List[str], saved_selection):
+        for fp in all_files:
+            item = _FileListItem(fp, self._list_container)
+            if saved_selection is not None:
+                item.set_checked(fp in saved_selection)
+            item.clicked.connect(self._on_file_selected)
+            item.selection_changed.connect(self._on_selection_changed)
+            self._list_layout.insertWidget(self._list_layout.count() - 1, item)
+            self._file_items[fp] = item
+
+    def _populate_grouped(self, all_files: List[str], saved_selection):
+        # Build groups preserving file order
+        groups: Dict[str, List[str]] = {}
+        for fp in all_files:
+            key = _get_group_key(os.path.basename(fp))
+            groups.setdefault(key, []).append(fp)
+        self._group_file_map = groups
+
+        labels = _shorten_group_labels(list(groups.keys()))
+
+        for key, files in groups.items():
+            header = _GroupHeader(labels.get(key, key), self._list_container)
+            self._list_layout.insertWidget(self._list_layout.count() - 1, header)
+            self._group_headers[key] = header
+
+            for fp in files:
+                item = _FileListItem(fp, self._list_container)
+                if saved_selection is not None:
+                    item.set_checked(fp in saved_selection)
+                item.clicked.connect(self._on_file_selected)
+                item.selection_changed.connect(self._on_selection_changed)
+                self._list_layout.insertWidget(self._list_layout.count() - 1, item)
+                self._file_items[fp] = item
+
+            # Initialize counters
+            total = len(files)
+            selected = sum(1 for fp in files if self._file_items[fp].is_checked())
+            header.update_counter(selected, total)
+
+    @staticmethod
+    def _group_btn_style(active: bool) -> str:
+        if active:
+            return (f"QPushButton {{background-color:{Colors.BLUE_500};color:white;"
+                    f"border:none;border-radius:{BorderRadius.SM};"
+                    f"font-size:{Fonts.SIZE_XS};font-weight:{Fonts.WEIGHT_MEDIUM};"
+                    f"padding:2px 8px;}}"
+                    f"QPushButton:hover {{background-color:{Colors.BLUE_600};}}")
+        return (f"QPushButton {{background-color:{Colors.BG_TERTIARY};"
+                f"color:{Colors.TEXT_MUTED};"
+                f"border:1px solid {Colors.BORDER_MUTED};border-radius:{BorderRadius.SM};"
+                f"font-size:{Fonts.SIZE_XS};font-weight:{Fonts.WEIGHT_MEDIUM};"
+                f"padding:2px 8px;}}"
+                f"QPushButton:hover {{background-color:{Colors.BG_SECONDARY};}}")
+
+    def _on_toggle_grouping(self, checked: bool):
+        self._grouped_mode = checked
+        self._toggle_group_btn.setStyleSheet(self._group_btn_style(checked))
+        self._populate_file_list()
+        # Re-select current or first file
+        if self._current_file and self._current_file in self._file_items:
+            self._on_file_selected(self._current_file)
+        elif self._file_items:
+            self._on_file_selected(next(iter(self._file_items)))
 
     # ------------------------------------------------------------------
     # RMS data
@@ -780,8 +956,18 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
     # Selection helpers
     # ------------------------------------------------------------------
 
-    def _on_selection_changed(self, _file_path: str, _is_selected: bool):
+    def _on_selection_changed(self, file_path: str, _is_selected: bool):
         self._update_confirm_button()
+        if self._grouped_mode:
+            key = _get_group_key(os.path.basename(file_path))
+            if key in self._group_headers and key in self._group_file_map:
+                files = self._group_file_map[key]
+                total = len(files)
+                selected = sum(
+                    1 for fp in files
+                    if fp in self._file_items and self._file_items[fp].is_checked()
+                )
+                self._group_headers[key].update_counter(selected, total)
 
     def _update_confirm_button(self):
         total = len(self._file_items)
