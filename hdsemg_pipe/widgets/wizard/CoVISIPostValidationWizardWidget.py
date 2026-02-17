@@ -192,7 +192,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Step configuration
-        step_index = 11  # After MUEdit (10), before FinalResults (12)
+        step_index = 12  # After MUEdit (11), before FinalResults (13)
         step_name = "CoVISI Post-Validation"
         description = (
             "Validate motor unit quality after MUedit cleaning. "

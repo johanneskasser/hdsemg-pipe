@@ -25,6 +25,7 @@ from hdsemg_pipe.widgets.wizard.OpenFileWizardWidget import OpenFileWizardWidget
 from hdsemg_pipe.widgets.wizard.GridAssociationWizardWidget import GridAssociationWizardWidget
 from hdsemg_pipe.widgets.wizard.LineNoiseRemovalWizardWidget import LineNoiseRemovalWizardWidget
 from hdsemg_pipe.widgets.wizard.RMSQualityWizardWidget import RMSQualityWizardWidget
+from hdsemg_pipe.widgets.wizard.FileQualitySelectionWizardWidget import FileQualitySelectionWizardWidget
 from hdsemg_pipe.widgets.wizard.DefineRoiWizardWidget import DefineRoiWizardWidget
 from hdsemg_pipe.widgets.wizard.ChannelSelectionWizardWidget import ChannelSelectionWizardWidget
 from hdsemg_pipe.widgets.wizard.DecompositionResultsWizardWidget import DecompositionResultsWizardWidget
@@ -152,61 +153,68 @@ class WizardMainWindow(QMainWindow):
         self.step_stack.addWidget(step4)
         step4.check()
 
-        # Step 5: Define ROI
-        step5 = DefineRoiWizardWidget()
+        # Step 5: File Quality Selection
+        step5 = FileQualitySelectionWizardWidget()
         global_state.register_widget(step5, name="step5")
         self.steps.append(step5)
         self.step_stack.addWidget(step5)
         step5.check()
 
-        # Step 6: Channel Selection
-        step6 = ChannelSelectionWizardWidget()
+        # Step 6: Define ROI
+        step6 = DefineRoiWizardWidget()
         global_state.register_widget(step6, name="step6")
         self.steps.append(step6)
         self.step_stack.addWidget(step6)
         step6.check()
 
-        # Step 7: Decomposition Results
-        step7 = DecompositionResultsWizardWidget()
+        # Step 7: Channel Selection
+        step7 = ChannelSelectionWizardWidget()
         global_state.register_widget(step7, name="step7")
         self.steps.append(step7)
         self.step_stack.addWidget(step7)
         step7.check()
 
-        # Step 8: Multi-Grid Configuration
-        step8 = MultiGridConfigWizardWidget()
+        # Step 8: Decomposition Results
+        step8 = DecompositionResultsWizardWidget()
         global_state.register_widget(step8, name="step8")
         self.steps.append(step8)
         self.step_stack.addWidget(step8)
         step8.check()
 
-        # Step 9: CoVISI Pre-Filtering (optional)
-        step9 = CoVISIPreFilterWizardWidget()
+        # Step 9: Multi-Grid Configuration
+        step9 = MultiGridConfigWizardWidget()
         global_state.register_widget(step9, name="step9")
         self.steps.append(step9)
         self.step_stack.addWidget(step9)
         step9.check()
 
-        # Step 10: MUEdit Manual Cleaning
-        step10 = MUEditCleaningWizardWidget()
+        # Step 10: CoVISI Pre-Filtering (optional)
+        step10 = CoVISIPreFilterWizardWidget()
         global_state.register_widget(step10, name="step10")
         self.steps.append(step10)
         self.step_stack.addWidget(step10)
         step10.check()
 
-        # Step 11: CoVISI Post-Validation
-        step11 = CoVISIPostValidationWizardWidget()
+        # Step 11: MUEdit Manual Cleaning
+        step11 = MUEditCleaningWizardWidget()
         global_state.register_widget(step11, name="step11")
         self.steps.append(step11)
         self.step_stack.addWidget(step11)
         step11.check()
 
-        # Step 12: Final Results
-        step12 = FinalResultsWizardWidget()
+        # Step 12: CoVISI Post-Validation
+        step12 = CoVISIPostValidationWizardWidget()
         global_state.register_widget(step12, name="step12")
         self.steps.append(step12)
         self.step_stack.addWidget(step12)
         step12.check()
+
+        # Step 13: Final Results
+        step13 = FinalResultsWizardWidget()
+        global_state.register_widget(step13, name="step13")
+        self.steps.append(step13)
+        self.step_stack.addWidget(step13)
+        step13.check()
 
     def connectSteps(self):
         """Connect step signals."""
@@ -233,7 +241,7 @@ class WizardMainWindow(QMainWindow):
         current_viewed_step = self.current_step_index + 1  # Convert 0-based to 1-based
         if step_index == current_viewed_step:
             # Auto-navigate to next step if not on last step
-            if step_index < 12:
+            if step_index < 13:
                 logger.info(f"Auto-navigating from step {step_index} to step {step_index + 1}")
                 self.navigateNext()
             else:
@@ -248,7 +256,7 @@ class WizardMainWindow(QMainWindow):
 
     def navigateToStep(self, step_index):
         """Navigate to a specific step (1-indexed)."""
-        if 1 <= step_index <= 12:
+        if 1 <= step_index <= 13:
             self.current_step_index = step_index - 1
             self.step_stack.setCurrentIndex(self.current_step_index)
             self.progress_indicator.setActiveStep(step_index)
@@ -310,7 +318,7 @@ class WizardMainWindow(QMainWindow):
         last_step = start_reconstruction_workflow(self)
         if last_step is not None:
             # Navigate to next step after last completed (or stay on last if all complete)
-            next_step = min(last_step + 1, 11)  # 11 is last step (0-indexed)
+            next_step = min(last_step + 1, 12)  # 12 is last step (0-indexed, 13 steps total)
             self.navigateToStep(next_step + 1)  # navigateToStep is 1-indexed
             logger.info(f"Navigated to step {next_step + 1} after state reconstruction")
 

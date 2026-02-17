@@ -132,7 +132,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Hardcoded step configuration
-        step_index = 12
+        step_index = 13
         step_name = "Final Results"
         description = "Convert edited MUEdit files back to JSON format and view cleaned results in openhdemg."
 

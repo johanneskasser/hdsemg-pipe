@@ -126,7 +126,7 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Hardcoded step configuration
-        step_index = 8
+        step_index = 9
         step_name = "Multi-Grid Configuration"
         description = "Configure multi-grid groups for MUEdit's duplicate detection (optional). Export files to MUEdit format."
 
