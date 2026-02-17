@@ -149,14 +149,14 @@ class _FileListItem(QWidget):
         self._apply_style(active)
 
     def _apply_style(self, active: bool):
-        bg = Colors.BLUE_50 if active else "transparent"
+        bg = Colors.BLUE_100 if active else "transparent"
         self.setStyleSheet(f"""
             QWidget {{
                 background-color: {bg};
                 border-radius: {BorderRadius.SM};
             }}
             QWidget:hover {{
-                background-color: {"#dbeafe" if active else Colors.BG_SECONDARY};
+                background-color: {"#bfdbfe" if active else Colors.BG_SECONDARY};
             }}
         """)
 
@@ -170,111 +170,7 @@ class _FileListItem(QWidget):
         self.selection_changed.emit(self._file_path, checked)
 
 
-# ---------------------------------------------------------------------------
-# _MetadataCard
-# ---------------------------------------------------------------------------
-
-class _MetadataCard(QFrame):
-    """Small info card: title + coloured dot + value + quality label."""
-
-    def __init__(self, title: str, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {Colors.BG_SECONDARY};
-                border: 1px solid {Colors.BORDER_MUTED};
-                border-radius: {BorderRadius.MD};
-            }}
-        """)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
-        layout.setSpacing(Spacing.XS)
-
-        # Section title
-        title_lbl = QLabel(title.upper())
-        title_lbl.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.TEXT_SECONDARY};
-                font-size: {Fonts.SIZE_XS};
-                font-weight: {Fonts.WEIGHT_MEDIUM};
-                letter-spacing: 0.4px;
-                background: transparent;
-                border: none;
-            }}
-        """)
-        layout.addWidget(title_lbl)
-
-        # Value row
-        value_row = QWidget()
-        value_row.setStyleSheet("background: transparent; border: none;")
-        value_layout = QHBoxLayout(value_row)
-        value_layout.setContentsMargins(0, 0, 0, 0)
-        value_layout.setSpacing(Spacing.XS)
-
-        self._dot = QLabel("●")
-        self._dot.setStyleSheet(
-            f"color: {Colors.GRAY_300}; font-size: 16px; background: transparent; border: none;"
-        )
-        value_layout.addWidget(self._dot)
-
-        self._value = QLabel("—")
-        self._value.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.TEXT_PRIMARY};
-                font-size: {Fonts.SIZE_LG};
-                font-weight: {Fonts.WEIGHT_SEMIBOLD};
-                background: transparent;
-                border: none;
-            }}
-        """)
-        value_layout.addWidget(self._value)
-        value_layout.addStretch()
-        layout.addWidget(value_row)
-
-        # Quality word
-        self._quality = QLabel("")
-        self._quality.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.TEXT_MUTED};
-                font-size: {Fonts.SIZE_XS};
-                background: transparent;
-                border: none;
-            }}
-        """)
-        layout.addWidget(self._quality)
-
-    def update_card(self, value_text: str, quality_label: str, color: str):
-        self._dot.setStyleSheet(
-            f"color: {color}; font-size: 16px; background: transparent; border: none;"
-        )
-        self._value.setText(value_text)
-        self._quality.setText(quality_label)
-        self._quality.setStyleSheet(f"""
-            QLabel {{
-                color: {color};
-                font-size: {Fonts.SIZE_XS};
-                font-weight: {Fonts.WEIGHT_MEDIUM};
-                background: transparent;
-                border: none;
-            }}
-        """)
-
-    def reset_card(self):
-        self._dot.setStyleSheet(
-            f"color: {Colors.GRAY_300}; font-size: 16px; background: transparent; border: none;"
-        )
-        self._value.setText("—")
-        self._quality.setText("")
-        self._quality.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.TEXT_MUTED};
-                font-size: {Fonts.SIZE_XS};
-                background: transparent;
-                border: none;
-            }}
-        """)
+# (no card class — stats are displayed as flat labels in the right panel)
 
 
 # ---------------------------------------------------------------------------
@@ -448,27 +344,67 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._warning_label.setVisible(False)
         layout.addWidget(self._warning_label)
 
-        # Metadata cards row
-        meta_row = QWidget()
-        meta_layout = QHBoxLayout(meta_row)
-        meta_layout.setContentsMargins(0, 0, 0, 0)
-        meta_layout.setSpacing(Spacing.MD)
-        self._deviation_card = _MetadataCard("Tracking Deviation (NRMSE)")
-        self._rms_card = _MetadataCard("RMS Noise Quality")
-        meta_layout.addWidget(self._deviation_card)
-        meta_layout.addWidget(self._rms_card)
-        layout.addWidget(meta_row)
+        # Stats row — flat labels, no card borders
+        _ts = (f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};"
+               f"font-weight:{Fonts.WEIGHT_MEDIUM};letter-spacing:0.5px;"
+               f"background:transparent;border:none;")
+        _vs = (f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+               f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;")
+        _qs = f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};background:transparent;border:none;"
+
+        stats_row = QWidget()
+        stats_row.setStyleSheet("background:transparent;")
+        stats_layout = QHBoxLayout(stats_row)
+        stats_layout.setContentsMargins(0, Spacing.XS, 0, 0)
+        stats_layout.setSpacing(0)
+
+        dev_col = QWidget()
+        dev_col.setStyleSheet("background:transparent;")
+        dev_cv = QVBoxLayout(dev_col)
+        dev_cv.setContentsMargins(0, 0, 0, 0)
+        dev_cv.setSpacing(2)
+        dev_cv.addWidget(QLabel("TRACKING DEVIATION (NRMSE)", styleSheet=_ts))
+        self._dev_value_lbl = QLabel("—")
+        self._dev_value_lbl.setStyleSheet(_vs)
+        self._dev_quality_lbl = QLabel("")
+        self._dev_quality_lbl.setStyleSheet(_qs)
+        dev_cv.addWidget(self._dev_value_lbl)
+        dev_cv.addWidget(self._dev_quality_lbl)
+        stats_layout.addWidget(dev_col)
+        stats_layout.addSpacing(Spacing.LG)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFixedWidth(1)
+        sep.setStyleSheet(f"background-color:{Colors.BORDER_MUTED};border:none;")
+        stats_layout.addWidget(sep)
+        stats_layout.addSpacing(Spacing.LG)
+
+        rms_col = QWidget()
+        rms_col.setStyleSheet("background:transparent;")
+        rms_cv = QVBoxLayout(rms_col)
+        rms_cv.setContentsMargins(0, 0, 0, 0)
+        rms_cv.setSpacing(2)
+        rms_cv.addWidget(QLabel("RMS NOISE QUALITY", styleSheet=_ts))
+        self._rms_value_lbl = QLabel("—")
+        self._rms_value_lbl.setStyleSheet(_vs)
+        self._rms_quality_lbl = QLabel("")
+        self._rms_quality_lbl.setStyleSheet(_qs)
+        rms_cv.addWidget(self._rms_value_lbl)
+        rms_cv.addWidget(self._rms_quality_lbl)
+        stats_layout.addWidget(rms_col)
+        stats_layout.addStretch()
+
+        layout.addWidget(stats_row)
 
         # Filename display
-        self._filename_display = QLabel("Select a file from the list to inspect.")
+        self._filename_display = QLabel("")
         self._filename_display.setWordWrap(True)
-        self._filename_display.setTextInteractionFlags(
-            Qt.TextSelectableByMouse
-        )
+        self._filename_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._filename_display.setStyleSheet(f"""
             QLabel {{
-                color: {Colors.TEXT_SECONDARY};
-                font-size: {Fonts.SIZE_SM};
+                color: {Colors.TEXT_MUTED};
+                font-size: {Fonts.SIZE_XS};
                 font-style: italic;
             }}
         """)
@@ -525,6 +461,11 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self.setActionButtonsEnabled(True)
         self._populate_file_list()
         self._load_rms_csv()
+        # Always refresh displayed file after CSV reload (also handles initial auto-select)
+        if self._current_file and self._current_file in self._file_items:
+            self._on_file_selected(self._current_file)
+        elif self._file_items:
+            self._on_file_selected(next(iter(self._file_items)))
         self._update_confirm_button()
 
     # ------------------------------------------------------------------
@@ -560,6 +501,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._file_items.clear()
+        self._current_file = None
 
         # Load previously saved selection
         saved_selection = self._load_saved_selection()
@@ -574,9 +516,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             self._list_layout.insertWidget(self._list_layout.count() - 1, list_item)
             self._file_items[fp] = list_item
 
-        # Automatically show first file
-        if all_files:
-            self._on_file_selected(all_files[0])
+        # Auto-select happens in check() after _load_rms_csv() so RMS data is available
 
     # ------------------------------------------------------------------
     # RMS data
@@ -742,23 +682,51 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         if file_path in self._file_items:
             self._file_items[file_path].set_quality_color(dot_color)
 
-        # Deviation card
+        # Deviation stat
         if score is not None:
             slabel, scolor = _score_to_label_color(score)
-            self._deviation_card.update_card(f"{score:.1f} %", slabel, scolor)
+            self._update_stat(self._dev_value_lbl, self._dev_quality_lbl,
+                              f"{score:.1f} %", slabel, scolor)
         else:
-            self._deviation_card.reset_card()
+            self._reset_stat(self._dev_value_lbl, self._dev_quality_lbl)
 
-        # RMS card — show mean ± std across all channels/grids
+        # RMS stat — show mean ± std across all channels/grids
         if rms_mean is not None and not np.isnan(rms_mean):
             rlabel, rcolor = _rms_to_label_color(rms_mean)
-            if rms_std is not None and not np.isnan(rms_std) and rms_std > 0:
-                value_text = f"{rms_mean:.1f} ± {rms_std:.1f} µV"
-            else:
-                value_text = f"{rms_mean:.1f} µV"
-            self._rms_card.update_card(value_text, rlabel, rcolor)
+            value_text = (f"{rms_mean:.1f} ± {rms_std:.1f} µV"
+                          if rms_std is not None and not np.isnan(rms_std) and rms_std > 0
+                          else f"{rms_mean:.1f} µV")
+            self._update_stat(self._rms_value_lbl, self._rms_quality_lbl,
+                              value_text, rlabel, rcolor)
         else:
-            self._rms_card.reset_card()
+            self._reset_stat(self._rms_value_lbl, self._rms_quality_lbl)
+
+    # ------------------------------------------------------------------
+    # Stat label helpers
+    # ------------------------------------------------------------------
+
+    def _update_stat(self, value_lbl: QLabel, quality_lbl: QLabel,
+                     value_text: str, quality_label: str, color: str):
+        value_lbl.setText(value_text)
+        value_lbl.setStyleSheet(
+            f"color:{color};font-size:{Fonts.SIZE_LG};"
+            f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
+        )
+        quality_lbl.setText(quality_label)
+        quality_lbl.setStyleSheet(
+            f"color:{color};font-size:{Fonts.SIZE_XS};background:transparent;border:none;"
+        )
+
+    def _reset_stat(self, value_lbl: QLabel, quality_lbl: QLabel):
+        value_lbl.setText("—")
+        value_lbl.setStyleSheet(
+            f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+            f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
+        )
+        quality_lbl.setText("")
+        quality_lbl.setStyleSheet(
+            f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};background:transparent;border:none;"
+        )
 
     # ------------------------------------------------------------------
     # Plot
