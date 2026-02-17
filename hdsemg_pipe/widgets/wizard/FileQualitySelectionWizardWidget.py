@@ -114,9 +114,9 @@ class _FileListItem(QWidget):
         layout.addWidget(self._checkbox)
 
         # Filename label – full path as tooltip, elided display text
-        filename = os.path.basename(file_path)
+        filename = os.path.basename(self._file_path)
         self._name_label = QLabel(filename)
-        self._name_label.setToolTip(file_path)
+        self._name_label.setToolTip(self._file_path)
         self._name_label.setWordWrap(False)
         self._name_label.setMinimumWidth(0)
         self._name_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
