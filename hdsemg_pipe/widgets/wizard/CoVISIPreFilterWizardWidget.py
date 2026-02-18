@@ -153,9 +153,17 @@ class CoVISIFilterWorker(QThread):
                 "manual_overrides_applied": len(self.manual_overrides),
             }
 
+            # Collect filenames that belong to multigrid groups (will be merged later)
+            group_json_fnames = {
+                fname
+                for fnames in (self.multigrid_groupings or {}).values()
+                for fname in fnames
+            }
+
             total = len(self.json_files) + len(self.multigrid_groupings)
             for idx, json_path in enumerate(self.json_files):
                 filename = os.path.basename(json_path)
+                is_group_member = filename in group_json_fnames
                 self.progress.emit(idx, total, f"Filtering {filename}...")
 
                 try:
@@ -180,11 +188,16 @@ class CoVISIFilterWorker(QThread):
                         manual_overrides=file_overrides,
                     )
 
-                    # Export filtered JSON to MUedit format
-                    self.progress.emit(
-                        idx, total, f"Exporting {filename} to MUedit..."
-                    )
-                    muedit_path = export_to_muedit_mat(filtered_json_path)
+                    if is_group_member:
+                        # Group members are re-exported as merged multigrid below — skip individual MAT
+                        muedit_path = None
+                    else:
+                        # Export filtered JSON to MUedit format in multigrid folder
+                        self.progress.emit(
+                            idx, total, f"Exporting {filename} to MUedit..."
+                        )
+                        export_dir = self.multigrid_folder if self.multigrid_folder else self.output_folder
+                        muedit_path = export_to_muedit_mat(filtered_json_path, output_dir=export_dir)
 
                     # Aggregate stats
                     overall_stats["files_processed"] += 1
@@ -1117,7 +1130,9 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         self.progress_bar.setMaximum(len(self.json_files) + len(self.multigrid_groupings))
 
         # Start worker with manual overrides and multigrid support
-        multigrid_folder = global_state.get_decomposition_multigrid_path() if self.multigrid_groupings else None
+        # multigrid_folder is always set so CoVISI-filtered MAT files always land there
+        multigrid_folder = global_state.get_decomposition_multigrid_path()
+        os.makedirs(multigrid_folder, exist_ok=True)
         self.filter_worker = CoVISIFilterWorker(
             self.json_files, self.threshold, self.expected_folder,
             manual_overrides=self.manual_overrides.copy(),

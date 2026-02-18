@@ -150,7 +150,7 @@ def extract_grid_metadata_from_extras(extras_field):
     return grid_metadata
 
 
-def export_to_muedit_mat(json_load_filepath, ngrid=None):
+def export_to_muedit_mat(json_load_filepath, ngrid=None, output_dir=None):
     """
     Export openhdemg JSON decomposition results to MUEdit MAT format.
 
@@ -214,6 +214,11 @@ def export_to_muedit_mat(json_load_filepath, ngrid=None):
         else:
             mat_save_filepath = str(json_path).replace(".json", "_muedit.mat")
             logger.info("Single-grid export")
+
+        # Redirect to output_dir if provided (keeps filename, changes parent directory)
+        if output_dir is not None:
+            import os as _os
+            mat_save_filepath = _os.path.join(str(output_dir), Path(mat_save_filepath).name)
 
         # Extract dimensions
         nMU = json_from_openhdemg["IPTS"].shape[1]

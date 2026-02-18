@@ -51,10 +51,10 @@ class MUFileScanWorker(QThread):
                     else:
                         logger.info(f"Skipping {file} - no motor units found")
 
-        # Scan decomposition_multigrid for multigrid files
+        # Scan decomposition_multigrid for all muedit files (multigrid + covisi filtered single-grid)
         if self.multigrid_folder_path and os.path.exists(self.multigrid_folder_path):
             for file in os.listdir(self.multigrid_folder_path):
-                if file.endswith('_multigrid_muedit.mat'):
+                if file.endswith('_muedit.mat'):
                     full_path = os.path.join(self.multigrid_folder_path, file)
                     has_mus = self._check_motor_units(full_path, h5py, sio)
                     mu_check_cache[full_path] = has_mus
@@ -361,10 +361,10 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                     if os.path.exists(edited_path):
                         edited_files.append(edited_path)
 
-        # Scan decomposition_multigrid for multigrid files
+        # Scan decomposition_multigrid for all muedit files (multigrid + covisi filtered single-grid)
         if self.multigrid_folder and os.path.exists(self.multigrid_folder):
             for file in os.listdir(self.multigrid_folder):
-                if file.endswith('_multigrid_muedit.mat'):
+                if file.endswith('_muedit.mat'):
                     full_path = os.path.join(self.multigrid_folder, file)
                     all_muedit_files.append(full_path)
                     edited_path = os.path.join(self.multigrid_folder, file + '_edited.mat')
@@ -600,13 +600,13 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                     if os.path.exists(edited_path):
                         edited_files.append(edited_path)
 
-        # Scan decomposition_multigrid for multigrid muedit files
+        # Scan decomposition_multigrid for all muedit files (multigrid + covisi filtered single-grid)
         if self.multigrid_folder and os.path.exists(self.multigrid_folder):
             # Watch this folder if not already watched
             if self.multigrid_folder not in self.watcher.directories():
                 self.watcher.addPath(self.multigrid_folder)
             for file in os.listdir(self.multigrid_folder):
-                if file.endswith('_multigrid_muedit.mat'):
+                if file.endswith('_muedit.mat'):
                     full_path = os.path.join(self.multigrid_folder, file)
 
                     if full_path not in self.mu_check_cache:
