@@ -66,7 +66,9 @@ class MUEditExportWorker(QThread):
 
                     self.progress.emit(current, total_files, f"Exporting multi-grid group '{group_name}'...")
 
-                    muedit_file = export_multi_grid_to_muedit(group_file_paths, group_name)
+                    multigrid_folder = global_state.get_decomposition_multigrid_path()
+                    os.makedirs(multigrid_folder, exist_ok=True)
+                    muedit_file = export_multi_grid_to_muedit(group_file_paths, group_name, output_dir=multigrid_folder)
 
                     if muedit_file:
                         success_count += len(group_file_paths)
@@ -366,8 +368,9 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
             safe_group_name = "".join(c for c in group_name if c.isalnum() or c in (' ', '_', '-')).strip()
             safe_group_name = safe_group_name.replace(' ', '_')
 
-            # Check if the multi-grid file exists
-            expected_path = os.path.join(self.expected_folder, f"{safe_group_name}_multigrid_muedit.mat")
+            # Check if the multi-grid file exists (now in decomposition_multigrid folder)
+            multigrid_folder = global_state.get_decomposition_multigrid_path()
+            expected_path = os.path.join(multigrid_folder, f"{safe_group_name}_multigrid_muedit.mat")
             if not os.path.exists(expected_path):
                 return False
 

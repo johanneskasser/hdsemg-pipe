@@ -32,6 +32,7 @@ nav:
       - Grid Association: processing/grid_association.md
       - Line Noise Removal: processing/line_noise_removal.md
       - RMS Quality Analysis: processing/rms_quality_analysis.md
+      - File Quality Selection: processing/file_quality_selection.md
       - Crop to Region of Interest: processing/crop_to_roi.md
       - Channel Selection: processing/channel_selection.md
       - Decomposition Results: processing/decomposition_results.md

@@ -483,12 +483,21 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             self.status_label.setText("Decomposition folder not found.")
             return
 
-        # Find edited MAT files
-        self.edited_files = [
+        # Find edited MAT files from decomposition_auto and decomposition_multigrid
+        edited_from_auto = [
             os.path.join(self.expected_folder, f)
             for f in os.listdir(self.expected_folder)
             if f.endswith("_edited.mat")
-        ]
+        ] if os.path.exists(self.expected_folder) else []
+
+        multigrid_folder = global_state.get_decomposition_multigrid_path()
+        edited_from_multigrid = [
+            os.path.join(multigrid_folder, f)
+            for f in os.listdir(multigrid_folder)
+            if f.endswith("_edited.mat")
+        ] if os.path.exists(multigrid_folder) else []
+
+        self.edited_files = edited_from_auto + edited_from_multigrid
 
         # Find JSON files (for pre-cleaning comparison)
         state_files = {

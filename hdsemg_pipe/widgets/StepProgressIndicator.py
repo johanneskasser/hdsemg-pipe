@@ -11,12 +11,13 @@ class StepCircle(QWidget):
 
     clicked = pyqtSignal(int)
 
-    # Step names for tooltips (12 steps)
+    # Step names for tooltips (13 steps)
     STEP_NAMES = [
         "Open File(s)",
         "Grid Association",
         "Line Noise Removal",
         "RMS Quality Analysis",
+        "File Quality Selection",
         "Define ROI",
         "Channel Selection",
         "Decomposition Results",
@@ -190,7 +191,7 @@ class StepCircle(QWidget):
 class StepProgressIndicator(QWidget):
     """Top bar showing progress through all 12 steps."""
 
-    TOTAL_STEPS = 12
+    TOTAL_STEPS = 13
 
     stepClicked = pyqtSignal(int)
 

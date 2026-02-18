@@ -21,19 +21,22 @@ class MUEditInstructionDialog(QDialog):
     Shows which files need to be edited and highlights the next file to process.
     """
 
-    def __init__(self, muedit_files, edited_files, folder_path, skipped_files=None, parent=None):
+    def __init__(self, muedit_files, edited_files, folder_path, skipped_files=None,
+                 multigrid_folder_path=None, parent=None):
         """
         Args:
             muedit_files: List of full paths to _muedit.mat files
             edited_files: List of full paths to already edited files
-            folder_path: Path to the decomposition folder
+            folder_path: Path to the decomposition_auto folder
             skipped_files: Dict mapping file paths to skip reasons
+            multigrid_folder_path: Path to the decomposition_multigrid folder (optional)
             parent: Parent widget
         """
         super().__init__(parent)
         self.muedit_files = muedit_files
         self.edited_files = edited_files
         self.folder_path = folder_path
+        self.multigrid_folder_path = multigrid_folder_path
         self.parent_widget = parent
         self.skipped_files = skipped_files or {}
 
@@ -399,8 +402,8 @@ class MUEditInstructionDialog(QDialog):
             """)
             layout.addWidget(filename_label)
 
-            # Full path with copy button
-            file_path = os.path.join(self.folder_path, filename)
+            # Full path - use the full path from next_file directly (handles both folders)
+            file_path = next_file
 
             path_layout = QHBoxLayout()
             path_layout.setSpacing(Spacing.SM)
