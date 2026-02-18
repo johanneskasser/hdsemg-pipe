@@ -8,7 +8,6 @@ Literature standard: CoVISI < 30% indicates physiologically plausible MUs.
 """
 
 import csv
-import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -50,7 +49,6 @@ from hdsemg_pipe.actions.covisi_analysis import (
     get_ref_signal_for_plotting,
     save_covisi_report,
 )
-from hdsemg_pipe.actions.decomposition_export import export_to_muedit_mat, export_multi_grid_to_muedit
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.theme import (
     BorderRadius,
@@ -132,17 +130,16 @@ class CoVISIFilterWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, json_files, threshold, output_folder, manual_overrides=None,
-                 multigrid_groupings=None, multigrid_folder=None, parent=None):
+                 covisi_filtered_folder=None, parent=None):
         super().__init__(parent)
         self.json_files = json_files
         self.threshold = threshold
-        self.output_folder = output_folder
+        self.output_folder = output_folder  # decomposition_auto/ (source)
         self.manual_overrides = manual_overrides or {}  # (filename, mu_index) -> "Keep" or "Filter"
-        self.multigrid_groupings = multigrid_groupings or {}  # {group_name: [json_filenames]}
-        self.multigrid_folder = multigrid_folder  # Path to decomposition_multigrid/
+        self.covisi_filtered_folder = covisi_filtered_folder  # decomposition_covisi_filtered/
 
     def run(self):
-        """Apply CoVISI filtering and export to MUedit."""
+        """Apply CoVISI filtering and save filtered JSONs to covisi_filtered folder."""
         try:
             overall_stats = {
                 "files_processed": 0,
@@ -153,25 +150,16 @@ class CoVISIFilterWorker(QThread):
                 "manual_overrides_applied": len(self.manual_overrides),
             }
 
-            # Collect filenames that belong to multigrid groups (will be merged later)
-            group_json_fnames = {
-                fname
-                for fnames in (self.multigrid_groupings or {}).values()
-                for fname in fnames
-            }
-
-            total = len(self.json_files) + len(self.multigrid_groupings)
+            total = len(self.json_files)
             for idx, json_path in enumerate(self.json_files):
                 filename = os.path.basename(json_path)
-                is_group_member = filename in group_json_fnames
                 self.progress.emit(idx, total, f"Filtering {filename}...")
 
                 try:
-                    # Generate output path for filtered JSON
+                    # Generate output path for filtered JSON in covisi_filtered folder
                     base_name = Path(json_path).stem
-                    filtered_json_path = os.path.join(
-                        self.output_folder, f"{base_name}_covisi_filtered.json"
-                    )
+                    out_folder = self.covisi_filtered_folder if self.covisi_filtered_folder else self.output_folder
+                    filtered_json_path = os.path.join(out_folder, f"{base_name}_covisi_filtered.json")
 
                     # Extract manual overrides for this file
                     file_overrides = {
@@ -180,24 +168,13 @@ class CoVISIFilterWorker(QThread):
                         if fn == filename
                     }
 
-                    # Apply CoVISI filter with manual overrides
+                    # Apply CoVISI filter — output is filtered JSON only (no MAT export here)
                     stats = apply_covisi_filter_to_json(
                         json_path,
                         filtered_json_path,
                         threshold=self.threshold,
                         manual_overrides=file_overrides,
                     )
-
-                    if is_group_member:
-                        # Group members are re-exported as merged multigrid below — skip individual MAT
-                        muedit_path = None
-                    else:
-                        # Export filtered JSON to MUedit format in multigrid folder
-                        self.progress.emit(
-                            idx, total, f"Exporting {filename} to MUedit..."
-                        )
-                        export_dir = self.multigrid_folder if self.multigrid_folder else self.output_folder
-                        muedit_path = export_to_muedit_mat(filtered_json_path, output_dir=export_dir)
 
                     # Aggregate stats
                     overall_stats["files_processed"] += 1
@@ -209,45 +186,6 @@ class CoVISIFilterWorker(QThread):
                 except Exception as e:
                     logger.error(f"Failed to filter {filename}: {e}")
                     overall_stats["per_file_stats"][filename] = {"error": str(e)}
-
-            # Process multigrid groups: filter each group's JSONs and re-export as filtered multigrid
-            if self.multigrid_groupings and self.multigrid_folder:
-                offset = len(self.json_files)
-                for grp_idx, (group_name, json_filenames) in enumerate(self.multigrid_groupings.items()):
-                    self.progress.emit(
-                        offset + grp_idx, total,
-                        f"Filtering multigrid group '{group_name}'..."
-                    )
-                    try:
-                        filtered_paths = []
-                        for fname in json_filenames:
-                            json_path = os.path.join(self.output_folder, fname)
-                            if not os.path.exists(json_path):
-                                logger.warning(f"JSON not found for multigrid group: {json_path}")
-                                continue
-                            base = Path(json_path).stem
-                            filtered_json = os.path.join(self.output_folder, f"{base}_covisi_filtered.json")
-                            apply_covisi_filter_to_json(json_path, filtered_json, threshold=self.threshold)
-                            filtered_paths.append(filtered_json)
-                            overall_stats["files_processed"] += 1
-
-                        if len(filtered_paths) >= 2:
-                            filtered_group_name = group_name + "_covisi_filtered"
-                            self.progress.emit(
-                                offset + grp_idx, total,
-                                f"Exporting filtered multigrid group '{group_name}'..."
-                            )
-                            export_multi_grid_to_muedit(
-                                filtered_paths, filtered_group_name,
-                                output_dir=self.multigrid_folder
-                            )
-                            logger.info(f"Exported filtered multigrid: {filtered_group_name}")
-                        else:
-                            logger.warning(f"Not enough files for multigrid export of group '{group_name}'")
-
-                    except Exception as e:
-                        logger.error(f"Failed to filter multigrid group '{group_name}': {e}")
-                        overall_stats["per_file_stats"][f"multigrid:{group_name}"] = {"error": str(e)}
 
             self.finished.emit(overall_stats)
 
@@ -281,7 +219,6 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         self.expected_folder = None
         self.json_files = []
-        self.multigrid_groupings = {}  # {group_name: [json_filenames]}
         self.covisi_data = {}  # filename -> covisi_df
         self.threshold = DEFAULT_COVISI_THRESHOLD
         self.compute_worker = None
@@ -720,27 +657,10 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         if not global_state.is_widget_completed(f"step{self.step_index - 1}"):
             return False
 
-        # Load multigrid groupings (if any)
-        self._load_multigrid_groupings()
-
         # Scan for JSON files
         self.scan_json_files()
 
         return True
-
-    def _load_multigrid_groupings(self):
-        """Load multigrid groupings from JSON file in decomposition_auto folder."""
-        groupings_file = os.path.join(self.expected_folder, "multigrid_groupings.json")
-        if os.path.exists(groupings_file):
-            try:
-                with open(groupings_file, 'r') as f:
-                    self.multigrid_groupings = json.load(f)
-                logger.info(f"Loaded {len(self.multigrid_groupings)} multigrid groupings for CoVISI filtering")
-            except Exception as e:
-                logger.warning(f"Failed to load multigrid_groupings.json: {e}")
-                self.multigrid_groupings = {}
-        else:
-            self.multigrid_groupings = {}
 
     def scan_json_files(self):
         """Scan for JSON files in decomposition folder."""
@@ -1127,17 +1047,15 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         # Show progress
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.progress_bar.setMaximum(len(self.json_files) + len(self.multigrid_groupings))
+        self.progress_bar.setMaximum(len(self.json_files))
 
-        # Start worker with manual overrides and multigrid support
-        # multigrid_folder is always set so CoVISI-filtered MAT files always land there
-        multigrid_folder = global_state.get_decomposition_multigrid_path()
-        os.makedirs(multigrid_folder, exist_ok=True)
+        # Create output folder for filtered JSONs
+        covisi_filtered_folder = global_state.get_decomposition_covisi_filtered_path()
+        os.makedirs(covisi_filtered_folder, exist_ok=True)
         self.filter_worker = CoVISIFilterWorker(
             self.json_files, self.threshold, self.expected_folder,
             manual_overrides=self.manual_overrides.copy(),
-            multigrid_groupings=self.multigrid_groupings.copy() if self.multigrid_groupings else None,
-            multigrid_folder=multigrid_folder,
+            covisi_filtered_folder=covisi_filtered_folder,
         )
         self.filter_worker.progress.connect(self.on_filter_progress)
         self.filter_worker.finished.connect(self.on_filter_finished)

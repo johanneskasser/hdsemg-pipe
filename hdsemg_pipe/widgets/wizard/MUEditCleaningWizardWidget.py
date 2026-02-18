@@ -9,7 +9,7 @@ import subprocess
 from PyQt5.QtCore import QFileSystemWatcher, QTimer, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QFrame, QScrollArea,
-    QWidget, QProgressBar, QCheckBox
+    QWidget, QProgressBar
 )
 
 from hdsemg_pipe._log.log_config import logger
@@ -26,32 +26,18 @@ class MUFileScanWorker(QThread):
 
     scan_complete = pyqtSignal(list, dict)  # (valid_files, mu_check_cache)
 
-    def __init__(self, folder_path, multigrid_folder_path=None, parent=None):
+    def __init__(self, multigrid_folder_path, parent=None):
         super().__init__(parent)
-        self.folder_path = folder_path
         self.multigrid_folder_path = multigrid_folder_path
 
     def run(self):
-        """Scan folder(s) and check which files have motor units."""
+        """Scan decomposition_multigrid/ and check which files have motor units."""
         import h5py
         import scipy.io as sio
 
         valid_files = []
         mu_check_cache = {}
 
-        # Scan decomposition_auto for single-grid files
-        if os.path.exists(self.folder_path):
-            for file in os.listdir(self.folder_path):
-                if file.endswith('_muedit.mat') and '_multigrid_muedit.mat' not in file:
-                    full_path = os.path.join(self.folder_path, file)
-                    has_mus = self._check_motor_units(full_path, h5py, sio)
-                    mu_check_cache[full_path] = has_mus
-                    if has_mus:
-                        valid_files.append(full_path)
-                    else:
-                        logger.info(f"Skipping {file} - no motor units found")
-
-        # Scan decomposition_multigrid for all muedit files (multigrid + covisi filtered single-grid)
         if self.multigrid_folder_path and os.path.exists(self.multigrid_folder_path):
             for file in os.listdir(self.multigrid_folder_path):
                 if file.endswith('_muedit.mat'):
@@ -206,13 +192,6 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.loading_label.setVisible(False)
         status_layout.addWidget(self.loading_label)
 
-        # Checkbox to skip original muedit files when covisi filtered versions exist
-        self.chk_skip_originals = QCheckBox("Nur CoVISI-gefilterte Dateien verwenden (Originale auslassen)")
-        self.chk_skip_originals.setStyleSheet(f"font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;")
-        self.chk_skip_originals.setChecked(True)
-        self.chk_skip_originals.toggled.connect(lambda: self.scan_muedit_files(skip_mu_check=self.indexing_needed))
-        status_layout.addWidget(self.chk_skip_originals)
-
         # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setStyleSheet(f"""
@@ -273,18 +252,13 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         # Load skipped files from disk
         self.skipped_files = self._load_skipped_files()
 
-        # Add watcher for decomposition_auto folder
-        if os.path.exists(self.expected_folder):
-            if self.expected_folder not in self.watcher.directories():
-                self.watcher.addPath(self.expected_folder)
-
         # Add watcher for multigrid folder (if it exists)
         if os.path.exists(self.multigrid_folder):
             if self.multigrid_folder not in self.watcher.directories():
                 self.watcher.addPath(self.multigrid_folder)
 
         # Start polling timer for reliable file detection
-        if os.path.exists(self.expected_folder) or os.path.exists(self.multigrid_folder):
+        if os.path.exists(self.multigrid_folder):
             if not self.poll_timer.isActive():
                 self.poll_timer.start()
                 logger.info("Started MUEdit file polling timer (2s interval)")
@@ -351,17 +325,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         all_muedit_files = []
         edited_files = []
 
-        # Scan decomposition_auto for single-grid files only
-        if os.path.exists(self.expected_folder):
-            for file in os.listdir(self.expected_folder):
-                if file.endswith('_muedit.mat') and '_multigrid_muedit.mat' not in file:
-                    full_path = os.path.join(self.expected_folder, file)
-                    all_muedit_files.append(full_path)
-                    edited_path = os.path.join(self.expected_folder, file + '_edited.mat')
-                    if os.path.exists(edited_path):
-                        edited_files.append(edited_path)
-
-        # Scan decomposition_multigrid for all muedit files (multigrid + covisi filtered single-grid)
+        # Scan decomposition_multigrid only — all MAT files live here in the new design
         if self.multigrid_folder and os.path.exists(self.multigrid_folder):
             for file in os.listdir(self.multigrid_folder):
                 if file.endswith('_muedit.mat'):
@@ -371,44 +335,11 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                     if os.path.exists(edited_path):
                         edited_files.append(edited_path)
 
-        # Build set of originals that have a covisi filtered counterpart
-        covisi_filtered_names = set()
-        originals_with_covisi = set()
-        for f in all_muedit_files:
-            fname = os.path.basename(f)
-            if '_covisi_filtered_multigrid_muedit.mat' in fname:
-                covisi_filtered_names.add(fname)
-                original_name = fname.replace('_covisi_filtered_multigrid_muedit.mat', '_multigrid_muedit.mat')
-                originals_with_covisi.add(original_name)
-            elif '_covisi_filtered_muedit.mat' in fname:
-                covisi_filtered_names.add(fname)
-                original_name = fname.replace('_covisi_filtered_muedit.mat', '_muedit.mat')
-                originals_with_covisi.add(original_name)
-
-        # Show/hide checkbox based on whether any covisi filtered muedit files exist
-        has_covisi = len(covisi_filtered_names) > 0
-        self.chk_skip_originals.setVisible(has_covisi)
-
-        # Filter out original muedit files when covisi filtered versions exist
-        if has_covisi and self.chk_skip_originals.isChecked():
-            muedit_files = [
-                f for f in all_muedit_files
-                if os.path.basename(f) not in originals_with_covisi
-            ]
-            # Also filter edited_files to only include those matching kept muedit_files
-            kept_basenames = {os.path.basename(f) for f in muedit_files}
-            edited_files = [
-                ef for ef in edited_files
-                if any(os.path.basename(ef).startswith(kb.replace('.mat', '')) for kb in kept_basenames)
-            ]
-        else:
-            muedit_files = all_muedit_files
-
-        self.muedit_files = muedit_files
+        self.muedit_files = all_muedit_files
         self.edited_files = edited_files
 
         # Show indexing button only when cache has never been populated (None = never scanned)
-        if len(muedit_files) > 0 and self.mu_check_cache is None and not self.is_scanning:
+        if len(self.muedit_files) > 0 and self.mu_check_cache is None and not self.is_scanning:
             self.indexing_needed = True
             self.btn_index_motor_units.setVisible(True)
         else:
@@ -419,11 +350,11 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.update_progress_ui()
 
         # Enable button if files exist
-        self.btn_launch_muedit.setEnabled(len(muedit_files) > 0)
+        self.btn_launch_muedit.setEnabled(len(self.muedit_files) > 0)
 
     def _start_initial_scan(self):
         """Start initial scan in background thread."""
-        if self.is_scanning or not self.expected_folder:
+        if self.is_scanning or not self.multigrid_folder:
             return
 
         self.is_scanning = True
@@ -431,8 +362,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.loading_label.setVisible(True)
         self.loading_animation_timer.start(500)  # Update every 500ms
 
-        # Create and start worker thread (scan both folders)
-        self.scan_worker = MUFileScanWorker(self.expected_folder, multigrid_folder_path=self.multigrid_folder)
+        # Create and start worker thread (scan decomposition_multigrid only)
+        self.scan_worker = MUFileScanWorker(self.multigrid_folder)
         self.scan_worker.scan_complete.connect(self._on_scan_complete)
         self.scan_worker.start()
 
@@ -552,12 +483,12 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.scan_muedit_files()
 
     def scan_muedit_files(self, skip_mu_check=False):
-        """Scan for MUEdit files and track progress.
+        """Scan decomposition_multigrid/ for MUEdit files and track progress.
 
         Args:
             skip_mu_check: If True, skip motor unit checking (fast path for state reconstruction)
         """
-        if not os.path.exists(self.expected_folder):
+        if not self.multigrid_folder or not os.path.exists(self.multigrid_folder):
             return
 
         # Fast path: Skip motor unit checking entirely (for state reconstruction)
@@ -575,111 +506,51 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         if self.is_scanning:
             return
 
-        # Find all _muedit.mat files from both folders
+        # Scan decomposition_multigrid only — all MAT files live here in the new design
         all_muedit_files = []
         edited_files = []
         new_files_found = []
 
-        # Scan decomposition_auto for single-grid muedit files (NOT multigrid, those moved)
-        if os.path.exists(self.expected_folder):
-            for file in os.listdir(self.expected_folder):
-                if file.endswith('_muedit.mat') and '_multigrid_muedit.mat' not in file:
-                    full_path = os.path.join(self.expected_folder, file)
+        if self.multigrid_folder not in self.watcher.directories():
+            self.watcher.addPath(self.multigrid_folder)
 
-                    if full_path not in self.mu_check_cache:
-                        new_files_found.append(full_path)
-                        has_mus = True
-                    else:
-                        has_mus = self.mu_check_cache[full_path]
+        for file in os.listdir(self.multigrid_folder):
+            if file.endswith('_muedit.mat'):
+                full_path = os.path.join(self.multigrid_folder, file)
 
-                    if not has_mus:
-                        continue
+                if full_path not in self.mu_check_cache:
+                    new_files_found.append(full_path)
+                    has_mus = True
+                else:
+                    has_mus = self.mu_check_cache[full_path]
 
-                    all_muedit_files.append(full_path)
-                    edited_path = os.path.join(self.expected_folder, file + '_edited.mat')
-                    if os.path.exists(edited_path):
-                        edited_files.append(edited_path)
+                if not has_mus:
+                    continue
 
-        # Scan decomposition_multigrid for all muedit files (multigrid + covisi filtered single-grid)
-        if self.multigrid_folder and os.path.exists(self.multigrid_folder):
-            # Watch this folder if not already watched
-            if self.multigrid_folder not in self.watcher.directories():
-                self.watcher.addPath(self.multigrid_folder)
-            for file in os.listdir(self.multigrid_folder):
-                if file.endswith('_muedit.mat'):
-                    full_path = os.path.join(self.multigrid_folder, file)
-
-                    if full_path not in self.mu_check_cache:
-                        new_files_found.append(full_path)
-                        has_mus = True
-                    else:
-                        has_mus = self.mu_check_cache[full_path]
-
-                    if not has_mus:
-                        continue
-
-                    all_muedit_files.append(full_path)
-                    edited_path = os.path.join(self.multigrid_folder, file + '_edited.mat')
-                    if os.path.exists(edited_path):
-                        edited_files.append(edited_path)
+                all_muedit_files.append(full_path)
+                edited_path = os.path.join(self.multigrid_folder, file + '_edited.mat')
+                if os.path.exists(edited_path):
+                    edited_files.append(edited_path)
 
         # If new files were found, trigger a background scan for them
         if new_files_found and not self.is_scanning:
             logger.info(f"Found {len(new_files_found)} new files, starting background check")
             self._scan_new_files(new_files_found)
 
-        # Build set of originals that have a covisi filtered counterpart.
-        # Handles both single-grid (_covisi_filtered_muedit.mat) and
-        # multigrid (_covisi_filtered_multigrid_muedit.mat) cases.
-        covisi_filtered_names = set()
-        originals_with_covisi = set()
-        for f in all_muedit_files:
-            fname = os.path.basename(f)
-            if '_covisi_filtered_multigrid_muedit.mat' in fname:
-                covisi_filtered_names.add(fname)
-                original_name = fname.replace('_covisi_filtered_multigrid_muedit.mat', '_multigrid_muedit.mat')
-                originals_with_covisi.add(original_name)
-            elif '_covisi_filtered_muedit.mat' in fname:
-                covisi_filtered_names.add(fname)
-                original_name = fname.replace('_covisi_filtered_muedit.mat', '_muedit.mat')
-                originals_with_covisi.add(original_name)
-
-        # Show/hide checkbox based on whether any covisi filtered muedit files exist
-        has_covisi = len(covisi_filtered_names) > 0
-        self.chk_skip_originals.setVisible(has_covisi)
-
-        # Filter out original muedit files when covisi filtered versions exist
-        if has_covisi and self.chk_skip_originals.isChecked():
-            muedit_files = [
-                f for f in all_muedit_files
-                if os.path.basename(f) not in originals_with_covisi
-            ]
-            # Also filter edited_files to only include those matching kept muedit_files
-            kept_basenames = {os.path.basename(f) for f in muedit_files}
-            edited_files = [
-                ef for ef in edited_files
-                if any(os.path.basename(ef).startswith(kb.replace('.mat', '')) for kb in kept_basenames)
-            ]
-        else:
-            muedit_files = all_muedit_files
-
         # Check if file count changed (for logging)
-        file_count = len(muedit_files) + len(edited_files)
-        file_count_changed = file_count != self.last_file_count
+        file_count = len(all_muedit_files) + len(edited_files)
         self.last_file_count = file_count
 
-        self.muedit_files = muedit_files
+        self.muedit_files = all_muedit_files
         self.edited_files = edited_files
 
         # Update UI
         self.update_progress_ui()
 
         # Enable button if files exist
-        self.btn_launch_muedit.setEnabled(len(muedit_files) > 0)
+        self.btn_launch_muedit.setEnabled(len(self.muedit_files) > 0)
 
-        # Only log when file count changes to avoid spam
-        if file_count_changed:
-            logger.info(f"MUEdit files: {len(muedit_files)}, Edited files: {len(edited_files)}")
+        logger.debug(f"MUEdit files: {len(self.muedit_files)}, Edited files: {len(self.edited_files)}")
 
     def update_progress_ui(self):
         """Update progress UI with current status."""

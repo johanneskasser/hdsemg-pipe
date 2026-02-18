@@ -7,6 +7,7 @@ class FolderNames(Enum):
     LINE_NOISE_CLEANED = "line_noise_cleaned"
     DECOMPOSITION_AUTO = "decomposition_auto"
     DECOMPOSITION_MULTIGRID = "decomposition_multigrid"
+    DECOMPOSITION_COVISI_FILTERED = "decomposition_covisi_filtered"
     DECOMPOSITION_RESULTS = "decomposition_results"
     CROPPED_SIGNAL = "cropped_signal"
     ANALYSIS = "analysis"
@@ -20,6 +21,7 @@ class FolderNames(Enum):
             cls.CHANNELSELECTION.value,
             cls.DECOMPOSITION_AUTO.value,
             cls.DECOMPOSITION_MULTIGRID.value,
+            cls.DECOMPOSITION_COVISI_FILTERED.value,
             cls.DECOMPOSITION_RESULTS.value,
             cls.CROPPED_SIGNAL.value,
             cls.ORIGINAL_FILES.value

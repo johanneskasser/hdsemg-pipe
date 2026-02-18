@@ -101,18 +101,19 @@ def reconstruct_folder_state(folderpath):
         logger.info(f"Skipping decomposition results reconstruction: {e}")
         global_state.skip_widget("step8")
 
-    # Try to reconstruct multi-grid configuration (Step 9)
-    try:
-        _multigrid_config()
-    except Exception as e:
-        logger.info(f"Skipping multi-grid configuration reconstruction: {e}")
-        global_state.skip_widget("step9")
-
-    # Try to reconstruct CoVISI pre-filter (Step 10)
+    # Try to reconstruct CoVISI pre-filter (Step 9)
     try:
         _covisi_pre_filter()
     except Exception as e:
         logger.info(f"Skipping CoVISI pre-filter reconstruction: {e}")
+        global_state.skip_widget("step9")
+
+    # Try to reconstruct multi-grid configuration (Step 10)
+    try:
+        _multigrid_config()
+    except Exception as e:
+        logger.info(f"Skipping multi-grid configuration reconstruction: {e}")
+        global_state.skip_widget("step10")
 
     # Try to reconstruct MUEdit cleaning (Step 11)
     try:
@@ -482,41 +483,36 @@ def _decomposition_results_init():
         raise ValueError("decomposition widget not found in global state.")
 
 def _multigrid_config():
-    """Reconstruct Step 9: Multi-Grid Configuration from JSON state."""
-    multigrid_widget = global_state.get_widget("step9")
+    """Reconstruct Step 10: Multi-Grid Configuration from JSON state."""
+    multigrid_widget = global_state.get_widget("step10")
     if multigrid_widget:
         multigrid_widget.init_file_checking()
 
         # Case 1: groupings JSON exists (empty or with groups) and all required MUEdit files exist
         if multigrid_widget.grid_groupings is not None and multigrid_widget.is_completed():
             if len(multigrid_widget.grid_groupings) > 0:
-                logger.info("Step 9 state reconstructed: groupings loaded and MUEdit files found")
+                logger.info("Step 10 state reconstructed: groupings loaded and MUEdit files found")
             else:
-                logger.info("Step 9 state reconstructed: no multi-grid groups (single grids only)")
-            global_state.complete_widget("step9")
+                logger.info("Step 10 state reconstructed: no multi-grid groups (single grids only)")
+            global_state.complete_widget("step10")
         # Case 2: No groupings JSON but MUEdit files exist (backwards compatibility)
         elif multigrid_widget.grid_groupings == {} and multigrid_widget.is_completed():
-            logger.info("Step 9 state reconstructed: no groupings JSON but MUEdit files exist (backwards compat)")
+            logger.info("Step 10 state reconstructed: no groupings JSON but MUEdit files exist (backwards compat)")
             multigrid_widget.save_groupings_to_json()
-            global_state.complete_widget("step9")
+            global_state.complete_widget("step10")
         else:
-            logger.info("Step 9 not completed: no MUEdit files found or step not yet processed")
+            logger.info("Step 10 not completed: no MUEdit files found or step not yet processed")
     else:
         logger.warning("Multi-grid configuration widget not found in global state.")
         raise ValueError("Multi-grid configuration widget not found in global state.")
 
 def _covisi_pre_filter():
-    """Reconstruct Step 10: CoVISI Pre-Filtering state."""
-    covisi_pre_filter_widget = global_state.get_widget("step10")
+    """Reconstruct Step 9: CoVISI Pre-Filtering state."""
+    covisi_pre_filter_widget = global_state.get_widget("step9")
     if covisi_pre_filter_widget:
         covisi_pre_filter_widget.init_file_checking()
 
         if covisi_pre_filter_widget.is_completed():
-            # Step 9 (Multi-Grid Config) is optional — skip if not completed
-            if not global_state.is_widget_completed("step9") and not global_state.is_widget_skipped("step9"):
-                logger.info("Step 9 (Multi-Grid Config) was not completed - marking as skipped to allow step 10 completion")
-                global_state.skip_widget("step9")
-
             report_path = os.path.join(covisi_pre_filter_widget.expected_folder, "covisi_pre_filter_report.json")
             filtering_skipped = False
             if os.path.exists(report_path):
@@ -529,11 +525,11 @@ def _covisi_pre_filter():
                     logger.warning(f"Could not read filtering_skipped status from report: {e}")
 
             if filtering_skipped:
-                logger.info("Step 10 state reconstructed: CoVISI pre-filter was skipped")
-                global_state.skip_widget("step10")
+                logger.info("Step 9 state reconstructed: CoVISI pre-filter was skipped")
+                global_state.skip_widget("step9")
             else:
-                logger.info("Step 10 state reconstructed: CoVISI pre-filter was applied")
-                global_state.complete_widget("step10")
+                logger.info("Step 9 state reconstructed: CoVISI pre-filter was applied")
+                global_state.complete_widget("step9")
 
     else:
         logger.warning("CoVISI pre-filter widget not found in global state.")

@@ -181,15 +181,15 @@ class WizardMainWindow(QMainWindow):
         self.step_stack.addWidget(step8)
         step8.check()
 
-        # Step 9: Multi-Grid Configuration
-        step9 = MultiGridConfigWizardWidget()
+        # Step 9: CoVISI Pre-Filtering (optional)
+        step9 = CoVISIPreFilterWizardWidget()
         global_state.register_widget(step9, name="step9")
         self.steps.append(step9)
         self.step_stack.addWidget(step9)
         step9.check()
 
-        # Step 10: CoVISI Pre-Filtering (optional)
-        step10 = CoVISIPreFilterWizardWidget()
+        # Step 10: Multi-Grid Configuration + MUEdit Export
+        step10 = MultiGridConfigWizardWidget()
         global_state.register_widget(step10, name="step10")
         self.steps.append(step10)
         self.step_stack.addWidget(step10)
