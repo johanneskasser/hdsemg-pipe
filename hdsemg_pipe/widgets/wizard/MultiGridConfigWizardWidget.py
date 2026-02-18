@@ -392,15 +392,14 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
             self.complete_step()
 
         elif success_count > 0 and actual_error_count > 0:
-            # Some real files failed, but check if all required files actually exist
-            if self.is_completed():
-                # All required files exist despite some errors, mark as complete
-                self.success(f"Export completed with warnings. All required files exist.")
-                # ALWAYS save state to JSON (even if empty) for state reconstruction
-                self.save_groupings_to_json()
-                self.complete_step()
-            else:
-                self.warn(f"Exported {success_count} file(s), but {actual_error_count} failed:\n" + "\n".join(non_state_errors))
+            # Some files failed — warn but still complete the step.
+            # Failed exports cannot be retried automatically; the user must proceed.
+            self.warn(
+                f"Export finished with {actual_error_count} error(s) "
+                f"({success_count} succeeded):\n" + "\n".join(non_state_errors)
+            )
+            self.save_groupings_to_json()
+            self.complete_step()
         else:
             self.error(f"Export failed:\n" + "\n".join(error_messages))
 

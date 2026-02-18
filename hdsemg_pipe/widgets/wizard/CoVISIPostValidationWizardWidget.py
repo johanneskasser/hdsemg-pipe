@@ -460,7 +460,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         if not workfolder:
             return False
 
-        self.expected_folder = global_state.get_decomposition_path()
+        self.expected_folder = global_state.get_decomposition_multigrid_path()
 
         if not OPENHDEMG_AVAILABLE:
             self.status_label.setText(
