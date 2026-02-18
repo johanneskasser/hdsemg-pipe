@@ -216,7 +216,13 @@ def _check_pipe_folder_structure(folderpath):
     logger.debug(f"Checking folder structure for: {folderpath}")
     # Define the expected subfolders (some are optional for backwards compatibility)
     expected_subfolders = FolderNames.list_values()
-    optional_folders = [FolderNames.DECOMPOSITION_RESULTS.value, FolderNames.ANALYSIS.value]
+    optional_folders = [
+        FolderNames.DECOMPOSITION_RESULTS.value,
+        FolderNames.ANALYSIS.value,
+        # These folders are created on-demand (CoVISI / MultiGrid export may never run)
+        FolderNames.DECOMPOSITION_COVISI_FILTERED.value,
+        FolderNames.DECOMPOSITION_MULTIGRID.value,
+    ]
 
     # Check if each expected subfolder exists
     for subfolder in expected_subfolders:
@@ -630,5 +636,20 @@ def _apply_process_log_overrides(folderpath: str) -> None:
                 global_state.widgets[step_key]["skipped"] = False
                 logger.info("Process log override: %s → pending (not in log)", step_key)
 
+    # Backwards compatibility for step9 (CoVISI pre-filter):
+    # The step may have been run before process-log support for this step was
+    # added, or the log entry was lost during a reconstruction cycle.  Use
+    # physical folder evidence as the authoritative signal in that case.
+    if "step9" in global_state.widgets and not steps.get("step9"):
+        covisi_folder = os.path.join(folderpath, FolderNames.DECOMPOSITION_COVISI_FILTERED.value)
+        if os.path.exists(covisi_folder) and any(
+            f.endswith('_covisi_filtered.json') for f in os.listdir(covisi_folder)
+        ):
+            global_state.widgets["step9"]["completed_step"] = True
+            global_state.widgets["step9"]["skipped"] = False
+            logger.info(
+                "Process log override: step9 → completed "
+                "(covisi_filtered folder evidence, backwards compat)"
+            )
 
 

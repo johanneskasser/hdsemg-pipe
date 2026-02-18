@@ -254,10 +254,22 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
     def _update_source_folder(self):
         """Determine whether to read JSONs from covisi_filtered or decomposition_auto."""
         covisi_folder = global_state.get_decomposition_covisi_filtered_path()
-        covisi_done = (
-            global_state.is_widget_completed("step9") or global_state.is_widget_skipped("step9")
+
+        # Primary check: step state
+        covisi_applied_by_state = (
+            global_state.is_widget_completed("step9")
+            and not global_state.is_widget_skipped("step9")
         )
-        if covisi_done and not global_state.is_widget_skipped("step9") and os.path.exists(covisi_folder):
+
+        # Fallback check: physical folder evidence.
+        # Handles backwards-compat workfolders where step9 wasn't recorded in the
+        # process log (e.g. CoVISI was run before process-log support or the log
+        # entry was lost during a reconstruction cycle).
+        covisi_applied_by_folder = os.path.exists(covisi_folder) and any(
+            f.endswith('_covisi_filtered.json') for f in os.listdir(covisi_folder)
+        )
+
+        if (covisi_applied_by_state or covisi_applied_by_folder) and os.path.exists(covisi_folder):
             self.source_folder = covisi_folder
         else:
             self.source_folder = self.expected_folder

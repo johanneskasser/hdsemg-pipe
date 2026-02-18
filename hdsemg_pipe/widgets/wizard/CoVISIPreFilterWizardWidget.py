@@ -207,7 +207,7 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Step configuration
-        step_index = 10  # After MultiGrid (9), before MUEdit (11)
+        step_index = 9  # Before MultiGrid (10)
         step_name = "CoVISI Pre-Filtering"
         description = (
             "Filter motor units based on CoVISI (Coefficient of Variation of "
