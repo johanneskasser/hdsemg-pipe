@@ -402,7 +402,11 @@ def get_muedit_filepath(json_filepath, multi_grid=False):
 
 def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
     """
-    Export multiple openhdemg JSON files as a single multi-grid MUEdit MAT file.
+    DEPRECATED: Export multiple openhdemg JSON files as a single multi-grid MUEdit MAT file.
+
+    **This function is deprecated and will be removed in a future version.**
+    Use the new duplicate detection step (Step 10) in hdsemg-pipe instead,
+    which detects duplicates within the Python pipeline before MUEdit export.
 
     This function combines decomposition results from multiple grids (recorded from
     the same muscle with common motor units) into a single MUEdit MAT file. This
@@ -429,6 +433,12 @@ def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
         ... )
         'Biceps_multigrid_muedit.mat'
     """
+    # Deprecation warning
+    logger.warning(
+        "DEPRECATED: export_multi_grid_to_muedit() is deprecated and will be removed in a future version. "
+        "Use the new duplicate detection step (Step 10) in hdsemg-pipe instead."
+    )
+
     if not OPENHDEMG_AVAILABLE:
         raise ImportError("openhdemg library is required for this function")
 
@@ -1116,6 +1126,12 @@ def apply_muedit_edits_multigrid_to_json(json_in_paths, mat_edited_path, json_ou
         ...     'consolidated_cleaned.json'
         ... )
     """
+    # Deprecation warning
+    logger.warning(
+        "DEPRECATED: apply_muedit_edits_multigrid_to_json() is deprecated and will be removed in a future version. "
+        "Multi-grid MAT files are no longer created in the new workflow."
+    )
+
     if not OPENHDEMG_AVAILABLE:
         raise ImportError("openhdemg library is required for this function")
 

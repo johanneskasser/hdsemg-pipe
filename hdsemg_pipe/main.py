@@ -30,6 +30,7 @@ from hdsemg_pipe.widgets.wizard.DefineRoiWizardWidget import DefineRoiWizardWidg
 from hdsemg_pipe.widgets.wizard.ChannelSelectionWizardWidget import ChannelSelectionWizardWidget
 from hdsemg_pipe.widgets.wizard.DecompositionResultsWizardWidget import DecompositionResultsWizardWidget
 from hdsemg_pipe.widgets.wizard.MultiGridConfigWizardWidget import MultiGridConfigWizardWidget
+from hdsemg_pipe.widgets.wizard.RemoveDuplicateMUsWizardWidget import RemoveDuplicateMUsWizardWidget
 from hdsemg_pipe.widgets.wizard.CoVISIPreFilterWizardWidget import CoVISIPreFilterWizardWidget
 from hdsemg_pipe.widgets.wizard.MUEditCleaningWizardWidget import MUEditCleaningWizardWidget
 from hdsemg_pipe.widgets.wizard.CoVISIPostValidationWizardWidget import CoVISIPostValidationWizardWidget
@@ -188,8 +189,8 @@ class WizardMainWindow(QMainWindow):
         self.step_stack.addWidget(step9)
         step9.check()
 
-        # Step 10: Multi-Grid Configuration + MUEdit Export
-        step10 = MultiGridConfigWizardWidget()
+        # Step 10: Remove Duplicate MUs (Within/Between Grids)
+        step10 = RemoveDuplicateMUsWizardWidget()
         global_state.register_widget(step10, name="step10")
         self.steps.append(step10)
         self.step_stack.addWidget(step10)

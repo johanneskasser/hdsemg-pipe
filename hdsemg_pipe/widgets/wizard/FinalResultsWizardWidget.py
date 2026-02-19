@@ -13,8 +13,7 @@ from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.actions.decomposition_export import (
-    apply_muedit_edits_to_json,
-    apply_muedit_edits_multigrid_to_json
+    apply_muedit_edits_to_json
 )
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius, Fonts
 import json
@@ -71,96 +70,52 @@ class JSONConversionWorker(QThread):
                     filename = os.path.basename(edited_mat)
                     self.progress.emit(idx, total, f"Converting {filename}...")
 
-                    # Check if this is a multi-grid file
-                    is_multigrid = '_multigrid_muedit.mat' in filename
+                    # Single-grid file conversion only (multi-grid support removed)
+                    # Find original JSON file
+                    # edited_mat is like: "file_muedit.mat_edited.mat" or "file_covisi_filtered_muedit.mat_edited.mat"
+                    # Remove the "_edited.mat" suffix to get the original MAT filename
+                    base_name = filename.replace('.mat_edited.mat', '')
 
-                    if is_multigrid:
-                        # Look for the .multigrid.json mapping file
-                        # The MAT file is like: "GroupName_multigrid_muedit.mat_edited.mat"
-                        # The mapping file is like: "GroupName_multigrid_muedit.multigrid.json"
-                        base_mat_name = filename.replace('.mat_edited.mat', '')  # -> "GroupName_multigrid_muedit.mat"
-                        base_mat_name = base_mat_name.replace('.mat', '')  # -> "GroupName_multigrid_muedit"
+                    # Then remove the MUEdit suffix to get the base name for JSON lookup
+                    base_name = base_name.replace('_muedit', '')
 
-                        # Try to find the mapping file in the same directory as the edited MAT
-                        mat_dir = os.path.dirname(edited_mat)
-                        mapping_file = os.path.join(mat_dir, f"{base_mat_name}.multigrid.json")
+                    # Try to find corresponding JSON in source folder
+                    # If CoVISI was applied: look for *_covisi_filtered.json
+                    # If duplicates removed: look for *_duplicates_removed.json
+                    # Otherwise: look for *.json
+                    json_candidates = []
 
-                        if not os.path.exists(mapping_file):
-                            raise FileNotFoundError(
-                                f"Multi-grid mapping file not found: {mapping_file}. "
-                                f"This file should have been created when the multi-grid MAT was exported."
-                            )
-
-                        # Load the mapping
-                        with open(mapping_file, 'r') as f:
-                            mapping_data = json.load(f)
-
-                        json_filenames = mapping_data['original_jsons']
-                        group_name = mapping_data.get('group_name', base_mat_name)
-
-                        logger.info(f"Converting multi-grid file '{filename}' from {len(json_filenames)} source JSONs")
-                        logger.debug(f"Loaded mapping from: {os.path.basename(mapping_file)}")
-
-                        # Resolve all JSON paths
-                        json_paths = []
-                        for json_fn in json_filenames:
-                            resolved_path = self._resolve_json_path(json_fn)
-                            if not resolved_path:
-                                raise FileNotFoundError(f"Could not find JSON file: {json_fn}")
-                            json_paths.append(resolved_path)
-
-                        # Output: consolidated JSON file
-                        output_json = os.path.join(self.results_folder, f"{group_name}_multigrid_cleaned.json")
-
-                        # Convert multi-grid to consolidated JSON
-                        apply_muedit_edits_multigrid_to_json(json_paths, edited_mat, output_json)
-
-                        success_count += 1
-                        logger.info(f"Successfully converted multi-grid file: {filename} → {os.path.basename(output_json)}")
-
+                    # Check for duplicate removal suffix
+                    if '_duplicates_removed' in base_name:
+                        json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
+                    # Check if this file came from CoVISI filtering (has _covisi_filtered in name)
+                    elif '_covisi_filtered' in base_name:
+                        # Look for the covisi_filtered JSON
+                        json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
                     else:
-                        # Single-grid file conversion (original logic)
-                        # Find original JSON file
-                        # edited_mat is like: "file_muedit.mat_edited.mat" or "file_covisi_filtered_muedit.mat_edited.mat"
-                        # Remove the "_edited.mat" suffix to get the original MAT filename
-                        base_name = filename.replace('.mat_edited.mat', '')
+                        # Look for the original JSON
+                        json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
 
-                        # Then remove the MUEdit suffix to get the base name for JSON lookup
-                        base_name = base_name.replace('_muedit', '')
+                    original_json = None
+                    for candidate in json_candidates:
+                        if os.path.exists(candidate):
+                            original_json = candidate
+                            break
 
-                        # Try to find corresponding JSON in source folder
-                        # If CoVISI was applied: look for *_covisi_filtered.json
-                        # Otherwise: look for *.json
-                        json_candidates = []
+                    if not original_json:
+                        raise FileNotFoundError(
+                            f"No original JSON found for {filename}. "
+                            f"Searched in: {self.json_source_folder}"
+                        )
 
-                        # Check if this file came from CoVISI filtering (has _covisi_filtered in name)
-                        if '_covisi_filtered' in base_name:
-                            # Look for the covisi_filtered JSON
-                            json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
-                        else:
-                            # Look for the original JSON
-                            json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
+                    # Output path in results folder
+                    output_json = os.path.join(self.results_folder, f"{base_name}_cleaned.json")
 
-                        original_json = None
-                        for candidate in json_candidates:
-                            if os.path.exists(candidate):
-                                original_json = candidate
-                                break
+                    # Convert using single-grid logic
+                    apply_muedit_edits_to_json(original_json, edited_mat, output_json)
 
-                        if not original_json:
-                            raise FileNotFoundError(
-                                f"No original JSON found for {filename}. "
-                                f"Searched in: {self.json_source_folder}"
-                            )
-
-                        # Output path in results folder
-                        output_json = os.path.join(self.results_folder, f"{base_name}_cleaned.json")
-
-                        # Convert
-                        apply_muedit_edits_to_json(original_json, edited_mat, output_json)
-
-                        success_count += 1
-                        logger.info(f"Successfully converted: {filename}")
+                    success_count += 1
+                    logger.info(f"Successfully converted: {filename}")
 
                 except Exception as e:
                     error_count += 1

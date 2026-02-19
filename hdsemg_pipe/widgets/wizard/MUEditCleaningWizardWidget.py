@@ -246,7 +246,31 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         if not workfolder:
             return False
 
-        self.expected_folder = global_state.get_decomposition_path()
+        # Priority order for source folder:
+        # 1. decomposition_removed_duplicates/ (if step 10 completed and not skipped)
+        # 2. decomposition_covisi_filtered/ (if step 9 completed and not skipped)
+        # 3. decomposition_auto/ (fallback)
+        removed_dups_folder = global_state.get_decomposition_removed_duplicates_path()
+        covisi_folder = global_state.get_decomposition_covisi_filtered_path()
+        auto_folder = global_state.get_decomposition_path()
+
+        # Check step 10 (Remove Duplicates)
+        if (global_state.is_widget_completed("step10") and
+            not global_state.is_widget_skipped("step10") and
+            removed_dups_folder and os.path.exists(removed_dups_folder)):
+            self.expected_folder = removed_dups_folder
+            logger.info("Using duplicate-removed files for MUEdit export")
+        # Check step 9 (CoVISI)
+        elif (global_state.is_widget_completed("step9") and
+              not global_state.is_widget_skipped("step9") and
+              covisi_folder and os.path.exists(covisi_folder)):
+            self.expected_folder = covisi_folder
+            logger.info("Using CoVISI-filtered files for MUEdit export")
+        # Fallback
+        else:
+            self.expected_folder = auto_folder
+            logger.info("Using decomposition_auto files for MUEdit export")
+
         self.multigrid_folder = global_state.get_decomposition_multigrid_path()
 
         # Load skipped files from disk
@@ -328,7 +352,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         # Scan decomposition_multigrid only — all MAT files live here in the new design
         if self.multigrid_folder and os.path.exists(self.multigrid_folder):
             for file in os.listdir(self.multigrid_folder):
-                if file.endswith('_muedit.mat'):
+                # Only scan single-grid files (exclude multi-grid files)
+                if file.endswith('_muedit.mat') and '_multigrid_' not in file:
                     full_path = os.path.join(self.multigrid_folder, file)
                     all_muedit_files.append(full_path)
                     edited_path = os.path.join(self.multigrid_folder, file + '_edited.mat')
@@ -515,7 +540,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             self.watcher.addPath(self.multigrid_folder)
 
         for file in os.listdir(self.multigrid_folder):
-            if file.endswith('_muedit.mat'):
+            # Only scan single-grid files (exclude multi-grid files)
+            if file.endswith('_muedit.mat') and '_multigrid_' not in file:
                 full_path = os.path.join(self.multigrid_folder, file)
 
                 if full_path not in self.mu_check_cache:
@@ -786,7 +812,25 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         to avoid blocking the UI. If motor unit indexing is needed, a button
         will be shown for the user to trigger it manually.
         """
-        self.expected_folder = global_state.get_decomposition_path()
+        # Priority order for source folder (same as check())
+        removed_dups_folder = global_state.get_decomposition_removed_duplicates_path()
+        covisi_folder = global_state.get_decomposition_covisi_filtered_path()
+        auto_folder = global_state.get_decomposition_path()
+
+        # Check step 10
+        if (global_state.is_widget_completed("step10") and
+            not global_state.is_widget_skipped("step10") and
+            removed_dups_folder and os.path.exists(removed_dups_folder)):
+            self.expected_folder = removed_dups_folder
+        # Check step 9
+        elif (global_state.is_widget_completed("step9") and
+              not global_state.is_widget_skipped("step9") and
+              covisi_folder and os.path.exists(covisi_folder)):
+            self.expected_folder = covisi_folder
+        # Fallback
+        else:
+            self.expected_folder = auto_folder
+
         self.multigrid_folder = global_state.get_decomposition_multigrid_path()
 
         # Load skipped files from disk

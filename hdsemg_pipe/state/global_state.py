@@ -159,6 +159,12 @@ class GlobalState:
         path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_COVISI_FILTERED.value)
         return os.path.normpath(path)
 
+    def get_decomposition_removed_duplicates_path(self):
+        if not self.workfolder:
+            raise ValueError("Workfolder is not set.")
+        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_REMOVED_DUPLICATES.value)
+        return os.path.normpath(path)
+
     def get_decomposition_results_path(self):
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
