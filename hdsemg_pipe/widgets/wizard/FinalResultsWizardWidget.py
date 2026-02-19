@@ -75,30 +75,31 @@ class JSONConversionWorker(QThread):
                     is_multigrid = '_multigrid_muedit.mat' in filename
 
                     if is_multigrid:
-                        # Extract group name from filename (e.g., "GroupName_multigrid_muedit.mat_edited.mat")
-                        group_name = filename.replace('_multigrid_muedit.mat_edited.mat', '')
+                        # Look for the .multigrid.json mapping file
+                        # The MAT file is like: "GroupName_multigrid_muedit.mat_edited.mat"
+                        # The mapping file is like: "GroupName_multigrid_muedit.multigrid.json"
+                        base_mat_name = filename.replace('.mat_edited.mat', '')  # -> "GroupName_multigrid_muedit.mat"
+                        base_mat_name = base_mat_name.replace('.mat', '')  # -> "GroupName_multigrid_muedit"
 
-                        # Find the original JSON file paths for this group
-                        if group_name not in self.multigrid_groupings:
-                            # Try to find a matching group by sanitizing the name
-                            found_group = None
-                            for grp_name in self.multigrid_groupings.keys():
-                                safe_grp_name = "".join(c for c in grp_name if c.isalnum() or c in (' ', '_', '-')).strip()
-                                safe_grp_name = safe_grp_name.replace(' ', '_')
-                                if safe_grp_name == group_name:
-                                    found_group = grp_name
-                                    break
+                        # Try to find the mapping file in the same directory as the edited MAT
+                        mat_dir = os.path.dirname(edited_mat)
+                        mapping_file = os.path.join(mat_dir, f"{base_mat_name}.multigrid.json")
 
-                            if found_group:
-                                group_name = found_group
-                            else:
-                                raise ValueError(
-                                    f"Multi-grid group '{group_name}' not found in groupings. "
-                                    f"Available groups: {list(self.multigrid_groupings.keys())}"
-                                )
+                        if not os.path.exists(mapping_file):
+                            raise FileNotFoundError(
+                                f"Multi-grid mapping file not found: {mapping_file}. "
+                                f"This file should have been created when the multi-grid MAT was exported."
+                            )
 
-                        json_filenames = self.multigrid_groupings[group_name]
+                        # Load the mapping
+                        with open(mapping_file, 'r') as f:
+                            mapping_data = json.load(f)
+
+                        json_filenames = mapping_data['original_jsons']
+                        group_name = mapping_data.get('group_name', base_mat_name)
+
                         logger.info(f"Converting multi-grid file '{filename}' from {len(json_filenames)} source JSONs")
+                        logger.debug(f"Loaded mapping from: {os.path.basename(mapping_file)}")
 
                         # Resolve all JSON paths
                         json_paths = []

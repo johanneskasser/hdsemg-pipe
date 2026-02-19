@@ -599,6 +599,23 @@ def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
         # Save to MAT file
         sio.savemat(str(mat_save_filepath), dict_for_muedit, do_compression=True, long_field_names=True)
 
+        # Save JSON mapping file to track which original JSONs this multi-grid was created from
+        # This file is used when converting the edited MAT file back to openhdemg JSON format
+        mapping_file = mat_save_filepath.with_suffix('.multigrid.json')
+        mapping_data = {
+            'group_name': group_name,
+            'safe_filename': safe_group_name,
+            'mat_file': mat_save_filepath.name,
+            'original_jsons': [p.name for p in json_paths],
+            'ngrid': ngrid,
+            'created': str(pd.Timestamp.now())
+        }
+
+        import json as json_lib
+        with open(mapping_file, 'w') as f:
+            json_lib.dump(mapping_data, f, indent=2)
+        logger.debug(f"Saved multi-grid mapping: {mapping_file.name}")
+
         logger.info(f"Successfully created multi-grid MUEdit file: {mat_save_filepath.name}")
         logger.info(f"  - {ngrid} grids combined")
         logger.info(f"  - {total_channels} total channels")
@@ -1158,31 +1175,54 @@ def apply_muedit_edits_multigrid_to_json(json_in_paths, mat_edited_path, json_ou
         disc_nested = _cell_row_read(f, inner_cell_ds)
 
     # JSON expects IPTS as DataFrame (time x nMU)
-    IPTS_df = pd.DataFrame(pulsetrain_cells[0])
+    pulsetrain_data = pulsetrain_cells[0]
 
-    # Build MUPULSES (0-based) from Dischargetimes
-    MUPULSES_list = []
-    for mu_timing in disc_nested:
-        MUPULSES_list.append(np.squeeze(np.asarray(mu_timing, dtype='int32')) - 1)
+    # Handle empty case (all MUs deleted in MUEdit)
+    if pulsetrain_data.size == 0 or len(disc_nested) == 0:
+        logger.warning(f"No motor units found in edited multi-grid file: {mat_edited_path.name}. Creating empty structure.")
+        json_dict['IPTS'] = pd.DataFrame()
+        json_dict['MUPULSES'] = []
+        json_dict['BINARY_MUS_FIRING'] = pd.DataFrame()
+        json_dict['FILENAME'] = f"multigrid_consolidated_from_{mat_edited_path.name}"
+        json_dict['ACCURACY'] = pd.DataFrame()
+        json_dict['NUMBER_OF_MUS'] = 0
+    else:
+        IPTS_df = pd.DataFrame(pulsetrain_data)
 
-    # Update the edited fields in the new JSON
-    json_dict['IPTS'] = IPTS_df
-    json_dict['MUPULSES'] = MUPULSES_list
+        # Build MUPULSES (0-based) from Dischargetimes
+        MUPULSES_list = []
+        for mu_timing in disc_nested:
+            MUPULSES_list.append(np.squeeze(np.asarray(mu_timing, dtype='int32')) - 1)
 
-    # Create binary firing matrix
-    nMU = min(IPTS_df.shape)
-    spikeMat = np.zeros((nMU, max(IPTS_df.shape)))
-    for i in range(nMU):
-        spikeMat[i, MUPULSES_list[i]] = 1
-    json_dict['BINARY_MUS_FIRING'] = pd.DataFrame(spikeMat.T)
-    json_dict['FILENAME'] = f"multigrid_consolidated_from_{mat_edited_path.name}"
-    json_dict['ACCURACY'] = pd.DataFrame(np.squeeze(np.array(silval)))
-    json_dict['NUMBER_OF_MUS'] = nMU
+        # Update the edited fields in the new JSON
+        json_dict['IPTS'] = IPTS_df
+        json_dict['MUPULSES'] = MUPULSES_list
+
+        # Create binary firing matrix
+        nMU = min(IPTS_df.shape)
+        spikeMat = np.zeros((nMU, max(IPTS_df.shape)))
+        for i in range(nMU):
+            spikeMat[i, MUPULSES_list[i]] = 1
+        json_dict['BINARY_MUS_FIRING'] = pd.DataFrame(spikeMat.T)
+        json_dict['FILENAME'] = f"multigrid_consolidated_from_{mat_edited_path.name}"
+
+        # Handle ACCURACY/silval safely
+        silval_array = np.array(silval)
+        if silval_array.size == 0:
+            json_dict['ACCURACY'] = pd.DataFrame()
+        else:
+            silval_squeezed = np.squeeze(silval_array)
+            # Ensure at least 1-d
+            if silval_squeezed.ndim == 0:
+                silval_squeezed = np.array([silval_squeezed])
+            json_dict['ACCURACY'] = pd.DataFrame(silval_squeezed)
+
+        json_dict['NUMBER_OF_MUS'] = nMU
 
     # Save consolidated JSON in openhdemg format
     emg.save_json_emgfile(json_dict, str(json_out_path), compresslevel=4)
     logger.info(f"Successfully converted multi-grid to consolidated openhdemg format: {json_out_path.name}")
-    logger.info(f"Consolidated {len(emgfiles)} grids into single JSON with {nMU} motor units")
+    logger.info(f"Consolidated {len(emgfiles)} grids into single JSON with {nMU if pulsetrain_data.size > 0 else 0} motor units")
 
     return str(json_out_path)
 
@@ -1266,26 +1306,49 @@ def apply_muedit_edits_to_json(json_in_path, mat_edited_path, json_out_path):
         disc_nested = _cell_row_read(f, inner_cell_ds)
 
     # JSON expects IPTS as DataFrame (time x nMU)
-    IPTS_df = pd.DataFrame(pulsetrain_cells[0])
+    pulsetrain_data = pulsetrain_cells[0]
 
-    # Build MUPULSES (0-based) from Dischargetimes
-    MUPULSES_list = []
-    for mu_timing in disc_nested:
-        MUPULSES_list.append(np.squeeze(np.asarray(mu_timing, dtype='int32')) - 1)
+    # Handle empty case (all MUs deleted in MUEdit)
+    if pulsetrain_data.size == 0 or len(disc_nested) == 0:
+        logger.warning(f"No motor units found in edited file: {mat_edited_path.name}. Creating empty structure.")
+        json_dict['IPTS'] = pd.DataFrame()
+        json_dict['MUPULSES'] = []
+        json_dict['BINARY_MUS_FIRING'] = pd.DataFrame()
+        json_dict['FILENAME'] = str(mat_edited_path)
+        json_dict['ACCURACY'] = pd.DataFrame()
+        json_dict['NUMBER_OF_MUS'] = 0
+    else:
+        IPTS_df = pd.DataFrame(pulsetrain_data)
 
-    # Update the edited fields in the new JSON
-    json_dict['IPTS'] = IPTS_df
-    json_dict['MUPULSES'] = MUPULSES_list
+        # Build MUPULSES (0-based) from Dischargetimes
+        MUPULSES_list = []
+        for mu_timing in disc_nested:
+            MUPULSES_list.append(np.squeeze(np.asarray(mu_timing, dtype='int32')) - 1)
 
-    # Create binary firing matrix
-    nMU = min(IPTS_df.shape)
-    spikeMat = np.zeros((nMU, max(IPTS_df.shape)))
-    for i in range(nMU):
-        spikeMat[i, MUPULSES_list[i]] = 1
-    json_dict['BINARY_MUS_FIRING'] = pd.DataFrame(spikeMat.T)
-    json_dict['FILENAME'] = str(mat_edited_path)
-    json_dict['ACCURACY'] = pd.DataFrame(np.squeeze(np.array(silval)))
-    json_dict['NUMBER_OF_MUS'] = nMU
+        # Update the edited fields in the new JSON
+        json_dict['IPTS'] = IPTS_df
+        json_dict['MUPULSES'] = MUPULSES_list
+
+        # Create binary firing matrix
+        nMU = min(IPTS_df.shape)
+        spikeMat = np.zeros((nMU, max(IPTS_df.shape)))
+        for i in range(nMU):
+            spikeMat[i, MUPULSES_list[i]] = 1
+        json_dict['BINARY_MUS_FIRING'] = pd.DataFrame(spikeMat.T)
+        json_dict['FILENAME'] = str(mat_edited_path)
+
+        # Handle ACCURACY/silval safely
+        silval_array = np.array(silval)
+        if silval_array.size == 0:
+            json_dict['ACCURACY'] = pd.DataFrame()
+        else:
+            silval_squeezed = np.squeeze(silval_array)
+            # Ensure at least 1-d
+            if silval_squeezed.ndim == 0:
+                silval_squeezed = np.array([silval_squeezed])
+            json_dict['ACCURACY'] = pd.DataFrame(silval_squeezed)
+
+        json_dict['NUMBER_OF_MUS'] = nMU
 
     # Save updated JSON in openhdemg format
     emg.save_json_emgfile(json_dict, str(json_out_path), compresslevel=4)
