@@ -201,9 +201,11 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
         super().__init__(step_index, step_name, description, parent)
 
-        self.expected_folder = None
+        self.multigrid_folder = None  # where edited MAT files live
+        self.json_source_folder = None  # where source JSONs live (covisi_filtered or auto)
         self.edited_files = []
         self.json_files = []
+        self.multigrid_skipped_count = 0  # count of multigrid files skipped (not validatable)
         self.fsamp_dict = {}
         self.validation_results = {}
         self.overall_report = None
@@ -460,7 +462,8 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         if not workfolder:
             return False
 
-        self.expected_folder = global_state.get_decomposition_multigrid_path()
+        self.multigrid_folder = global_state.get_decomposition_multigrid_path()
+        self._update_json_source_folder()
 
         if not OPENHDEMG_AVAILABLE:
             self.status_label.setText(
@@ -477,29 +480,54 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
         return True
 
+    def _update_json_source_folder(self):
+        """Determine whether to read JSONs from covisi_filtered or decomposition_auto."""
+        covisi_folder = global_state.get_decomposition_covisi_filtered_path()
+
+        # Primary check: step state
+        covisi_applied_by_state = (
+            global_state.is_widget_completed("step9")
+            and not global_state.is_widget_skipped("step9")
+        )
+
+        # Fallback check: physical folder evidence
+        covisi_applied_by_folder = os.path.exists(covisi_folder) and any(
+            f.endswith('_covisi_filtered.json') for f in os.listdir(covisi_folder)
+        )
+
+        if (covisi_applied_by_state or covisi_applied_by_folder) and os.path.exists(covisi_folder):
+            self.json_source_folder = covisi_folder
+        else:
+            self.json_source_folder = global_state.get_decomposition_path()  # decomposition_auto
+
     def scan_files(self):
-        """Scan for edited MAT files and corresponding JSON files."""
-        if not os.path.exists(self.expected_folder):
-            self.status_label.setText("Decomposition folder not found.")
+        """Scan for edited MAT files (from decomposition_multigrid/) and corresponding JSON files."""
+        if not os.path.exists(self.multigrid_folder):
+            self.status_label.setText("MUEdit folder not found.")
             return
 
-        # Find edited MAT files from decomposition_auto and decomposition_multigrid
-        edited_from_auto = [
-            os.path.join(self.expected_folder, f)
-            for f in os.listdir(self.expected_folder)
-            if f.endswith("_edited.mat")
-        ] if os.path.exists(self.expected_folder) else []
+        # All edited MAT files now live in decomposition_multigrid/ (new design).
+        # Skip multigrid files (no 1:1 JSON match; merged files can't be validated against originals).
+        self.edited_files = [
+            os.path.join(self.multigrid_folder, f)
+            for f in os.listdir(self.multigrid_folder)
+            if f.endswith("_edited.mat") and "_multigrid_muedit.mat" not in f
+        ]
 
-        multigrid_folder = global_state.get_decomposition_multigrid_path()
-        edited_from_multigrid = [
-            os.path.join(multigrid_folder, f)
-            for f in os.listdir(multigrid_folder)
-            if f.endswith("_edited.mat")
-        ] if os.path.exists(multigrid_folder) else []
+        # Count skipped multigrid files for user info
+        self.multigrid_skipped_count = sum(
+            1 for f in os.listdir(self.multigrid_folder)
+            if f.endswith("_edited.mat") and "_multigrid_muedit.mat" in f
+        ) if os.path.exists(self.multigrid_folder) else 0
 
-        self.edited_files = edited_from_auto + edited_from_multigrid
+        if self.multigrid_skipped_count > 0:
+            logger.info(
+                f"Skipping {self.multigrid_skipped_count} multigrid file(s) "
+                "(merged files cannot be validated against original JSONs)"
+            )
 
-        # Find JSON files (for pre-cleaning comparison)
+        # Find JSON files for pre-cleaning comparison.
+        # Read from covisi_filtered/ if CoVISI was applied, else decomposition_auto/
         state_files = {
             "decomposition_mapping.json",
             "multigrid_groupings.json",
@@ -507,11 +535,14 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             "covisi_post_validation_report.json",
         }
 
-        self.json_files = [
-            os.path.join(self.expected_folder, f)
-            for f in os.listdir(self.expected_folder)
-            if f.endswith(".json") and f not in state_files and not f.startswith("algorithm_params")
-        ]
+        if self.json_source_folder and os.path.exists(self.json_source_folder):
+            self.json_files = [
+                os.path.join(self.json_source_folder, f)
+                for f in os.listdir(self.json_source_folder)
+                if f.endswith(".json") and f not in state_files and not f.startswith("algorithm_params")
+            ]
+        else:
+            self.json_files = []
 
         # Load sampling frequencies from JSON files
         # Optimized: Read only FSAMP field directly from JSON without loading entire EMG file
@@ -535,15 +566,18 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                 self.fsamp_dict[json_path] = 2048.0
 
         if self.edited_files:
-            self.status_label.setText(
-                f"Found {len(self.edited_files)} edited file(s). "
-                "Click 'Run Validation' to compare CoVISI values."
-            )
+            msg = f"Found {len(self.edited_files)} edited file(s). Click 'Run Validation' to compare CoVISI values."
+            if self.multigrid_skipped_count > 0:
+                msg += f" ({self.multigrid_skipped_count} multigrid file(s) skipped)"
+            self.status_label.setText(msg)
             self.btn_validate.setEnabled(True)
             self.btn_accept.setEnabled(True)
             self.btn_return_muedit.setEnabled(True)
         else:
-            self.status_label.setText("No edited MUedit files found.")
+            msg = "No single-grid edited files found for validation."
+            if self.multigrid_skipped_count > 0:
+                msg += f" ({self.multigrid_skipped_count} multigrid file(s) skipped)"
+            self.status_label.setText(msg)
             self.btn_validate.setEnabled(False)
             self.btn_accept.setEnabled(False)
             self.btn_return_muedit.setEnabled(False)
@@ -746,7 +780,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         report["action"] = "accepted_all"
 
         report_path = os.path.join(
-            self.expected_folder, "covisi_post_validation_report.json"
+            global_state.get_decomposition_path(), "covisi_post_validation_report.json"
         )
         save_covisi_report(report, report_path, report_type="post_validation")
 
@@ -779,7 +813,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                         )
 
         report_path = os.path.join(
-            self.expected_folder, "covisi_post_validation_report.json"
+            global_state.get_decomposition_path(), "covisi_post_validation_report.json"
         )
         save_covisi_report(report, report_path, report_type="post_validation")
 
@@ -993,13 +1027,14 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
     def is_completed(self):
         """Check if this step is completed."""
         report_path = os.path.join(
-            self.expected_folder, "covisi_post_validation_report.json"
+            global_state.get_decomposition_path(), "covisi_post_validation_report.json"
         )
         return os.path.exists(report_path)
 
     def init_file_checking(self):
         """Initialize file checking for state reconstruction."""
-        self.expected_folder = global_state.get_decomposition_path()
+        self.multigrid_folder = global_state.get_decomposition_multigrid_path()
+        self._update_json_source_folder()
         self.scan_files()
 
         if self.is_completed():
