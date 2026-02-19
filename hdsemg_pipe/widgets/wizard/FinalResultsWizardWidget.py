@@ -12,8 +12,12 @@ from PyQt5.QtWidgets import QPushButton, QLabel, QVBoxLayout, QFrame, QProgressB
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
-from hdsemg_pipe.actions.decomposition_export import apply_muedit_edits_to_json
+from hdsemg_pipe.actions.decomposition_export import (
+    apply_muedit_edits_to_json,
+    apply_muedit_edits_multigrid_to_json
+)
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius, Fonts
+import json
 
 
 class JSONConversionWorker(QThread):
@@ -23,11 +27,35 @@ class JSONConversionWorker(QThread):
     finished = pyqtSignal(int, int, list)  # success_count, error_count, error_messages
     error = pyqtSignal(str)
 
-    def __init__(self, edited_files, decomp_folder, results_folder, parent=None):
+    def __init__(self, edited_files, decomp_folder, json_source_folder, results_folder,
+                 multigrid_groupings=None, parent=None):
         super().__init__(parent)
         self.edited_files = edited_files
-        self.decomp_folder = decomp_folder
+        self.decomp_folder = decomp_folder  # decomposition_auto/ (for state files)
+        self.json_source_folder = json_source_folder  # where source JSONs live (covisi_filtered or auto)
         self.results_folder = results_folder
+        self.multigrid_groupings = multigrid_groupings or {}  # group_name -> [json_filenames]
+
+    def _resolve_json_path(self, json_filename):
+        """Resolve the actual path for a JSON filename, checking both covisi_filtered and auto folders."""
+        stem = Path(json_filename).stem
+
+        # Try covisi_filtered version first
+        covisi_path = os.path.join(self.json_source_folder, f"{stem}_covisi_filtered.json")
+        if os.path.exists(covisi_path):
+            return covisi_path
+
+        # Try with .json extension
+        json_path = os.path.join(self.json_source_folder, json_filename)
+        if os.path.exists(json_path):
+            return json_path
+
+        # Try in decomp_auto folder as fallback
+        auto_path = os.path.join(self.decomp_folder, json_filename)
+        if os.path.exists(auto_path):
+            return auto_path
+
+        return None
 
     def run(self):
         """Run the conversion process."""
@@ -43,46 +71,95 @@ class JSONConversionWorker(QThread):
                     filename = os.path.basename(edited_mat)
                     self.progress.emit(idx, total, f"Converting {filename}...")
 
-                    # Find original JSON file
-                    # edited_mat is like: "file_muedit.mat_edited.mat" or "Group_multigrid_muedit.mat_edited.mat"
-                    # Remove the "_edited.mat" suffix to get the original MAT filename
-                    base_name = filename.replace('.mat_edited.mat', '')
+                    # Check if this is a multi-grid file
+                    is_multigrid = '_multigrid_muedit.mat' in filename
 
-                    # Then remove the MUEdit suffixes to get the base name for JSON lookup
-                    base_name = base_name.replace('_muedit', '').replace('_multigrid_muedit', '')
+                    if is_multigrid:
+                        # Extract group name from filename (e.g., "GroupName_multigrid_muedit.mat_edited.mat")
+                        group_name = filename.replace('_multigrid_muedit.mat_edited.mat', '')
 
-                    # Try to find corresponding JSON
-                    json_candidates = [
-                        os.path.join(self.decomp_folder, f"{base_name}.json"),
-                        # For multi-grid, we need to find the first JSON file that was in the group
-                        # For now, use a simple heuristic: look for any JSON with similar name
-                    ]
+                        # Find the original JSON file paths for this group
+                        if group_name not in self.multigrid_groupings:
+                            # Try to find a matching group by sanitizing the name
+                            found_group = None
+                            for grp_name in self.multigrid_groupings.keys():
+                                safe_grp_name = "".join(c for c in grp_name if c.isalnum() or c in (' ', '_', '-')).strip()
+                                safe_grp_name = safe_grp_name.replace(' ', '_')
+                                if safe_grp_name == group_name:
+                                    found_group = grp_name
+                                    break
 
-                    original_json = None
-                    for candidate in json_candidates:
-                        if os.path.exists(candidate):
-                            original_json = candidate
-                            break
+                            if found_group:
+                                group_name = found_group
+                            else:
+                                raise ValueError(
+                                    f"Multi-grid group '{group_name}' not found in groupings. "
+                                    f"Available groups: {list(self.multigrid_groupings.keys())}"
+                                )
 
-                    # If not found, try finding any JSON in folder (fallback for multi-grid)
-                    if not original_json:
-                        json_files = [f for f in os.listdir(self.decomp_folder) if f.endswith('.json')]
-                        if json_files:
-                            # Use first JSON as reference (multi-grid case)
-                            original_json = os.path.join(self.decomp_folder, json_files[0])
-                            logger.info(f"Using {json_files[0]} as reference for multi-grid file")
+                        json_filenames = self.multigrid_groupings[group_name]
+                        logger.info(f"Converting multi-grid file '{filename}' from {len(json_filenames)} source JSONs")
 
-                    if not original_json:
-                        raise FileNotFoundError(f"No original JSON found for {filename}")
+                        # Resolve all JSON paths
+                        json_paths = []
+                        for json_fn in json_filenames:
+                            resolved_path = self._resolve_json_path(json_fn)
+                            if not resolved_path:
+                                raise FileNotFoundError(f"Could not find JSON file: {json_fn}")
+                            json_paths.append(resolved_path)
 
-                    # Output path in results folder
-                    output_json = os.path.join(self.results_folder, f"{base_name}_cleaned.json")
+                        # Output: consolidated JSON file
+                        output_json = os.path.join(self.results_folder, f"{group_name}_multigrid_cleaned.json")
 
-                    # Convert
-                    apply_muedit_edits_to_json(original_json, edited_mat, output_json)
+                        # Convert multi-grid to consolidated JSON
+                        apply_muedit_edits_multigrid_to_json(json_paths, edited_mat, output_json)
 
-                    success_count += 1
-                    logger.info(f"Successfully converted: {filename}")
+                        success_count += 1
+                        logger.info(f"Successfully converted multi-grid file: {filename} → {os.path.basename(output_json)}")
+
+                    else:
+                        # Single-grid file conversion (original logic)
+                        # Find original JSON file
+                        # edited_mat is like: "file_muedit.mat_edited.mat" or "file_covisi_filtered_muedit.mat_edited.mat"
+                        # Remove the "_edited.mat" suffix to get the original MAT filename
+                        base_name = filename.replace('.mat_edited.mat', '')
+
+                        # Then remove the MUEdit suffix to get the base name for JSON lookup
+                        base_name = base_name.replace('_muedit', '')
+
+                        # Try to find corresponding JSON in source folder
+                        # If CoVISI was applied: look for *_covisi_filtered.json
+                        # Otherwise: look for *.json
+                        json_candidates = []
+
+                        # Check if this file came from CoVISI filtering (has _covisi_filtered in name)
+                        if '_covisi_filtered' in base_name:
+                            # Look for the covisi_filtered JSON
+                            json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
+                        else:
+                            # Look for the original JSON
+                            json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
+
+                        original_json = None
+                        for candidate in json_candidates:
+                            if os.path.exists(candidate):
+                                original_json = candidate
+                                break
+
+                        if not original_json:
+                            raise FileNotFoundError(
+                                f"No original JSON found for {filename}. "
+                                f"Searched in: {self.json_source_folder}"
+                            )
+
+                        # Output path in results folder
+                        output_json = os.path.join(self.results_folder, f"{base_name}_cleaned.json")
+
+                        # Convert
+                        apply_muedit_edits_to_json(original_json, edited_mat, output_json)
+
+                        success_count += 1
+                        logger.info(f"Successfully converted: {filename}")
 
                 except Exception as e:
                     error_count += 1
@@ -138,12 +215,14 @@ class FinalResultsWizardWidget(WizardStepWidget):
 
         super().__init__(step_index, step_name, description, parent)
 
-        self.decomp_folder = None
+        self.decomp_folder = None  # decomposition_auto/ (for state files)
+        self.json_source_folder = None  # where source JSONs live (covisi_filtered or auto)
         self.results_folder = None
         self.edited_files = []
         self.exported_files = []
         self.conversion_worker = None
         self.notebook_worker = None
+        self.multigrid_groupings = {}  # group_name -> [json_filenames]
 
         # Create status UI
         self.create_status_ui()
@@ -218,8 +297,12 @@ class FinalResultsWizardWidget(WizardStepWidget):
         if not workfolder:
             return False
 
-        self.decomp_folder = global_state.get_decomposition_path()
+        self.decomp_folder = global_state.get_decomposition_path()  # decomposition_auto/
+        self._update_json_source_folder()
         self.results_folder = global_state.get_decomposition_results_path()
+
+        # Load multi-grid groupings (needed for converting multi-grid files back to JSON)
+        self._load_multigrid_groupings()
 
         # Create results folder if needed
         if not os.path.exists(self.results_folder):
@@ -234,6 +317,45 @@ class FinalResultsWizardWidget(WizardStepWidget):
             return False
 
         return True
+
+    def _update_json_source_folder(self):
+        """Determine whether to read JSONs from covisi_filtered or decomposition_auto."""
+        covisi_folder = global_state.get_decomposition_covisi_filtered_path()
+
+        # Primary check: step state
+        covisi_applied_by_state = (
+            global_state.is_widget_completed("step9")
+            and not global_state.is_widget_skipped("step9")
+        )
+
+        # Fallback check: physical folder evidence.
+        # Handles backwards-compat workfolders where step9 wasn't recorded in the
+        # process log (e.g. CoVISI was run before process-log support or the log
+        # entry was lost during a reconstruction cycle).
+        covisi_applied_by_folder = os.path.exists(covisi_folder) and any(
+            f.endswith('_covisi_filtered.json') for f in os.listdir(covisi_folder)
+        )
+
+        if (covisi_applied_by_state or covisi_applied_by_folder) and os.path.exists(covisi_folder):
+            self.json_source_folder = covisi_folder
+        else:
+            self.json_source_folder = self.decomp_folder
+
+    def _load_multigrid_groupings(self):
+        """Load multi-grid groupings from JSON file."""
+        groupings_file = os.path.join(self.decomp_folder, "multigrid_groupings.json")
+
+        if not os.path.exists(groupings_file):
+            self.multigrid_groupings = {}
+            return
+
+        try:
+            with open(groupings_file, 'r') as f:
+                self.multigrid_groupings = json.load(f)
+            logger.info(f"Loaded {len(self.multigrid_groupings)} multi-grid group(s) from state file")
+        except Exception as e:
+            logger.warning(f"Could not load multi-grid groupings: {e}")
+            self.multigrid_groupings = {}
 
     def scan_files(self):
         """Scan for edited MUEdit files and exported JSON files."""
@@ -298,7 +420,9 @@ class FinalResultsWizardWidget(WizardStepWidget):
         self.conversion_worker = JSONConversionWorker(
             self.edited_files,
             self.decomp_folder,
-            self.results_folder
+            self.json_source_folder,
+            self.results_folder,
+            multigrid_groupings=self.multigrid_groupings
         )
         self.conversion_worker.progress.connect(self.on_conversion_progress)
         self.conversion_worker.finished.connect(self.on_conversion_finished)
@@ -429,6 +553,8 @@ class FinalResultsWizardWidget(WizardStepWidget):
     def init_file_checking(self):
         """Initialize file checking for state reconstruction."""
         self.decomp_folder = global_state.get_decomposition_path()
+        self._update_json_source_folder()
+        self._load_multigrid_groupings()
         self.results_folder = global_state.get_decomposition_results_path()
 
         # Create results folder if needed
@@ -438,4 +564,4 @@ class FinalResultsWizardWidget(WizardStepWidget):
 
         # Scan for files
         self.scan_files()
-        logger.info(f"File checking initialized for folders: {self.decomp_folder}, {self.results_folder}")
+        logger.info(f"File checking initialized for folders: {self.json_source_folder}, {self.results_folder}")

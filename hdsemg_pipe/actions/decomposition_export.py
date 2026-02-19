@@ -1070,6 +1070,123 @@ def _cell_row_read(f, ds):
     return out
 
 
+def apply_muedit_edits_multigrid_to_json(json_in_paths, mat_edited_path, json_out_path):
+    """
+    Convert a multi-grid edited MUEdit MAT file to a consolidated openhdemg JSON file.
+
+    This function takes multiple original JSON files (that were combined into a multi-grid
+    MAT file), loads and concatenates them, then applies the MUEdit edits from the edited
+    MAT file to create a single consolidated openhdemg JSON file with all motor units.
+
+    Args:
+        json_in_paths (list of str or Path): Paths to the original openhdemg JSON files
+            that were used to create the multi-grid MAT file (in the correct order)
+        mat_edited_path (str or Path): Path to the edited multi-grid MUEdit MAT file
+        json_out_path (str or Path): Path where the consolidated JSON should be saved
+
+    Returns:
+        str: Path to the created JSON file
+
+    Raises:
+        ImportError: If openhdemg or h5py libraries are not available
+        FileNotFoundError: If any of the original JSON files are not found
+        KeyError: If required fields are not found in the MAT file
+
+    Example:
+        >>> apply_muedit_edits_multigrid_to_json(
+        ...     ['grid1.json', 'grid2.json'],
+        ...     'combined_multigrid_muedit.mat_edited.mat',
+        ...     'consolidated_cleaned.json'
+        ... )
+    """
+    if not OPENHDEMG_AVAILABLE:
+        raise ImportError("openhdemg library is required for this function")
+
+    try:
+        import h5py
+    except ImportError:
+        raise ImportError("h5py library is required for reading MATLAB v7.3 files (pip install h5py)")
+
+    json_in_paths = [Path(p) for p in json_in_paths]
+    mat_edited_path = Path(mat_edited_path)
+    json_out_path = Path(json_out_path)
+
+    logger.info(f"Converting multi-grid edited MUEdit file to consolidated openhdemg format...")
+    logger.debug(f"Input JSONs ({len(json_in_paths)}): {[p.name for p in json_in_paths]}")
+    logger.debug(f"Edited MAT: {mat_edited_path.name}")
+    logger.debug(f"Output JSON: {json_out_path.name}")
+
+    # Verify all original JSON files exist
+    for json_path in json_in_paths:
+        if not json_path.exists():
+            raise FileNotFoundError(f"Original JSON file not found: {json_path}")
+
+    # Load and concatenate all original JSON files (to get RAW_SIGNAL, REF_SIGNAL, etc.)
+    emgfiles = []
+    for json_path in json_in_paths:
+        logger.debug(f"Loading {json_path.name}...")
+        emgfile = emg.emg_from_json(str(json_path))
+        emgfiles.append(emgfile)
+
+    # Concatenate emgfiles to create the base structure
+    json_dict = concatenate_emgfiles(emgfiles)
+    logger.info(f"Concatenated {len(emgfiles)} files into base emgfile structure")
+
+    # Read edited MUEdit MAT (v7.3) using h5py to get the cleaned MU data
+    with h5py.File(str(mat_edited_path), 'r') as f:
+        if 'edition' not in f:
+            raise KeyError(f"'edition' group not found in {mat_edited_path.name}. "
+                          "The MAT file may not be a valid MUEdit edited file.")
+        edit = f['edition']
+
+        # SIL: 1 x ngrid cell, each double
+        if 'silval' not in edit:
+            raise KeyError("edition.silval not found in edited MAT.")
+        silval = _cell_row_read(f, edit['silval'])
+
+        # Pulsetrain: 1 x ngrid cell; each cell: (nMU_g x n_samples)
+        if 'Pulsetrainclean' not in edit:
+            raise KeyError("edition.Pulsetrainclean not found in edited MAT.")
+        pulsetrain_cells = _cell_row_read(f, edit['Pulsetrainclean'])
+
+        # Dischargetimes: ngrid x maxMU cell; each cell: (1 x nDischarges) or (nDischarges,)
+        top = edit['Distimeclean'][()]           # object array, shape (1,1)
+        inner_ref = top.flat[0]                  # the only reference
+        inner_cell_ds = f[inner_ref]             # dataset: the 1×nMU cell
+
+        # Now read that inner row cell into a Python list of arrays (length = nMU)
+        disc_nested = _cell_row_read(f, inner_cell_ds)
+
+    # JSON expects IPTS as DataFrame (time x nMU)
+    IPTS_df = pd.DataFrame(pulsetrain_cells[0])
+
+    # Build MUPULSES (0-based) from Dischargetimes
+    MUPULSES_list = []
+    for mu_timing in disc_nested:
+        MUPULSES_list.append(np.squeeze(np.asarray(mu_timing, dtype='int32')) - 1)
+
+    # Update the edited fields in the new JSON
+    json_dict['IPTS'] = IPTS_df
+    json_dict['MUPULSES'] = MUPULSES_list
+
+    # Create binary firing matrix
+    nMU = min(IPTS_df.shape)
+    spikeMat = np.zeros((nMU, max(IPTS_df.shape)))
+    for i in range(nMU):
+        spikeMat[i, MUPULSES_list[i]] = 1
+    json_dict['BINARY_MUS_FIRING'] = pd.DataFrame(spikeMat.T)
+    json_dict['FILENAME'] = f"multigrid_consolidated_from_{mat_edited_path.name}"
+    json_dict['ACCURACY'] = pd.DataFrame(np.squeeze(np.array(silval)))
+    json_dict['NUMBER_OF_MUS'] = nMU
+
+    # Save consolidated JSON in openhdemg format
+    emg.save_json_emgfile(json_dict, str(json_out_path), compresslevel=4)
+    logger.info(f"Successfully converted multi-grid to consolidated openhdemg format: {json_out_path.name}")
+    logger.info(f"Consolidated {len(emgfiles)} grids into single JSON with {nMU} motor units")
+
+    return str(json_out_path)
+
+
 def apply_muedit_edits_to_json(json_in_path, mat_edited_path, json_out_path):
     """
     Update an openhdemg JSON with MU edits made in a MUEdit-exported MAT file (v7.3/HDF5).
