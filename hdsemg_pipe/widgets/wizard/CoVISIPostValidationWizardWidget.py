@@ -653,7 +653,9 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             pre_val = detail["covisi_pre"]
             pre_item = QTableWidgetItem()
             if pd.notna(pre_val):
-                pre_item.setData(Qt.DisplayRole, round(pre_val, 1))
+                display_text = f"{round(pre_val, 1)}"
+                pre_item.setData(Qt.EditRole, float(pre_val))
+                pre_item.setData(Qt.DisplayRole, display_text)
             else:
                 pre_item.setText("N/A")
             pre_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -663,7 +665,9 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             post_val = detail["covisi_post"]
             post_item = QTableWidgetItem()
             if pd.notna(post_val):
-                post_item.setData(Qt.DisplayRole, round(post_val, 1))
+                display_text = f"{round(post_val, 1)}"
+                post_item.setData(Qt.EditRole, float(post_val))
+                post_item.setData(Qt.DisplayRole, display_text)
             else:
                 post_item.setText("N/A")
             post_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -686,7 +690,9 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             improvement = detail["improvement_percent"]
             improvement_item = QTableWidgetItem()
             if pd.notna(improvement):
-                improvement_item.setData(Qt.DisplayRole, round(improvement, 1))
+                display_text = f"{round(improvement, 1)}"
+                improvement_item.setData(Qt.EditRole, float(improvement))
+                improvement_item.setData(Qt.DisplayRole, display_text)
                 if improvement > 0:
                     improvement_item.setForeground(Qt.darkGreen)
                 elif improvement < 0:
