@@ -187,6 +187,7 @@ class GridGroupingDialog(QDialog):
 
         self.setWindowTitle("Configure Multi-Grid Groups for MUEdit")
         self.resize(1100, 800)
+        self.setMinimumHeight(500)  # Ensure buttons are always visible
         self.init_ui()
         self.load_existing_groupings()
 
@@ -198,6 +199,17 @@ class GridGroupingDialog(QDialog):
         """Initialize the dialog UI."""
         layout = QVBoxLayout(self)
         layout.setSpacing(Spacing.LG)
+
+        # Create a scrollable container for the main content
+        content_scroll = QScrollArea()
+        content_scroll.setWidgetResizable(True)
+        content_scroll.setFrameShape(QFrame.NoFrame)
+        content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        content_scroll.setStyleSheet("QScrollArea { border: none; }")
+
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(Spacing.LG)
 
         # Header with info button
         header_layout = QHBoxLayout()
@@ -242,11 +254,11 @@ class GridGroupingDialog(QDialog):
         """)
         header_layout.addWidget(info_btn, 0, Qt.AlignTop)
 
-        layout.addLayout(header_layout)
-        layout.addSpacing(Spacing.MD)
+        content_layout.addLayout(header_layout)
+        content_layout.addSpacing(Spacing.MD)
 
         # Auto-grouping section
-        self.add_auto_grouping_section(layout)
+        self.add_auto_grouping_section(content_layout)
 
         # Info box
         info_frame = QFrame()
@@ -271,7 +283,7 @@ class GridGroupingDialog(QDialog):
         info_text.setWordWrap(True)
         info_text.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_XS};")
         info_layout.addWidget(info_text)
-        layout.addWidget(info_frame)
+        content_layout.addWidget(info_frame)
 
         # Main content: Splitter with available files on left and groups on right
         splitter = QSplitter(Qt.Horizontal)
@@ -281,6 +293,7 @@ class GridGroupingDialog(QDialog):
                 width: 2px;
             }}
         """)
+        splitter.setMinimumHeight(350)  # Ensure splitter has minimum height
 
         # Left panel: Available files
         left_panel = QWidget()
@@ -302,7 +315,7 @@ class GridGroupingDialog(QDialog):
                 border-radius: {BorderRadius.MD};
                 background-color: white;
                 padding: {Spacing.SM}px;
-                min-height: 400px;
+                min-height: 250px;
             }}
             QListWidget::item {{
                 padding: {Spacing.MD}px {Spacing.LG}px;
@@ -373,9 +386,13 @@ class GridGroupingDialog(QDialog):
         splitter.addWidget(right_panel)
         splitter.setSizes([400, 600])
 
-        layout.addWidget(splitter, 1)
+        content_layout.addWidget(splitter, 1)
 
-        # Button box
+        # Set the content widget to the scroll area
+        content_scroll.setWidget(content_widget)
+        layout.addWidget(content_scroll, 1)
+
+        # Button box (always visible at bottom)
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
