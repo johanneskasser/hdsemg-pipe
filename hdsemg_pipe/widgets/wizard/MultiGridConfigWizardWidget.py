@@ -27,12 +27,12 @@ class MUEditExportWorker(QThread):
     finished = pyqtSignal(int, int, list)  # success_count, error_count, error_messages
     error = pyqtSignal(str)
 
-    def __init__(self, json_files, grid_groupings, multigrid_folder,
+    def __init__(self, json_files, grid_groupings, muedit_folder,
                  covisi_filtered_folder=None, auto_folder=None, parent=None):
         super().__init__(parent)
         self.json_files = json_files
         self.grid_groupings = grid_groupings
-        self.multigrid_folder = multigrid_folder
+        self.muedit_folder = muedit_folder
         self.covisi_filtered_folder = covisi_filtered_folder  # decomposition_covisi_filtered/ or None
         self.auto_folder = auto_folder  # decomposition_auto/
 
@@ -59,7 +59,7 @@ class MUEditExportWorker(QThread):
         return matching[0] if matching else None
 
     def run(self):
-        """Run the export process in background. All outputs go to decomposition_multigrid/."""
+        """Run the export process in background. All outputs go to decomposition_muedit/."""
         try:
             success_count = 0
             error_count = 0
@@ -93,9 +93,9 @@ class MUEditExportWorker(QThread):
 
                     self.progress.emit(current, total_files, f"Exporting multi-grid group '{group_name}'...")
 
-                    os.makedirs(self.multigrid_folder, exist_ok=True)
+                    os.makedirs(self.muedit_folder, exist_ok=True)
                     muedit_file = export_multi_grid_to_muedit(
-                        group_file_paths, group_name, output_dir=self.multigrid_folder
+                        group_file_paths, group_name, output_dir=self.muedit_folder
                     )
 
                     if muedit_file:
@@ -122,8 +122,8 @@ class MUEditExportWorker(QThread):
                 try:
                     self.progress.emit(current, total_files, f"Exporting {os.path.basename(json_file)}...")
 
-                    os.makedirs(self.multigrid_folder, exist_ok=True)
-                    muedit_file = export_to_muedit_mat(json_file, output_dir=self.multigrid_folder)
+                    os.makedirs(self.muedit_folder, exist_ok=True)
+                    muedit_file = export_to_muedit_mat(json_file, output_dir=self.muedit_folder)
                     if muedit_file:
                         success_count += 1
                         logger.info(f"Successfully exported: {os.path.basename(muedit_file)}")
@@ -335,12 +335,12 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.setMaximum(len(self.json_files))
 
-        # Start worker — all outputs go to decomposition_multigrid/
-        multigrid_folder = global_state.get_decomposition_multigrid_path()
+        # Start worker — all outputs go to decomposition_muedit/
+        muedit_folder = global_state.get_decomposition_muedit_path()
         covisi_filtered_folder = global_state.get_decomposition_covisi_filtered_path()
         self.export_worker = MUEditExportWorker(
             self.json_files, self.grid_groupings,
-            multigrid_folder=multigrid_folder,
+            muedit_folder=muedit_folder,
             covisi_filtered_folder=covisi_filtered_folder if os.path.exists(covisi_filtered_folder) else None,
             auto_folder=self.expected_folder,
         )
@@ -414,15 +414,15 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
     def is_completed(self):
         """Check if this step is completed.
 
-        All MAT files are now in decomposition_multigrid/:
+        All MAT files are now in decomposition_muedit/:
         - Groups: {group_name}_multigrid_muedit.mat
         - Singles: {stem}_muedit.mat (stem may include _covisi_filtered)
         """
         if not self.json_files:
             return False
 
-        multigrid_folder = global_state.get_decomposition_multigrid_path()
-        if not os.path.exists(multigrid_folder):
+        muedit_folder = global_state.get_decomposition_muedit_path()
+        if not os.path.exists(muedit_folder):
             return False
 
         # Collect original filenames in groups
@@ -434,11 +434,11 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
         for group_name in self.grid_groupings.keys():
             safe_group_name = "".join(c for c in group_name if c.isalnum() or c in (' ', '_', '-')).strip()
             safe_group_name = safe_group_name.replace(' ', '_')
-            expected_path = os.path.join(multigrid_folder, f"{safe_group_name}_multigrid_muedit.mat")
+            expected_path = os.path.join(muedit_folder, f"{safe_group_name}_multigrid_muedit.mat")
             if not os.path.exists(expected_path):
                 return False
 
-        # Check single-grid MAT files in decomposition_multigrid/
+        # Check single-grid MAT files in decomposition_muedit/
         for json_file in self.json_files:
             json_basename = os.path.basename(json_file)
             # Determine the original filename (strip _covisi_filtered suffix if present)
@@ -449,7 +449,7 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
 
             # Expected MAT: {stem}_muedit.mat in multigrid folder
             stem = Path(json_file).stem
-            expected_mat = os.path.join(multigrid_folder, f"{stem}_muedit.mat")
+            expected_mat = os.path.join(muedit_folder, f"{stem}_muedit.mat")
             if not os.path.exists(expected_mat):
                 return False
 

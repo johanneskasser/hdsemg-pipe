@@ -6,7 +6,7 @@ class FolderNames(Enum):
     ASSOCIATED_GRIDS = "associated_grids"
     LINE_NOISE_CLEANED = "line_noise_cleaned"
     DECOMPOSITION_AUTO = "decomposition_auto"
-    DECOMPOSITION_MULTIGRID = "decomposition_multigrid"
+    DECOMPOSITION_MUEDIT = "decomposition_muedit"
     DECOMPOSITION_REMOVED_DUPLICATES = "decomposition_removed_duplicates"
     DECOMPOSITION_COVISI_FILTERED = "decomposition_covisi_filtered"
     DECOMPOSITION_RESULTS = "decomposition_results"
@@ -21,7 +21,7 @@ class FolderNames(Enum):
             cls.ANALYSIS.value,
             cls.CHANNELSELECTION.value,
             cls.DECOMPOSITION_AUTO.value,
-            cls.DECOMPOSITION_MULTIGRID.value,
+            cls.DECOMPOSITION_MUEDIT.value,
             cls.DECOMPOSITION_REMOVED_DUPLICATES.value,
             cls.DECOMPOSITION_COVISI_FILTERED.value,
             cls.DECOMPOSITION_RESULTS.value,

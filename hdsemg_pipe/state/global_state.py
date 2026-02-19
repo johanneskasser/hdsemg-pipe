@@ -147,10 +147,10 @@ class GlobalState:
         path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_AUTO.value)
         return os.path.normpath(path)
 
-    def get_decomposition_multigrid_path(self):
+    def get_decomposition_muedit_path(self):
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
-        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_MULTIGRID.value)
+        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_MUEDIT.value)
         return os.path.normpath(path)
 
     def get_decomposition_covisi_filtered_path(self):

@@ -22,21 +22,21 @@ class MUEditInstructionDialog(QDialog):
     """
 
     def __init__(self, muedit_files, edited_files, folder_path, skipped_files=None,
-                 multigrid_folder_path=None, parent=None):
+                 muedit_folder_path=None, parent=None):
         """
         Args:
             muedit_files: List of full paths to _muedit.mat files
             edited_files: List of full paths to already edited files
             folder_path: Path to the decomposition_auto folder
             skipped_files: Dict mapping file paths to skip reasons
-            multigrid_folder_path: Path to the decomposition_multigrid folder (optional)
+            muedit_folder_path: Path to the decomposition_muedit folder (optional)
             parent: Parent widget
         """
         super().__init__(parent)
         self.muedit_files = muedit_files
         self.edited_files = edited_files
         self.folder_path = folder_path
-        self.multigrid_folder_path = multigrid_folder_path
+        self.muedit_folder_path = muedit_folder_path
         self.parent_widget = parent
         self.skipped_files = skipped_files or {}
 

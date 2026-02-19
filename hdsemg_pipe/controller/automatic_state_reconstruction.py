@@ -219,9 +219,10 @@ def _check_pipe_folder_structure(folderpath):
     optional_folders = [
         FolderNames.DECOMPOSITION_RESULTS.value,
         FolderNames.ANALYSIS.value,
-        # These folders are created on-demand (CoVISI / MultiGrid export may never run)
+        # These folders are created on-demand (CoVISI / duplicate removal / MUEdit export may never run)
         FolderNames.DECOMPOSITION_COVISI_FILTERED.value,
-        FolderNames.DECOMPOSITION_MULTIGRID.value,
+        FolderNames.DECOMPOSITION_REMOVED_DUPLICATES.value,
+        FolderNames.DECOMPOSITION_MUEDIT.value,
     ]
 
     # Check if each expected subfolder exists

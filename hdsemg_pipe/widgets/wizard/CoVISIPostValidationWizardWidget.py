@@ -201,7 +201,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
         super().__init__(step_index, step_name, description, parent)
 
-        self.multigrid_folder = None  # where edited MAT files live
+        self.muedit_folder = None  # where edited MAT files live
         self.json_source_folder = None  # where source JSONs live (covisi_filtered or auto)
         self.edited_files = []
         self.json_files = []
@@ -462,7 +462,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         if not workfolder:
             return False
 
-        self.multigrid_folder = global_state.get_decomposition_multigrid_path()
+        self.muedit_folder = global_state.get_decomposition_muedit_path()
         self._update_json_source_folder()
 
         if not OPENHDEMG_AVAILABLE:
@@ -501,24 +501,24 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             self.json_source_folder = global_state.get_decomposition_path()  # decomposition_auto
 
     def scan_files(self):
-        """Scan for edited MAT files (from decomposition_multigrid/) and corresponding JSON files."""
-        if not os.path.exists(self.multigrid_folder):
+        """Scan for edited MAT files (from decomposition_muedit/) and corresponding JSON files."""
+        if not os.path.exists(self.muedit_folder):
             self.status_label.setText("MUEdit folder not found.")
             return
 
-        # All edited MAT files now live in decomposition_multigrid/ (new design).
+        # All edited MAT files now live in decomposition_muedit/ (new design).
         # Skip multigrid files (no 1:1 JSON match; merged files can't be validated against originals).
         self.edited_files = [
-            os.path.join(self.multigrid_folder, f)
-            for f in os.listdir(self.multigrid_folder)
+            os.path.join(self.muedit_folder, f)
+            for f in os.listdir(self.muedit_folder)
             if f.endswith("_edited.mat") and "_multigrid_muedit.mat" not in f
         ]
 
         # Count skipped multigrid files for user info
         self.multigrid_skipped_count = sum(
-            1 for f in os.listdir(self.multigrid_folder)
+            1 for f in os.listdir(self.muedit_folder)
             if f.endswith("_edited.mat") and "_multigrid_muedit.mat" in f
-        ) if os.path.exists(self.multigrid_folder) else 0
+        ) if os.path.exists(self.muedit_folder) else 0
 
         if self.multigrid_skipped_count > 0:
             logger.info(
@@ -1039,7 +1039,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
     def init_file_checking(self):
         """Initialize file checking for state reconstruction."""
-        self.multigrid_folder = global_state.get_decomposition_multigrid_path()
+        self.muedit_folder = global_state.get_decomposition_muedit_path()
         self._update_json_source_folder()
         self.scan_files()
 

@@ -10,6 +10,7 @@ This step is optional and skippable.
 
 import os
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -267,6 +268,55 @@ class ViewDuplicateDialog(QDialog):
         parent_layout.addWidget(canvas)
 
 
+class JSONExportWorker(QThread):
+    """Worker thread for exporting cleaned JSONs to MUEdit MAT format."""
+
+    progress = pyqtSignal(int, int, str)  # current, total, message
+    finished = pyqtSignal(int, list)  # success_count, output_paths
+    error = pyqtSignal(str)
+
+    def __init__(self, json_files, output_folder, parent=None):
+        super().__init__(parent)
+        self.json_files = json_files
+        self.output_folder = output_folder
+
+    def run(self):
+        """Export JSON files to MAT format."""
+        try:
+            from hdsemg_pipe.actions.decomposition_export import export_to_muedit_mat
+
+            os.makedirs(self.output_folder, exist_ok=True)
+
+            success_count = 0
+            output_paths = []
+
+            for idx, json_path in enumerate(self.json_files):
+                filename = os.path.basename(json_path)
+                self.progress.emit(idx, len(self.json_files), f"Exporting {filename}...")
+
+                try:
+                    # Export JSON file to MAT (function loads JSON internally)
+                    output_path = export_to_muedit_mat(
+                        json_load_filepath=json_path,
+                        ngrid=None,  # Single-grid export
+                        output_dir=self.output_folder
+                    )
+                    output_paths.append(output_path)
+                    success_count += 1
+                    logger.info(f"Exported {filename} to {output_path}")
+
+                except Exception as e:
+                    logger.error(f"Failed to export {filename}: {e}")
+                    logger.exception(f"Full error for {filename}")
+                    continue
+
+            self.finished.emit(success_count, output_paths)
+
+        except Exception as e:
+            logger.exception("Export worker failed")
+            self.error.emit(f"Export failed: {str(e)}")
+
+
 # ============================================================================
 # MAIN WIDGET
 # ============================================================================
@@ -288,60 +338,43 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         step_index = 10
         step_name = "Remove Duplicate MUs"
         description = "Detect and remove duplicate motor units within and between grids (optional)"
-        super().__init__(step_index, step_name, description, parent)
 
         self.json_files = []
         self.grid_groupings = {}  # {group_name: [file1, file2, ...]}
         self.detection_results = None
         self.detection_worker = None
+        self.export_worker = None
+        self.saved_json_paths = []  # Paths to cleaned JSONs (for export)
+
+        super().__init__(step_index, step_name, description, parent)
 
         self.init_ui()
+        self.check()
 
-    def init_ui(self):
-        """Initialize UI components."""
-        # Status panel
-        self.status_group = self.create_status_panel()
-        self.layout.addWidget(self.status_group)
-
-        # Parameters panel
-        self.params_group = self.create_parameter_panel()
-        self.layout.addWidget(self.params_group)
-
-        # Action buttons
+    def create_buttons(self):
+        """Create action buttons for this step."""
+        # Configure grouping button
         self.btn_configure = QPushButton("Configure Grouping")
         self.btn_configure.setStyleSheet(Styles.button_secondary())
         self.btn_configure.clicked.connect(self.open_grouping_dialog)
+        self.btn_configure.setEnabled(False)
         self.buttons.append(self.btn_configure)
 
+        # Detect duplicates button
         self.btn_detect = QPushButton("Detect Duplicates")
         self.btn_detect.setStyleSheet(Styles.button_primary())
         self.btn_detect.clicked.connect(self.start_detection)
         self.btn_detect.setEnabled(False)
         self.buttons.append(self.btn_detect)
 
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.btn_configure)
-        btn_layout.addWidget(self.btn_detect)
-        btn_layout.addStretch()
-        self.layout.addLayout(btn_layout)
-
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet(Styles.progress_bar())
-        self.progress_bar.setVisible(False)
-        self.layout.addWidget(self.progress_bar)
-
-        # Results panel
-        self.results_group = self.create_results_panel()
-        self.layout.addWidget(self.results_group)
-
-        # Bottom buttons
+        # Apply removals button
         self.btn_apply = QPushButton("Apply Removals and Save")
-        self.btn_apply.setStyleSheet(Styles.button_success())
+        self.btn_apply.setStyleSheet(Styles.button_primary())
         self.btn_apply.clicked.connect(self.apply_removals)
         self.btn_apply.setEnabled(False)
         self.buttons.append(self.btn_apply)
 
+        # Skip button
         self.btn_skip = QPushButton("Skip This Step")
         self.btn_skip.setStyleSheet(Styles.button_secondary())
         self.btn_skip.setToolTip(
@@ -351,26 +384,36 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         self.btn_skip.clicked.connect(self.skip_step)
         self.buttons.append(self.btn_skip)
 
-        bottom_btn_layout = QHBoxLayout()
-        bottom_btn_layout.addWidget(self.btn_apply)
-        bottom_btn_layout.addStretch()
-        bottom_btn_layout.addWidget(self.btn_skip)
-        self.layout.addLayout(bottom_btn_layout)
+    def init_ui(self):
+        """Initialize UI components."""
+        # Status panel
+        self.status_group = self.create_status_panel()
+        self.content_layout.addWidget(self.status_group)
 
-        self.layout.addStretch()
+        # Parameters panel
+        self.params_group = self.create_parameter_panel()
+        self.content_layout.addWidget(self.params_group)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setStyleSheet(Styles.progress_bar())
+        self.progress_bar.setVisible(False)
+        self.content_layout.addWidget(self.progress_bar)
+
+        # Results panel
+        self.results_group = self.create_results_panel()
+        self.content_layout.addWidget(self.results_group)
 
     def create_status_panel(self):
         """Create status information panel."""
         group = QGroupBox("Status")
-        group.setStyleSheet(Styles.group_box())
+        group.setStyleSheet(Styles.groupbox())
         layout = QVBoxLayout(group)
 
         self.lbl_files_found = QLabel("No files found")
-        self.lbl_files_found.setStyleSheet(Styles.label())
         layout.addWidget(self.lbl_files_found)
 
         self.lbl_grouping_strategy = QLabel("Grouping: File + Muscle (default)")
-        self.lbl_grouping_strategy.setStyleSheet(Styles.label())
         layout.addWidget(self.lbl_grouping_strategy)
 
         return group
@@ -378,62 +421,60 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
     def create_parameter_panel(self):
         """Create parameter configuration panel."""
         group = QGroupBox("Detection Parameters")
-        group.setStyleSheet(Styles.group_box())
-        layout = QVBoxLayout(group)
+        group.setStyleSheet(Styles.groupbox())
 
-        # Row 1: Jitter and MaxLag
-        row1 = QHBoxLayout()
+        # Use compact single-row layout
+        row = QHBoxLayout(group)
+        row.setSpacing(Spacing.MD)
+        row.setContentsMargins(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM)
 
-        row1.addWidget(QLabel("Jitter tolerance:"))
+        # Jitter
+        row.addWidget(QLabel("Jitter:"))
         self.jitter_spin = QDoubleSpinBox()
         self.jitter_spin.setRange(0.01, 0.2)
-        self.jitter_spin.setValue(0.05)  # MUEdit default
+        self.jitter_spin.setValue(0.05)
         self.jitter_spin.setSuffix(" s")
         self.jitter_spin.setDecimals(3)
+        self.jitter_spin.setFixedWidth(80)
         self.jitter_spin.setToolTip("Time tolerance for spike matching (default: 0.05s = 50ms)")
-        row1.addWidget(self.jitter_spin)
+        row.addWidget(self.jitter_spin)
 
-        row1.addSpacing(20)
-
-        row1.addWidget(QLabel("Max time lag:"))
+        # MaxLag
+        row.addWidget(QLabel("Max lag:"))
         self.maxlag_spin = QSpinBox()
         self.maxlag_spin.setRange(64, 2048)
-        self.maxlag_spin.setValue(512)  # MUEdit default
-        self.maxlag_spin.setSuffix(" samples")
+        self.maxlag_spin.setValue(512)
+        self.maxlag_spin.setSuffix(" samp")
+        self.maxlag_spin.setFixedWidth(100)
         self.maxlag_spin.setToolTip("Maximum time shift for cross-correlation (default: 512)")
-        row1.addWidget(self.maxlag_spin)
+        row.addWidget(self.maxlag_spin)
 
-        row1.addStretch()
-        layout.addLayout(row1)
-
-        # Row 2: Overlap threshold and Fsamp
-        row2 = QHBoxLayout()
-
-        row2.addWidget(QLabel("Overlap threshold:"))
+        # Overlap threshold
+        row.addWidget(QLabel("Overlap:"))
         self.tol_spin = QDoubleSpinBox()
         self.tol_spin.setRange(0.5, 1.0)
-        self.tol_spin.setValue(0.8)  # 80% default
+        self.tol_spin.setValue(0.8)
         self.tol_spin.setSingleStep(0.05)
         self.tol_spin.setDecimals(2)
+        self.tol_spin.setFixedWidth(60)
         self.tol_spin.setToolTip("Overlap threshold for duplicate detection (default: 0.8 = 80%)")
-        row2.addWidget(self.tol_spin)
+        row.addWidget(self.tol_spin)
 
-        row2.addSpacing(20)
-
-        row2.addWidget(QLabel("Sampling rate:"))
-        self.lbl_fsamp = QLabel("Auto-detected")
+        # Fsamp
+        row.addWidget(QLabel("Fsamp:"))
+        self.lbl_fsamp = QLabel("Auto")
         self.lbl_fsamp.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-style: italic;")
-        row2.addWidget(self.lbl_fsamp)
+        self.lbl_fsamp.setMinimumWidth(80)
+        row.addWidget(self.lbl_fsamp)
 
-        row2.addStretch()
-        layout.addLayout(row2)
+        row.addStretch()
 
         return group
 
     def create_results_panel(self):
         """Create results display panel."""
         group = QGroupBox("Detection Results")
-        group.setStyleSheet(Styles.group_box())
+        group.setStyleSheet(Styles.groupbox())
         group.setVisible(False)  # Hidden until detection runs
         layout = QVBoxLayout(group)
 
@@ -443,7 +484,6 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         self.results_table.setHorizontalHeaderLabels([
             "Group", "MUs in Duplicate", "Overlap %", "Survivor", "Action", "View"
         ])
-        self.results_table.setStyleSheet(Styles.table())
         self.results_table.horizontalHeader().setStretchLastSection(False)
         self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.results_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -451,13 +491,16 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
         # Summary label
         self.lbl_summary = QLabel("")
-        self.lbl_summary.setStyleSheet(Styles.label())
         layout.addWidget(self.lbl_summary)
 
         return group
 
     def check(self):
         """Check if step can be activated."""
+        # Don't show errors on initial load (no workfolder set)
+        if not global_state.workfolder:
+            return False
+
         if not OPENHDEMG_AVAILABLE:
             self.error("openhdemg library is required for duplicate detection")
             return False
@@ -478,8 +521,12 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         # 1. decomposition_covisi_filtered/ (if step 9 completed and not skipped)
         # 2. decomposition_auto/ (fallback)
 
-        covisi_folder = global_state.get_decomposition_covisi_filtered_path()
-        auto_folder = global_state.get_decomposition_path()
+        try:
+            covisi_folder = global_state.get_decomposition_covisi_filtered_path()
+            auto_folder = global_state.get_decomposition_path()
+        except (ValueError, AttributeError):
+            # Workfolder not set
+            return
 
         source_folder = None
 
@@ -498,8 +545,10 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             logger.info("Using decomposition_auto files for duplicate detection")
 
         # Scan for JSON files
-        if not os.path.exists(source_folder):
-            self.error(f"Source folder not found: {source_folder}")
+        if not source_folder or not os.path.exists(source_folder):
+            # Don't show error on initial load
+            if global_state.workfolder:
+                self.error(f"Source folder not found: {source_folder}")
             return
 
         state_files = {
@@ -539,7 +588,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         # Use existing GridGroupingDialog
         dialog = GridGroupingDialog(
             self.json_files,
-            existing_groupings=self.grid_groupings,
+            current_groupings=self.grid_groupings,
             parent=self
         )
 
@@ -554,18 +603,12 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             self.error("No JSON files to process")
             return
 
-        # Create groups using existing logic
+        # Create groups
         try:
-            strategy = 'file_and_muscle'  # Default per user preference
-            groups_dict = create_emgfile_groups(
-                self.json_files,
-                strategy=strategy,
-                concatenate=False  # Don't merge, just group
-            )
+            groups = []
 
-            # If manual groupings configured, use those instead
+            # If manual groupings configured, use those
             if self.grid_groupings:
-                groups = []
                 for group_name, file_basenames in self.grid_groupings.items():
                     # Resolve basenames to full paths
                     group_files = []
@@ -574,32 +617,34 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                         if matching:
                             group_files.extend(matching)
 
-                    if len(group_files) >= 2:
+                    if len(group_files) > 0:
                         groups.append({'name': group_name, 'files': group_files})
             else:
-                # Use auto-grouped
-                groups = []
-                for group_name, group_data in groups_dict.get('groups', {}).items():
-                    if isinstance(group_data, list):
-                        files = group_data
-                    else:
-                        files = group_data.get('files', [])
+                # Auto-group by muscle name (simple strategy)
+                muscle_groups = {}
+                for json_file in self.json_files:
+                    # Extract muscle name from filename (simplified)
+                    # Pattern: ..._{muscle}.json or ..._{muscle}_covisi_filtered.json
+                    stem = Path(json_file).stem
+                    # Remove common suffixes
+                    for suffix in ['_covisi_filtered', '_duplicates_removed']:
+                        if stem.endswith(suffix):
+                            stem = stem[:-len(suffix)]
 
-                    if len(files) >= 2:
-                        groups.append({'name': group_name, 'files': files})
+                    # Extract muscle name (last part before extensions)
+                    parts = stem.split('_')
+                    if len(parts) >= 2:
+                        muscle = parts[-1]  # Last part is typically muscle name
+                        if muscle not in muscle_groups:
+                            muscle_groups[muscle] = []
+                        muscle_groups[muscle].append(json_file)
 
-                # Also process ungrouped files individually (single-file groups)
-                for ungrouped_file in groups_dict.get('ungrouped', []):
-                    if isinstance(ungrouped_file, dict):
-                        file_path = ungrouped_file.get('file')
-                    else:
-                        file_path = ungrouped_file
+                # Create groups from muscle groupings
+                for muscle, files in muscle_groups.items():
+                    if len(files) > 0:
+                        groups.append({'name': muscle, 'files': files})
 
-                    if file_path:
-                        file_name = Path(file_path).stem
-                        groups.append({'name': file_name, 'files': [file_path]})
-
-            logger.info(f"Created {len(groups)} groups for detection")
+            logger.info(f"Created {len(groups)} groups for detection ({len([g for g in groups if len(g['files']) >= 2])} multi-file groups)")
 
             # Start worker
             self.progress_bar.setVisible(True)
@@ -641,15 +686,55 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
         self.detection_results = results
 
-        # Display results
-        self.display_results(results)
-
-        # Enable apply button if duplicates found
+        # Check if any duplicates were found
         if results['total_duplicate_groups'] > 0:
+            # Display results for user review
+            self.display_results(results)
             self.btn_apply.setEnabled(True)
             self.success(f"Found {results['total_duplicate_groups']} duplicate groups")
         else:
-            self.info("No duplicates found - all MUs are unique")
+            # No duplicates found - automatically copy files and complete step
+            self.info("No duplicates found - all MUs are unique. Auto-completing step...")
+            self.auto_complete_no_duplicates(results)
+
+    def auto_complete_no_duplicates(self, results):
+        """Automatically complete step when no duplicates are found."""
+        try:
+            output_folder = global_state.get_decomposition_removed_duplicates_path()
+            os.makedirs(output_folder, exist_ok=True)
+
+            # Copy all source files to output folder
+            self.saved_json_paths = []
+            processed_files = set()
+
+            for group_result in results['groups']:
+                for json_path in group_result['json_paths']:
+                    # Copy file to output folder (no suffix change since no duplicates removed)
+                    output_path = os.path.join(output_folder, Path(json_path).name)
+                    shutil.copy2(json_path, output_path)
+                    self.saved_json_paths.append(output_path)
+                    processed_files.add(json_path)
+                    logger.info(f"Copied {Path(json_path).name} (no duplicates found)")
+
+            # Copy any files that were NOT in groups
+            for json_path in self.json_files:
+                if json_path not in processed_files:
+                    output_path = os.path.join(output_folder, Path(json_path).name)
+                    shutil.copy2(json_path, output_path)
+                    self.saved_json_paths.append(output_path)
+                    logger.info(f"Copied {Path(json_path).name} (not in any group)")
+
+            # Save detection report
+            self.save_detection_report(output_folder)
+
+            logger.info(f"Copied {len(self.saved_json_paths)} files (no duplicates + ungrouped)")
+
+            # Export to MAT format for MUEdit
+            self.start_export_to_muedit()
+
+        except Exception as e:
+            logger.exception("Failed to auto-complete step")
+            self.error(f"Failed to auto-complete: {str(e)}")
 
     def on_detection_error(self, error_msg):
         """Handle detection error."""
@@ -713,7 +798,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         dialog.exec_()
 
     def apply_removals(self):
-        """Apply duplicate removals and save cleaned files."""
+        """Apply duplicate removals, save cleaned files, and export to MAT."""
         if self.detection_results is None:
             self.error("No detection results available")
             return
@@ -723,7 +808,8 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             os.makedirs(output_folder, exist_ok=True)
 
             # Collect removals based on checkboxes
-            total_saved = 0
+            self.saved_json_paths = []
+            processed_files = set()  # Track which files were processed
 
             for group_result in self.detection_results['groups']:
                 # Filter duplicate groups based on checkboxes
@@ -752,20 +838,85 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                     suffix='_duplicates_removed'
                 )
 
-                total_saved += len(output_paths)
+                self.saved_json_paths.extend(output_paths)
+                # Track processed files
+                for path in original_paths:
+                    processed_files.add(path)
+
+            # Copy any files that were NOT in groups (to ensure ALL files are exported)
+            for json_path in self.json_files:
+                if json_path not in processed_files:
+                    output_path = os.path.join(output_folder, Path(json_path).name)
+                    shutil.copy2(json_path, output_path)
+                    self.saved_json_paths.append(output_path)
+                    logger.info(f"Copied {Path(json_path).name} (not in any group)")
 
             # Save report
             self.save_detection_report(output_folder)
 
-            # Mark step as completed
-            global_state.complete_widget(f"step{self.step_index}")
+            logger.info(f"Saved {len(self.saved_json_paths)} JSON files (cleaned + ungrouped)")
 
-            self.success(f"Saved {total_saved} cleaned files to {Path(output_folder).name}/")
-            self.complete_step()
+            # Now export to MAT format for MUEdit
+            self.start_export_to_muedit()
 
         except Exception as e:
             logger.exception("Failed to apply removals")
             self.error(f"Failed to apply removals: {str(e)}")
+
+    def start_export_to_muedit(self):
+        """Export cleaned JSONs to MUEdit MAT format."""
+        muedit_folder = global_state.get_decomposition_muedit_path()
+        os.makedirs(muedit_folder, exist_ok=True)
+
+        logger.info(f"Starting export of {len(self.saved_json_paths)} files to MUEdit format...")
+
+        # Update UI
+        self.lbl_summary.setText(f"Exporting {len(self.saved_json_paths)} files to MUEdit format...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+
+        # Disable buttons during export
+        self.btn_apply.setEnabled(False)
+        self.btn_detect.setEnabled(False)
+        self.btn_configure.setEnabled(False)
+
+        # Start export worker
+        self.export_worker = JSONExportWorker(self.saved_json_paths, muedit_folder)
+        self.export_worker.progress.connect(self.on_export_progress)
+        self.export_worker.finished.connect(self.on_export_finished)
+        self.export_worker.error.connect(self.on_export_error)
+        self.export_worker.start()
+
+    def on_export_progress(self, current, total, message):
+        """Handle export progress updates."""
+        if total > 0:
+            progress = int((current / total) * 100)
+            self.progress_bar.setValue(progress)
+        self.lbl_summary.setText(message)
+
+    def on_export_finished(self, success_count, output_paths):
+        """Handle export completion."""
+        self.progress_bar.setVisible(False)
+        self.lbl_summary.setText(f"Exported {success_count} files to MUEdit format")
+
+        # Mark step as completed
+        global_state.complete_widget(f"step{self.step_index}")
+
+        self.success(
+            f"Saved {len(self.saved_json_paths)} cleaned files and exported {success_count} MAT files for MUEdit"
+        )
+        self.complete_step()
+
+    def on_export_error(self, error_msg):
+        """Handle export errors."""
+        self.progress_bar.setVisible(False)
+        self.lbl_summary.setText("Export failed")
+        self.error(f"Export to MUEdit failed: {error_msg}")
+
+        # Re-enable buttons
+        self.btn_apply.setEnabled(True)
+        self.btn_detect.setEnabled(True)
+        self.btn_configure.setEnabled(True)
 
     def save_detection_report(self, output_folder):
         """Save detection report to JSON."""
@@ -792,18 +943,29 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         logger.info(f"Saved detection report: {report_path}")
 
     def skip_step(self):
-        """Skip duplicate detection step."""
-        # Create output folder and save skip marker
-        output_folder = global_state.get_decomposition_removed_duplicates_path()
-        os.makedirs(output_folder, exist_ok=True)
+        """Skip duplicate detection step - copy files and export to MAT."""
+        try:
+            output_folder = global_state.get_decomposition_removed_duplicates_path()
+            os.makedirs(output_folder, exist_ok=True)
 
-        skip_marker_path = os.path.join(output_folder, '.skip_marker.json')
-        with open(skip_marker_path, 'w') as f:
-            json.dump({'skipped': True, 'reason': 'User skipped duplicate detection'}, f)
+            # Save skip marker
+            skip_marker_path = os.path.join(output_folder, '.skip_marker.json')
+            with open(skip_marker_path, 'w') as f:
+                json.dump({'skipped': True, 'reason': 'User skipped duplicate detection'}, f)
 
-        # Mark step as completed
-        global_state.complete_widget(f"step{self.step_index}")
+            # Copy all source files to output folder
+            self.saved_json_paths = []
+            for json_path in self.json_files:
+                output_path = os.path.join(output_folder, Path(json_path).name)
+                shutil.copy2(json_path, output_path)
+                self.saved_json_paths.append(output_path)
+                logger.info(f"Copied {Path(json_path).name} (step skipped)")
 
-        logger.info("Duplicate detection skipped")
-        self.success("Duplicate detection skipped. Proceeding to next step...")
-        self.complete_step()
+            logger.info(f"Copied {len(self.saved_json_paths)} files (duplicate detection skipped)")
+
+            # Export to MAT format for MUEdit
+            self.start_export_to_muedit()
+
+        except Exception as e:
+            logger.exception("Failed to skip step")
+            self.error(f"Failed to skip step: {str(e)}")

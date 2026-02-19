@@ -318,7 +318,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
         if not os.path.exists(self.decomp_folder):
             return
 
-        # Find edited MUEdit files from both decomposition_auto and decomposition_multigrid
+        # Find edited MUEdit files from both decomposition_auto and decomposition_muedit
         # MUEdit creates files by appending "_edited.mat" to the entire filename
         # e.g., "file_muedit.mat" -> "file_muedit.mat_edited.mat"
         edited_from_decomp = [
@@ -327,12 +327,12 @@ class FinalResultsWizardWidget(WizardStepWidget):
             if file.endswith('.mat_edited.mat')
         ] if os.path.exists(self.decomp_folder) else []
 
-        multigrid_folder = global_state.get_decomposition_multigrid_path()
+        muedit_folder = global_state.get_decomposition_muedit_path()
         edited_from_multigrid = [
-            os.path.join(multigrid_folder, file)
-            for file in os.listdir(multigrid_folder)
+            os.path.join(muedit_folder, file)
+            for file in os.listdir(muedit_folder)
             if file.endswith('.mat_edited.mat')
-        ] if os.path.exists(multigrid_folder) else []
+        ] if os.path.exists(muedit_folder) else []
 
         self.edited_files = edited_from_decomp + edited_from_multigrid
 
