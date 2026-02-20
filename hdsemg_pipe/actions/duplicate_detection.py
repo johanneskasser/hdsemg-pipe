@@ -180,10 +180,12 @@ def compute_xcorr_lag(
     # Output length equals len(binary_firing2) (first argument)
     xcorr = correlate(binary_firing2, binary_firing1, mode='same')
 
-    # Create lag vector based on xcorr length to guarantee alignment
+    # Create lag vector based on xcorr length to guarantee alignment.
+    # np.arange(n) - n//2 is safe for both even and odd lengths;
+    # the -n//2 shorthand is wrong for odd n due to Python floor division.
     n_xcorr = len(xcorr)
     n = len(binary_firing1)  # kept for normalization
-    lags = np.arange(-n_xcorr//2, n_xcorr//2 + (n_xcorr % 2))
+    lags = np.arange(n_xcorr) - n_xcorr // 2
 
     # Restrict to maxlag window
     valid_idx = np.abs(lags) <= maxlag
