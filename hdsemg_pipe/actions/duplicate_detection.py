@@ -177,11 +177,13 @@ def compute_xcorr_lag(
         - normalized_correlation: Correlation value normalized by signal length
     """
     # Compute cross-correlation (mode='same' centers the correlation)
+    # Output length equals len(binary_firing2) (first argument)
     xcorr = correlate(binary_firing2, binary_firing1, mode='same')
 
-    # Create lag vector (centered around 0)
-    n = len(binary_firing1)
-    lags = np.arange(-n//2, n//2 + (n % 2))
+    # Create lag vector based on xcorr length to guarantee alignment
+    n_xcorr = len(xcorr)
+    n = len(binary_firing1)  # kept for normalization
+    lags = np.arange(-n_xcorr//2, n_xcorr//2 + (n_xcorr % 2))
 
     # Restrict to maxlag window
     valid_idx = np.abs(lags) <= maxlag
