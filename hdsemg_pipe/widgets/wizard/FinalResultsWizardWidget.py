@@ -428,7 +428,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
             return
 
         try:
-            import openhdemg.gui as gui
+            import openhdemg.gui.openhdemg_gui as gui
 
             logger.info(f"Opening openhdemg GUI with results from: {self.results_folder}")
 
@@ -436,7 +436,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
             first_json = self.exported_files[0]
 
             # Launch openhdemg GUI
-            gui.openhdemg_gui(str(first_json))
+            gui.run_main()
 
             self.success("openhdemg GUI opened successfully!")
 
