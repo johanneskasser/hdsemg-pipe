@@ -481,11 +481,6 @@ def apply_covisi_filter_to_json(
 
     filtered_count = filtered_emgfile.get("NUMBER_OF_MUS", 0)
 
-    # Save filtered JSON
-    logger.info(f"Saving filtered JSON to: {output_path}")
-    emg.save_json_emgfile(filtered_emgfile, str(output_path), compresslevel=4)
-
-    # Build statistics
     removed_mask = report_df["status"] == "removed"
     stats = {
         "original_mu_count": original_count,
@@ -498,6 +493,21 @@ def apply_covisi_filter_to_json(
         ),
         "manual_overrides_applied": len(manual_overrides),
     }
+
+    # Do not save files with 0 MUs remaining — they are useless downstream
+    # and cause silent failures during MAT export and confuse file counts.
+    if filtered_count == 0:
+        logger.info(
+            f"All {original_count} MU(s) in {Path(json_path).name} exceeded the "
+            f"CoVISI threshold ({threshold}%). File excluded from output "
+            f"(not written to {Path(output_path).parent.name}/)."
+        )
+        stats["skipped_all_mus_removed"] = True
+        return stats
+
+    # Save filtered JSON
+    logger.info(f"Saving filtered JSON to: {output_path}")
+    emg.save_json_emgfile(filtered_emgfile, str(output_path), compresslevel=4)
 
     return stats
 

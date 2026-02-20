@@ -224,6 +224,13 @@ def export_to_muedit_mat(json_load_filepath, ngrid=None, output_dir=None):
         nMU = json_from_openhdemg["IPTS"].shape[1]
         nCH = json_from_openhdemg["RAW_SIGNAL"].shape[1]
 
+        if nMU == 0:
+            logger.info(
+                f"Skipping MAT export for {json_path.name}: file contains 0 motor units. "
+                "This is expected if all MUs were filtered (CoVISI, duplicates, etc.)."
+            )
+            return None
+
         logger.debug(f"Converting file with {nMU} motor units and {nCH} channels across {ngrid} grid(s)")
 
         # Allocate MUEdit structure

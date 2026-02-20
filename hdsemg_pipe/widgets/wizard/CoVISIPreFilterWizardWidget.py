@@ -143,6 +143,8 @@ class CoVISIFilterWorker(QThread):
         try:
             overall_stats = {
                 "files_processed": 0,
+                "files_skipped_no_mus": 0,
+                "skipped_filenames": [],
                 "total_mus_original": 0,
                 "total_mus_filtered": 0,
                 "total_mus_removed": 0,
@@ -176,11 +178,15 @@ class CoVISIFilterWorker(QThread):
                         manual_overrides=file_overrides,
                     )
 
-                    # Aggregate stats
-                    overall_stats["files_processed"] += 1
-                    overall_stats["total_mus_original"] += stats["original_mu_count"]
-                    overall_stats["total_mus_filtered"] += stats["filtered_mu_count"]
-                    overall_stats["total_mus_removed"] += stats["removed_count"]
+                    # Aggregate stats — separate skipped (0 MUs) from saved files
+                    if stats.get("skipped_all_mus_removed"):
+                        overall_stats["files_skipped_no_mus"] += 1
+                        overall_stats["skipped_filenames"].append(filename)
+                    else:
+                        overall_stats["files_processed"] += 1
+                        overall_stats["total_mus_original"] += stats["original_mu_count"]
+                        overall_stats["total_mus_filtered"] += stats["filtered_mu_count"]
+                        overall_stats["total_mus_removed"] += stats["removed_count"]
                     overall_stats["per_file_stats"][filename] = stats
 
                 except Exception as e:
@@ -668,11 +674,14 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             self.status_label.setText("Decomposition folder not found.")
             return
 
-        # State files to exclude
+        # State files to exclude (all known non-data JSONs in decomposition_auto)
         state_files = {
             "decomposition_mapping.json",
             "multigrid_groupings.json",
             "covisi_pre_filter_report.json",
+            "covisi_post_validation_report.json",
+            "duplicate_detection_params.json",
+            "duplicate_detection_report.json",
         }
 
         # Find JSON files (exclude state files, algorithm_params, and already-filtered files)
@@ -1086,13 +1095,30 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         removed = stats["total_mus_removed"]
         original = stats["total_mus_original"]
         filtered = stats["total_mus_filtered"]
+        saved_files = stats["files_processed"]
+        skipped_files = stats.get("files_skipped_no_mus", 0)
+        skipped_names = stats.get("skipped_filenames", [])
+
+        if skipped_files > 0:
+            logger.info(
+                f"CoVISI filtering: {skipped_files} file(s) had ALL MUs removed and "
+                f"were NOT written to decomposition_covisi_filtered/ "
+                f"(no motor units survived the threshold). "
+                f"Excluded files: {', '.join(skipped_names)}"
+            )
+
+        file_summary = f"{saved_files} file(s) saved"
+        if skipped_files > 0:
+            file_summary += f", {skipped_files} file(s) excluded (0 MUs remaining)"
 
         self.success(
-            f"CoVISI filtering complete. Removed {removed} of {original} MUs "
-            f"({filtered} remaining)."
+            f"CoVISI filtering complete. {file_summary}. "
+            f"MUs: {filtered} kept, {removed} removed."
         )
         self.status_label.setText(
-            f"Filtering complete: {filtered} MUs kept, {removed} removed"
+            f"Complete: {saved_files} files saved"
+            + (f", {skipped_files} excluded (0 MUs)" if skipped_files > 0 else "")
+            + f" · {filtered} MUs kept, {removed} removed"
         )
 
         # Mark step as completed

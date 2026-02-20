@@ -272,7 +272,7 @@ class JSONExportWorker(QThread):
     """Worker thread for exporting cleaned JSONs to MUEdit MAT format."""
 
     progress = pyqtSignal(int, int, str)  # current, total, message
-    finished = pyqtSignal(int, list)  # success_count, output_paths
+    finished = pyqtSignal(int, int, list, list)  # success_count, skipped_count, output_paths, skipped_files
     error = pyqtSignal(str)
 
     def __init__(self, json_files, output_folder, parent=None):
@@ -288,29 +288,53 @@ class JSONExportWorker(QThread):
             os.makedirs(self.output_folder, exist_ok=True)
 
             success_count = 0
+            skipped_count = 0
+            failed_count = 0
             output_paths = []
+            skipped_files = []   # Files skipped because they have 0 MUs
+            failed_files = []    # Files that failed due to an error
 
+            total = len(self.json_files)
             for idx, json_path in enumerate(self.json_files):
                 filename = os.path.basename(json_path)
-                self.progress.emit(idx, len(self.json_files), f"Exporting {filename}...")
+                self.progress.emit(idx, total, f"Exporting {filename}...")
 
                 try:
-                    # Export JSON file to MAT (function loads JSON internally)
                     output_path = export_to_muedit_mat(
                         json_load_filepath=json_path,
-                        ngrid=None,  # Single-grid export
+                        ngrid=None,
                         output_dir=self.output_folder
                     )
-                    output_paths.append(output_path)
-                    success_count += 1
-                    logger.info(f"Exported {filename} to {output_path}")
+
+                    if output_path is None:
+                        # export_to_muedit_mat returns None when file has 0 MUs
+                        skipped_count += 1
+                        skipped_files.append(filename)
+                        logger.info(f"Skipped MAT export for {filename} (0 MUs)")
+                    else:
+                        output_paths.append(output_path)
+                        success_count += 1
+                        logger.info(f"Exported {filename} -> {output_path}")
 
                 except Exception as e:
+                    failed_count += 1
+                    failed_files.append(filename)
                     logger.error(f"Failed to export {filename}: {e}")
                     logger.exception(f"Full error for {filename}")
                     continue
 
-            self.finished.emit(success_count, output_paths)
+            logger.info(
+                f"MAT export summary: {total} JSON files processed → "
+                f"{success_count} exported, "
+                f"{skipped_count} skipped (0 MUs), "
+                f"{failed_count} failed"
+            )
+            if skipped_files:
+                logger.info(f"Skipped (0 MUs): {', '.join(skipped_files)}")
+            if failed_files:
+                logger.warning(f"Failed exports: {', '.join(failed_files)}")
+
+            self.finished.emit(success_count, skipped_count, output_paths, skipped_files)
 
         except Exception as e:
             logger.exception("Export worker failed")
@@ -868,10 +892,10 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         muedit_folder = global_state.get_decomposition_muedit_path()
         os.makedirs(muedit_folder, exist_ok=True)
 
-        logger.info(f"Starting export of {len(self.saved_json_paths)} files to MUEdit format...")
+        logger.info(f"Starting MAT export of {len(self.saved_json_paths)} JSON files to MUEdit format...")
 
         # Update UI
-        self.lbl_summary.setText(f"Exporting {len(self.saved_json_paths)} files to MUEdit format...")
+        self.lbl_summary.setText(f"Exporting {len(self.saved_json_paths)} JSON files to MUEdit MAT format...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
 
@@ -894,16 +918,39 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             self.progress_bar.setValue(progress)
         self.lbl_summary.setText(message)
 
-    def on_export_finished(self, success_count, output_paths):
+    def on_export_finished(self, success_count, skipped_count, output_paths, skipped_files):
         """Handle export completion."""
         self.progress_bar.setVisible(False)
-        self.lbl_summary.setText(f"Exported {success_count} files to MUEdit format")
+
+        total_json = len(self.saved_json_paths)
+        failed_count = total_json - success_count - skipped_count
+
+        # Build a detailed breakdown for the summary label
+        parts = [f"{total_json} JSON files processed"]
+        parts.append(f"{success_count} MAT files exported")
+        if skipped_count > 0:
+            parts.append(f"{skipped_count} skipped (0 MUs — no motor units to export)")
+        if failed_count > 0:
+            parts.append(f"{failed_count} failed (see log)")
+
+        summary_text = " · ".join(parts)
+        self.lbl_summary.setText(summary_text)
+
+        if skipped_count > 0:
+            logger.info(
+                f"Note: {skipped_count} JSON file(s) were not converted to MAT because they "
+                f"contain 0 motor units. This is expected when all MUs were removed by "
+                f"CoVISI filtering or duplicate removal. "
+                f"Affected files: {', '.join(skipped_files)}"
+            )
 
         # Mark step as completed
         global_state.complete_widget(f"step{self.step_index}")
 
         self.success(
-            f"Saved {len(self.saved_json_paths)} cleaned files and exported {success_count} MAT files for MUEdit"
+            f"Saved {total_json} cleaned JSON files · "
+            f"Exported {success_count} MAT files for MUEdit"
+            + (f" · {skipped_count} skipped (0 MUs)" if skipped_count > 0 else "")
         )
         self.complete_step()
 
