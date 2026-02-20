@@ -61,3 +61,12 @@ In order to install hdsemg-pipe, follow the instructions in the [installation gu
 - 🔗 Grid association and ROI definition
 - 🎚️ Channel selection and decomposition result visualization
 - ⚡️ Integration with external tools like openhdemg
+
+## Acknowledgments
+
+This project is beeing developed with support from:
+
+**[Hochschule Campus Wien](https://www.hcw.ac.at)**
+Department of Physiotherapy
+
+Supervised by **Dr. rer. nat. Harald Penasso** ([harald.penasso@hcw.ac.at](mailto:harald.penasso@hcw.ac.at))
