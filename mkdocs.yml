@@ -38,6 +38,8 @@ nav:
       - Decomposition Results: processing/decomposition_results.md
       - CoVISI Filtering: processing/covisi_filtering.md
       - MUEdit Export Workflow: processing/muedit_export_workflow.md
+      - Analysis Notebook: processing/analysis_notebook.md
+      - Database Export (SQLite): processing/database_export.md
   - Developer Guide: developer.md
   - Contributing: contributing.md
 

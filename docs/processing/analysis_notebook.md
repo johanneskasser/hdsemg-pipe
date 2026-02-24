@@ -30,9 +30,15 @@ pip install openhdemg
 
 3. **Export Notebook**: Click **"Export Analysis Notebook"** button
 
-4. **Files Created**: Two files will be generated in your workfolder root:
-   - `workfolder_analysis_helper.py` - Python helper module (~250 lines)
-   - `hdsemg_analysis.ipynb` - Jupyter notebook (20 cells)
+4. **Files Created**: Three files will be generated in your workfolder root:
+   - `workfolder_analysis_helper.py` - Python helper module
+   - `hdsemg_analysis.ipynb` - Full analysis notebook with visualizations
+   - `01_export_to_db.ipynb` - **Database export notebook** (writes MU data to SQLite)
+
+!!! info "Database Export"
+    `01_export_to_db.ipynb` is new. It exports all motor unit properties into a central
+    SQLite database (`mu_study.db`) shared across all subjects – replacing the CSV export.
+    See [Database Export](database_export.md) for setup and usage.
 
 ## Generated Files
 
