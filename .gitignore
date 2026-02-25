@@ -22,3 +22,5 @@ CLAUDE.md
 GEMINI.md
 .claude/
 .grepai/
+
+docs/plans/*

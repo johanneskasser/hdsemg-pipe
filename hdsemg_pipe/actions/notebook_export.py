@@ -15,7 +15,7 @@ def export_analysis_notebook(workfolder: str) -> Dict:
     """
     Export analysis notebook and helper module to workfolder.
 
-    Also generates 01_export_to_db.ipynb for writing MU properties to SQLite.
+    Also generates 01_data_export.ipynb for writing MU properties to SQLite.
 
     Args:
         workfolder: Path to the workfolder
@@ -33,8 +33,8 @@ def export_analysis_notebook(workfolder: str) -> Dict:
 
         # Define output paths
         helper_path = workfolder_path / "workfolder_analysis_helper.py"
-        notebook_path = workfolder_path / "hdsemg_analysis.ipynb"
-        db_export_path = workfolder_path / "01_export_to_db.ipynb"
+        notebook_path = workfolder_path / "00_data_analysis.ipynb"
+        db_export_path = workfolder_path / "01_data_export.ipynb"
 
         logger.info(f"Exporting analysis notebook to: {workfolder}")
 
@@ -135,7 +135,7 @@ def generate_jupyter_notebook(workfolder: str, output_path: Path):
 
 def generate_db_export_notebook(workfolder: str, output_path: Path):
     """
-    Generate 01_export_to_db.ipynb - exports MU properties to SQLite.
+    Generate 01_data_export.ipynb - exports MU properties to SQLite.
 
     Args:
         workfolder: Path to the workfolder (baked into notebook paths)

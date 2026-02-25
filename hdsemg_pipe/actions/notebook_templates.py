@@ -83,10 +83,21 @@ class WorkfolderPaths:
         }}
 
     def find_protocol_file(self) -> Optional[Path]:
-        """Find the hdsemg-trail protocol file (*_protokoll.txt) in the workfolder root."""
-        protocol_files = sorted(self.workfolder.glob("*_protokoll.txt"))
-        if protocol_files:
-            return protocol_files[0]
+        """Find the hdsemg-trail protocol file in the workfolder root.
+
+        NOTE: Copy your *_protokoll.json (from hdsemg-trail) to the workfolder root.
+        If not found, set PROTOKOLL_PATH manually in the notebook config cell.
+
+        Search order: *_protokoll.json (preferred), *_protokoll.txt (legacy fallback)
+        """
+        # Try JSON first (hdsemg-trail v1.0+)
+        json_files = sorted(self.workfolder.glob("*_protokoll.json"))
+        if json_files:
+            return json_files[0]
+        # Fall back to legacy TXT format
+        txt_files = sorted(self.workfolder.glob("*_protokoll.txt"))
+        if txt_files:
+            return txt_files[0]
         return None
 
 
@@ -467,17 +478,26 @@ class ProtocolParser:
         """
         protocol_path = self.find_protocol_file()
         if not protocol_path:
-            print("No protocol file (*_protokoll.txt) found in workfolder.")
+            print("No protocol file (*_protokoll.json or *_protokoll.txt) found in workfolder.")
+            print("Copy your protokoll file to the workfolder root, or set PROTOKOLL_PATH manually.")
             return None
 
         with open(protocol_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        self._protocol = {{
-            'file': protocol_path.name,
-            'metadata': self._parse_metadata(content),
-            'steps': self._parse_steps(content),
-        }}
+        if protocol_path.suffix == '.json':
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as e:
+                print(f"Failed to parse JSON protocol: {{e}}")
+                return None
+            self._protocol = self._parse_json_protocol(protocol_path.name, data)
+        else:
+            self._protocol = {{
+                'file': protocol_path.name,
+                'metadata': self._parse_metadata(content),
+                'steps': self._parse_steps(content),
+            }}
         return self._protocol
 
     def _parse_metadata(self, content: str) -> Dict:
@@ -567,6 +587,82 @@ class ProtocolParser:
             steps.append(current_step)
 
         return steps
+
+    def _parse_json_protocol(self, filename: str, data: dict) -> Dict:
+        """Parse hdsemg-trail v1.0 JSON protocol format."""
+        MODE_NORMALIZE = {{
+            'Konzentrisch (CON)': 'CON',
+            'Exzentrisch (ECC)': 'EXZ',
+            'Konzentrisch': 'CON',
+            'Exzentrisch': 'EXZ',
+            'CON': 'CON',
+            'EXZ': 'EXZ',
+            'ECC': 'EXZ',
+        }}
+
+        raw_meta = data.get('metadata', {{}})
+
+        # Build flat metadata dict compatible with TXT format keys
+        metadata = {{
+            'pid': str(raw_meta.get('pid', '')),
+            'randomization': str(raw_meta.get('randomization', '')),
+            'session_type': str(raw_meta.get('session_type', '')),
+            'mess_tag': str(raw_meta.get('mess_tag', '')),
+            'doms_score': raw_meta.get('doms_score'),
+        }}
+
+        # Build steps list — flatten fields.X.value into inputs dict
+        steps = []
+        steps_by_id = {{}}
+        for step_data in data.get('steps', []):
+            step_id = step_data.get('step_id', '')
+            fields = step_data.get('fields', {{}})
+            inputs = {{}}
+            for field_name, field_data in fields.items():
+                if isinstance(field_data, dict):
+                    inputs[field_name] = field_data.get('value')
+                else:
+                    inputs[field_name] = field_data
+            step = {{
+                'step_id': step_id,
+                'name': step_data.get('name', step_id),
+                'inputs': inputs,
+                'notes': step_data.get('notes', ''),
+            }}
+            steps.append(step)
+            steps_by_id[step_id] = step
+
+        # Extract anthropometrics + MVC from specific steps
+        arrival = steps_by_id.get('arrival_setup', {{}}).get('inputs', {{}})
+        if arrival.get('body_height') is not None:
+            metadata['body_height_cm'] = arrival['body_height']
+        if arrival.get('body_mass') is not None:
+            metadata['body_mass_kg'] = arrival['body_mass']
+        if arrival.get('dominant_leg') is not None:
+            metadata['dominant_leg'] = arrival['dominant_leg']
+
+        mvc_pre = steps_by_id.get('mvc_pre', {{}}).get('inputs', {{}})
+        if mvc_pre.get('mvc_best') is not None:
+            metadata['mvc_pre_nm'] = mvc_pre['mvc_best']
+
+        mvc_post = steps_by_id.get('mvc_post', {{}}).get('inputs', {{}})
+        if mvc_post.get('mvc_best') is not None:
+            metadata['mvc_post_nm'] = mvc_post['mvc_best']
+
+        # Normalize training block modes
+        for block_num in [1, 2]:
+            block_step = steps_by_id.get(f'training_block{{block_num}}', {{}}).get('inputs', {{}})
+            raw_mode = block_step.get('mode', '')
+            metadata[f'training_block{{block_num}}_mode'] = MODE_NORMALIZE.get(raw_mode, raw_mode)
+
+        # Derive first_training_mode from randomization
+        rand = metadata.get('randomization', '')
+        if rand == 'CON first':
+            metadata['first_training_mode'] = 'CON'
+        elif rand == 'EXZ first':
+            metadata['first_training_mode'] = 'EXZ'
+
+        return {{'file': filename, 'metadata': metadata, 'steps': steps}}
 
     def get_randomization(self) -> Optional[str]:
         """Get randomization order ('CON first' or 'EXZ first')."""
@@ -1138,6 +1234,65 @@ def export_consolidated_csv(df_list, output_name='motor_unit_analysis_complete.c
     df_consolidated.to_csv(save_path, index=False)
 
     return save_path, len(df_consolidated)
+
+
+class PipelineStateReader:
+    """Read hdsemg-pipe-process.log from the workfolder root.
+
+    The log file records which processing steps have been completed.
+    """
+
+    LOG_FILENAME = 'hdsemg-pipe-process.log'
+
+    def __init__(self, workfolder):
+        self.workfolder = Path(workfolder)
+        self._log = None
+
+    def read(self) -> Optional[dict]:
+        """Read and parse the process log. Returns None if not found."""
+        log_path = self.workfolder / self.LOG_FILENAME
+        if not log_path.exists():
+            return None
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                self._log = json.load(f)
+            return self._log
+        except Exception as e:
+            print(f"Warning: Failed to read process log: {{e}}")
+            return None
+
+    def get_completed_steps(self) -> List[dict]:
+        """Return list of completed step dicts."""
+        if self._log is None:
+            self.read()
+        if self._log is None:
+            return []
+        steps = self._log.get('steps', {{}})
+        return [
+            {{'step_id': step_id, **step_data}}
+            for step_id, step_data in steps.items()
+            if step_data.get('status') == 'completed'
+        ]
+
+    def print_summary(self):
+        """Print pipeline completion status."""
+        if self._log is None:
+            self.read()
+        if self._log is None:
+            print("  (hdsemg-pipe-process.log not found)")
+            return
+        print(f"  Version: {{self._log.get('version', 'N/A')}}")
+        print(f"  Created: {{self._log.get('created', 'N/A')}}")
+        print(f"  Last updated: {{self._log.get('last_updated', 'N/A')}}")
+        print()
+        steps = self._log.get('steps', {{}})
+        for step_id, step_data in sorted(steps.items()):
+            status = step_data.get('status', 'unknown')
+            name = step_data.get('name', step_id)
+            ts = step_data.get('timestamp', '')[:10] if step_data.get('timestamp') else ''
+            symbol = '✓' if status == 'completed' else '○'
+            print(f"  {{symbol}} {{name:<30s}} [{{ts}}]")
+        print()
 '''
 
 
@@ -1173,7 +1328,7 @@ This notebook provides a starting point for analyzing the cleaned motor unit dat
    - 5.3 Paired Statistical Analysis (+ Washout Check)
 6. PIC Analysis (Pyramids - Delta F Method)
 7. Custom Analysis (template)
-8. Export Results'''
+8. Save Results for DB Export'''
     })
 
     # Cell 2: Setup & Imports (Code)
@@ -1197,10 +1352,10 @@ WORKFOLDER = Path.cwd()
 if str(WORKFOLDER) not in sys.path:
     sys.path.insert(0, str(WORKFOLDER))
 
-from workfolder_analysis_helper import WorkfolderPaths, MetadataReader, PipelineSummary, ProtocolParser
+from workfolder_analysis_helper import WorkfolderPaths, MetadataReader, PipelineSummary, ProtocolParser, PipelineStateReader
 from workfolder_analysis_helper import plot_pipeline_overview, plot_covisi_comparison
 from workfolder_analysis_helper import select_plateau_interactive, recalculate_dr_plateau, apply_plateau_to_all_trapezoids
-from workfolder_analysis_helper import create_analysis_folders, save_plot_to_analysis, export_consolidated_csv
+from workfolder_analysis_helper import create_analysis_folders, save_plot_to_analysis
 
 # openhdemg (optional but recommended)
 try:
@@ -1236,7 +1391,10 @@ print(f"✓ Created analysis folder structure: {len(analysis_folders)} subfolder
 final_files = paths.list_final_json_files()
 print(f"Found {len(final_files)} cleaned JSON file(s):")
 for f in final_files:
-    print(f"  - {f.name}")'''
+    print(f"  - {f.name}")
+
+# Pipeline state reader
+state_reader = PipelineStateReader(WORKFOLDER)'''
     })
 
     # Cell 4: Pipeline Summary (Code)
@@ -1245,7 +1403,13 @@ for f in final_files:
         'source': '''# Display pipeline processing summary
 summary.print_full_summary()
 print("\\n")
-summary.print_quality_metrics()'''
+summary.print_quality_metrics()
+
+# Display hdsemg-pipe process log
+print("=" * 70)
+print("hdsemg-pipe Process Log")
+print("=" * 70)
+state_reader.print_summary()'''
     })
 
     # Cell 5: Section Header - Load Data (Markdown)
@@ -1313,13 +1477,15 @@ if protocol:
     # Show training block details
     for step in protocol['steps']:
         if step['step_id'].startswith('training_block'):
-            mode = step['inputs'].get('Kontraktionsmodus', 'N/A')
-            sets = step['inputs'].get('Sätze abgeschlossen', '?')
-            borg = step['inputs'].get('Borg CR10 Anstrengung', '?')
+            inputs = step.get('inputs', {})
+            # Handle both TXT format (German keys) and JSON format (English keys)
+            mode = inputs.get('Kontraktionsmodus', inputs.get('mode', 'N/A'))
+            sets = inputs.get('Sätze abgeschlossen', inputs.get('sets_completed', '?'))
+            borg = inputs.get('Borg CR10 Anstrengung', inputs.get('borg_cr10', '?'))
             print(f"\\n  {step['name']} ({step['step_id']}):")
             print(f"    Mode: {mode}")
             print(f"    Sets: {sets}, Borg: {borg}")
-            if step['notes']:
+            if step.get('notes'):
                 print(f"    Notes: {step['notes']}")
 else:
     print("No protocol file found - condition grouping will not be available")'''
@@ -3282,87 +3448,6 @@ else:
     print("No delta F results available")'''
     })
 
-    # ================================================================
-    # CONSOLIDATED DATA EXPORT
-    # ================================================================
-
-    # Consolidated Export Header (Markdown)
-    cells.append({
-        'cell_type': 'markdown',
-        'source': '''## 6.5. Consolidated Data Export
-
-Export all motor unit data to a single CSV file for cross-patient statistical analysis.'''
-    })
-
-    # Consolidated Export (Code)
-    cells.append({
-        'cell_type': 'code',
-        'source': '''# ============================================================
-# Consolidated CSV Export
-# ============================================================
-
-df_parts = []
-
-# 1. Basic MU properties (if available)
-if 'df_properties' in locals() and df_properties is not None:
-    df_parts.append(df_properties)
-
-# 2. Properties by condition
-if 'df_mu' in locals() and df_mu is not None:
-    df_parts.append(df_mu)
-
-# 3. Paired tracking data (if available)
-if 'df_paired' in locals() and df_paired is not None:
-    # Add tracking flag
-    df_paired_export = df_paired.copy()
-    df_paired_export['Is_Tracked'] = True
-    df_parts.append(df_paired_export)
-
-# 4. Plateau analysis (trapezoids, if available)
-if 'df_plateau' in locals() and df_plateau is not None:
-    df_parts.append(df_plateau)
-
-# 5. Delta F (PIC analysis, pyramids, if available)
-if 'df_deltaf' in locals() and df_deltaf is not None:
-    df_parts.append(df_deltaf)
-
-# Merge all per-MU data
-if df_parts:
-    # Concatenate with outer join to keep all columns
-    df_complete = pd.concat(df_parts, ignore_index=True, sort=False)
-
-    # Remove exact duplicates (prefer later entries with more complete data)
-    df_complete = df_complete.drop_duplicates(
-        subset=['File', 'MU_Index'] if 'File' in df_complete.columns and 'MU_Index' in df_complete.columns else None,
-        keep='last'
-    )
-
-    # Export consolidated CSV
-    output_path, row_count = export_consolidated_csv(
-        [df_complete],
-        output_name='motor_unit_analysis_complete.csv'
-    )
-
-    print(f"\\n{'='*60}")
-    print(f"CONSOLIDATED EXPORT")
-    print(f"{'='*60}")
-    print(f"  File: {output_path.relative_to(WORKFOLDER)}")
-    print(f"  Rows: {row_count} motor units")
-    print(f"  Columns: {len(df_complete.columns)}")
-
-    # Summary by key dimensions
-    if 'Condition' in df_complete.columns:
-        print(f"  Conditions: {df_complete['Condition'].nunique()}")
-    if 'Muscle' in df_complete.columns:
-        print(f"  Muscles: {df_complete['Muscle'].nunique()}")
-    if 'tracking_type' in df_complete.columns:
-        print(f"  Tracking types: {df_complete['tracking_type'].nunique()}")
-
-    print(f"{'='*60}")
-else:
-    print("⚠ No data available for consolidated export")'''
-    })
-
     # Section Header - Custom Analysis (Markdown)
     cells.append({
         'cell_type': 'markdown',
@@ -3442,32 +3527,83 @@ else:
     print("⚠ Analysis directory not found")'''
     })
 
-    # Cell 19: Section Header - Export (Markdown)
+    # Section Header - Save Results (Markdown)
     cells.append({
         'cell_type': 'markdown',
-        'source': '''## 8. Export Results
+        'source': '''## 8. Save Results for DB Export
 
-Save your analysis results to files for publication or further processing.'''
+Save computed MU properties to `analysis/export/` for use by `01_data_export.ipynb`.
+
+**Run this after completing the analysis above.** The DB export notebook reads these files
+instead of recomputing MU metrics, keeping it fast and simple.'''
     })
 
-    # Cell 20: Export Results (Code)
+    # Save Results (Code)
     cells.append({
         'cell_type': 'code',
-        'source': '''# Export analysis results
+        'source': '''# ============================================================
+# SAVE RESULTS FOR DB EXPORT
+# Saves to analysis/export/ for use by 01_data_export.ipynb
+# ============================================================
 
-# Example exports:
-# 1. Motor unit properties DataFrame (already saved above)
-# 2. Custom figures
-# 3. Summary statistics
+import json as _json
 
-print("=" * 60)
-print("Export Summary")
-print("=" * 60)
-print(f"Workfolder: {WORKFOLDER}")
-print(f"Files available:")
-print(f"  - motor_unit_properties.csv (MU statistics)")
-print(f"  - [Add your custom exports here]")
-print("\\n✓ Analysis complete!")'''
+export_dir = Path(WORKFOLDER) / 'analysis' / 'export'
+export_dir.mkdir(parents=True, exist_ok=True)
+
+# 1. Session metadata (from protocol)
+meta = protocol_parser.get_metadata() if 'protocol_parser' in locals() else {}
+session_meta = {
+    'subject_id': meta.get('pid', 'UNKNOWN'),
+    'first_training_mode': meta.get('first_training_mode', ''),
+    'body_height_cm': meta.get('body_height_cm'),
+    'body_mass_kg': meta.get('body_mass_kg'),
+    'dominant_leg': meta.get('dominant_leg'),
+    'session_date': meta.get('mess_tag', ''),
+    'session_type': meta.get('session_type', ''),
+    'doms_score': meta.get('doms_score'),
+    'mvc_pre_nm': meta.get('mvc_pre_nm'),
+    'mvc_post_nm': meta.get('mvc_post_nm'),
+    'workfolder': str(WORKFOLDER),
+}
+meta_path = export_dir / 'session_meta.json'
+with open(meta_path, 'w') as f:
+    _json.dump(session_meta, f, indent=2, default=str)
+print(f"✓ session_meta.json saved")
+print(f"  subject_id: {session_meta['subject_id']}")
+print(f"  first_training_mode: {session_meta['first_training_mode']}")
+
+# Helper: save DataFrame as parquet (fallback csv.gz if pyarrow missing)
+def _save_df(df, stem):
+    try:
+        path = export_dir / f'{stem}.parquet'
+        df.to_parquet(path, index=False)
+        print(f"✓ {stem}.parquet ({len(df)} rows)")
+    except Exception:
+        path = export_dir / f'{stem}.csv.gz'
+        df.to_csv(path, index=False, compression='gzip')
+        print(f"✓ {stem}.csv.gz ({len(df)} rows, pyarrow not installed)")
+
+# 2. MU results (df_mu from Section 5.2)
+if 'df_mu' in locals() and len(df_mu) > 0:
+    _save_df(df_mu.reset_index(drop=True), 'mu_results')
+else:
+    print("⚠ df_mu not available — run Section 5.2 first")
+
+# 3. Plateau markers (if interactive plateau selection was run)
+if 'plateau_markers' in locals() and plateau_markers:
+    df_pm = pd.DataFrame([
+        {'group_name': k, 'start_idx': v['start_idx'], 'end_idx': v['end_idx']}
+        for k, v in plateau_markers.items()
+    ])
+    _save_df(df_pm, 'plateau_markers')
+
+# 4. Tracking results (if tracking was run in Section 5.1)
+if 'df_paired' in locals() and df_paired is not None and len(df_paired) > 0:
+    _save_df(df_paired.reset_index(drop=True), 'tracking_results')
+
+print(f"\\n✓ Export complete → {export_dir}")
+print("  Next: run 01_data_export.ipynb to write to SQLite DB")'''
     })
 
     return cells
@@ -3481,48 +3617,53 @@ def get_db_export_notebook_cells(workfolder: str, db_setup_path: str) -> List[Di
     """
     Generate cells for 01_export_to_db.ipynb.
 
-    This notebook extracts MU properties from openhdemg JSON files and writes
-    them to a central SQLite database (mu_study.db). No plots are produced.
+    This notebook reads pre-computed results from ``analysis/export/`` and
+    writes them to a central SQLite database (``mu_study.db``).
+    **No MU metric recomputation** is performed here; run
+    ``00_data_analysis.ipynb`` first to generate the export files.
 
     Args:
-        workfolder: Absolute path to the subject's workfolder (baked into import cells)
-        db_setup_path: Absolute path to the db_setup/ directory
+        workfolder: Absolute path to the subject's workfolder (baked into
+            import cells).
+        db_setup_path: Absolute path to the db_setup/ directory containing
+            ``db_connector.py``.
 
     Returns:
-        List of cell dicts with 'cell_type' and 'source' keys.
+        List of cell dicts with 'cell_type' and 'source' keys (10 cells total:
+        1 markdown + 9 code).
     """
     cells = []
 
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # Cell 1: Title
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     cells.append({
         'cell_type': 'markdown',
-        'source': f'''# 01 Export to DB
+        'source': f'''# 01 Data Export to DB
 
 **Generated by hdsemg-pipe**
 
-Exports motor unit properties from cleaned openhdemg JSON files into the
-central SQLite database (`mu_study.db`). **No plots.**
+Reads pre-computed results from `analysis/export/` and writes to the central
+SQLite database (`mu_study.db`). **No MU metric recomputation.**
+
+**Run `00_data_analysis.ipynb` first** to generate the export files.
 
 **Workfolder:** `{workfolder}`
 
 ## Workflow
-1. Config: Set SUBJECT_ID, SESSION_DATE, FIRST_TRAINING_MODE, DB_PATH
-2. DB init + subject/session insertion
-3. Protocol parsing & condition grouping
-4. MU extraction loop → `motor_units` table
-5. Plateau metrics → interactive or from `plateau_markers.json`
-6. QC flags (SIL, CoV ISI)
-7. Duplicate detection
-8. MU tracking (4-block + 6-block)
-9. Recording-level metrics
-10. Validation + close'''
+1. Load `session_meta.json` + set DB path
+2. DB init: schema, subject, session
+3. Load `mu_results.parquet` → insert recordings + motor units
+4. Load `plateau_markers.parquet` → update plateau DR metrics (Trapezoid only)
+5. QC flags (SIL, CoV ISI thresholds)
+6. Load `tracking_results.parquet` → insert tracking clusters
+7. Recording-level metrics update
+8. Validation + close'''
     })
 
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # Cell 2: Imports + Config
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     cells.append({
         'cell_type': 'code',
         'source': f'''# ============================================================
@@ -3535,45 +3676,56 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-# --- Workfolder & DB setup paths (baked in at notebook generation) ----------
 WORKFOLDER = Path(r"{workfolder}")
 DB_SETUP_PATH = Path(r"{db_setup_path}")
+EXPORT_DIR = WORKFOLDER / 'analysis' / 'export'
 
 if str(DB_SETUP_PATH) not in sys.path:
     sys.path.insert(0, str(DB_SETUP_PATH))
 
 from db_connector import DatabaseConnection  # noqa: E402
 
-# --- Subject-specific settings (EDIT THESE!) --------------------------------
-SUBJECT_ID = "S01"           # e.g. "S01", "S02"
-SESSION_DATE = "20260202"    # YYYYMMDD format
-FIRST_TRAINING_MODE = "CON"  # "CON" or "EXZ" - from randomization list
-
-# --- Database path (shared across all subjects) -----------------------------
+# --- Database path ----------------------------------------------------------
 DB_PATH = WORKFOLDER.parent / "mu_study.db"
-# DB_PATH = Path("/path/to/your/mu_study.db")   # override if needed
+# DB_PATH = Path("/path/to/your/mu_study.db")  # override if needed
 
 # --- QC thresholds ----------------------------------------------------------
 SIL_THRESHOLD = 0.85
-COV_ISI_THRESHOLD = 30.0    # %
-XCC_TRACKING_THRESHOLD = 0.8
+COV_ISI_THRESHOLD = 30.0  # %
 
-# --- Plateau selection mode -------------------------------------------------
-PLATEAU_MARKERS_FILE = WORKFOLDER / "plateau_markers.json"
-# If file exists: plateau markers are read from it
-# If not: interactive selection runs during Cell 5 (plateau)
+# --- Load session metadata --------------------------------------------------
+meta_path = EXPORT_DIR / 'session_meta.json'
+if not meta_path.exists():
+    raise FileNotFoundError(
+        f"session_meta.json not found. Run 00_data_analysis.ipynb first.\\n"
+        f"  Expected: {{meta_path}}"
+    )
+
+with open(meta_path) as f:
+    session_meta = json.load(f)
+
+SUBJECT_ID = session_meta['subject_id']
 
 print(f"Workfolder:  {{WORKFOLDER}}")
 print(f"DB path:     {{DB_PATH}}")
 print(f"Subject:     {{SUBJECT_ID}}")
-print(f"Session:     {{SESSION_DATE}}")
-print(f"First mode:  {{FIRST_TRAINING_MODE}}")
-print(f"Plateau markers found: {{PLATEAU_MARKERS_FILE.exists()}}")'''
+print(f"Session:     {{session_meta.get('session_date', 'N/A')}}")
+print(f"First mode:  {{session_meta.get('first_training_mode', 'N/A')}}")
+print()
+
+# Report available export files
+for fname in ['mu_results.parquet', 'mu_results.csv.gz',
+              'plateau_markers.parquet', 'plateau_markers.csv.gz',
+              'tracking_results.parquet', 'tracking_results.csv.gz']:
+    fpath = EXPORT_DIR / fname
+    if fpath.exists():
+        size_kb = fpath.stat().st_size / 1024
+        print(f"  ✓ {{fname}} ({{size_kb:.1f}} KB)")'''
     })
 
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # Cell 3: DB init + subject/session
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
@@ -3583,93 +3735,68 @@ print(f"Plateau markers found: {{PLATEAU_MARKERS_FILE.exists()}}")'''
 db = DatabaseConnection(str(DB_PATH))
 db.init_schema()
 
-# --- Subject data (anthropometrics) -----------------------------------------
-# Fill in values for this subject or leave as None
 db.insert_subject({
     'subject_id': SUBJECT_ID,
-    'first_training_mode': FIRST_TRAINING_MODE,
-    # 'age': None,
-    # 'sex': None,          # 'M' or 'F'
-    # 'height_m': None,
-    # 'body_mass_kg': None,
-    # 'dominant_leg': None,  # 'R' or 'L'
+    'first_training_mode': session_meta.get('first_training_mode'),
+    'body_mass_kg': session_meta.get('body_mass_kg'),
+    'dominant_leg': session_meta.get('dominant_leg'),
 })
 
-# --- Session data (measurement day) -----------------------------------------
 session_id = db.insert_session({
     'subject_id': SUBJECT_ID,
-    'session_date': SESSION_DATE,
-    # 'mvc_pre_nm': None,
-    # 'mvc_post_nm': None,
-    # 'borg_cr10_post_con': None,
-    # 'borg_cr10_post_exz': None,
-    # 'doms_score_pre': None,
+    'session_date': session_meta.get('session_date', ''),
+    'mvc_pre_nm': session_meta.get('mvc_pre_nm'),
+    'mvc_post_nm': session_meta.get('mvc_post_nm'),
+    'doms_score_pre': session_meta.get('doms_score'),
 })
 
 print(f"✓ Subject {SUBJECT_ID} ready")
 print(f"✓ Session ID: {session_id}")'''
     })
 
-    # -------------------------------------------------------------------------
-    # Cell 4: Protocol parsing
-    # -------------------------------------------------------------------------
-    cells.append({
-        'cell_type': 'code',
-        'source': f'''# ============================================================
-# PROTOCOL PARSING & CONDITION GROUPING
-# ============================================================
-
-# Import helper module from workfolder (same as hdsemg_analysis.ipynb)
-WORKFOLDER_STR = str(WORKFOLDER)
-if WORKFOLDER_STR not in sys.path:
-    sys.path.insert(0, WORKFOLDER_STR)
-
-from workfolder_analysis_helper import (  # noqa: E402
-    WorkfolderPaths, MetadataReader, ProtocolParser
-)
-
-try:
-    import openhdemg.library as emg
-    OPENHDEMG_AVAILABLE = True
-except ImportError:
-    OPENHDEMG_AVAILABLE = False
-    print("⚠ openhdemg not available - cannot load JSON files")
-
-paths = WorkfolderPaths(str(WORKFOLDER))
-reader = MetadataReader(paths)
-protocol_parser = ProtocolParser(paths)
-
-# Load EMG file groups from decomposition_results/
-from workfolder_analysis_helper import create_emgfile_groups  # noqa: E402
-groups_result = create_emgfile_groups(paths)
-condition_result = protocol_parser.create_condition_groups(groups_result)
-
-if condition_result:
-    print("✓ Protocol parsed")
-    print(f"  Randomization: {{condition_result.get('randomization', 'unknown')}}")
-    for cond_name, cond_data in condition_result.get('conditions', {{}}).items():
-        block = cond_data.get('block', '?')
-        for tt, groups in cond_data.get('tracking_types', {{}}).items():
-            total_mus = sum(
-                g.get('concatenated', {{}}).get('NUMBER_OF_MUS', 0)
-                for g in groups if g.get('concatenated')
-            )
-            print(f"  {{block}} {{cond_name}} | {{tt}} | {{sum(len(g.get('files',[])) for g in groups)}} files | {{total_mus}} MUs")
-else:
-    print("⚠ No protocol file found or parsing failed")'''
-    })
-
-    # -------------------------------------------------------------------------
-    # Cell 5: MU Extraction Loop
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Cell 4: Load MU results
+    # -----------------------------------------------------------------------
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
-# MU EXTRACTION LOOP → DB
-# Maps each condition/tracking_type/group to a DB recording
+# LOAD MU RESULTS
 # ============================================================
 
-# condition -> training_mode_before mapping
+def _read_export(export_dir, stem):
+    """Read parquet if available, else csv.gz. Returns None if neither exists."""
+    parquet_path = export_dir / f'{stem}.parquet'
+    csv_path = export_dir / f'{stem}.csv.gz'
+    if parquet_path.exists():
+        return pd.read_parquet(parquet_path)
+    elif csv_path.exists():
+        return pd.read_csv(csv_path, compression='gzip')
+    return None
+
+df_mu = _read_export(EXPORT_DIR, 'mu_results')
+if df_mu is None:
+    raise FileNotFoundError(
+        "mu_results not found in analysis/export/. "
+        "Run 00_data_analysis.ipynb and execute Section 8 first."
+    )
+
+print(f"✓ Loaded {len(df_mu)} MUs")
+print(f"  Conditions: {df_mu['condition'].unique().tolist()}")
+print(f"  Muscles: {df_mu['muscle'].unique().tolist()}")
+print(f"  Tracking types: {df_mu['tracking_type'].unique().tolist()}")
+print()
+print(df_mu.groupby(['condition', 'tracking_type', 'muscle']).size().rename('n_MUs').to_string())'''
+    })
+
+    # -----------------------------------------------------------------------
+    # Cell 5: Insert recordings + motor units
+    # -----------------------------------------------------------------------
+    cells.append({
+        'cell_type': 'code',
+        'source': '''# ============================================================
+# INSERT RECORDINGS + MOTOR UNITS
+# ============================================================
+
 COND_TO_TRAINING_MODE_BEFORE = {
     'Baseline': 'none',
     'Pre_Intervention': 'none',
@@ -3678,8 +3805,6 @@ COND_TO_TRAINING_MODE_BEFORE = {
     'Post_Washout': 'washout',
     'Final': 'none',
 }
-
-# condition -> block_label mapping
 COND_TO_BLOCK_LABEL = {
     'Baseline': 'Baseline',
     'Pre_Intervention': 'Pre_Intervention',
@@ -3689,220 +3814,135 @@ COND_TO_BLOCK_LABEL = {
     'Final': 'Final',
 }
 
-# recording_id lookup: (block_number, task_type, muscle) -> recording_id
-_recording_ids = {}
+_recording_ids = {}  # (condition, tracking_type, muscle) -> recording_id
 
-if condition_result and OPENHDEMG_AVAILABLE:
-    for cond_name, cond_data in condition_result['conditions'].items():
-        block_str = cond_data.get('block', 'Block0')   # e.g. 'Block3'
+for (condition, tracking_type, muscle), group_df in df_mu.groupby(
+        ['condition', 'tracking_type', 'muscle'], observed=True):
+
+    block_str = group_df['block'].iloc[0]          # e.g. 'Block3'
+    try:
         block_number = int(block_str.replace('Block', ''))
-        block_label = COND_TO_BLOCK_LABEL.get(cond_name, cond_name)
-        training_mode_before = COND_TO_TRAINING_MODE_BEFORE.get(cond_name, 'none')
+    except (ValueError, AttributeError):
+        block_number = 0
 
-        for tracking_type, groups in cond_data['tracking_types'].items():
-            task_type = 'Trapezoid' if 'Trap' in tracking_type else 'Pyramid'
+    task_type = 'Trapezoid' if 'Trap' in tracking_type else 'Pyramid'
+    n_mus = len(group_df)
 
-            for group in groups:
-                emgfile = group.get('concatenated')
-                if emgfile is None:
-                    continue
+    rec_id = db.insert_recording({
+        'session_id': session_id,
+        'block_number': block_number,
+        'block_label': COND_TO_BLOCK_LABEL.get(condition, condition),
+        'training_mode_before': COND_TO_TRAINING_MODE_BEFORE.get(condition, 'none'),
+        'task_type': task_type,
+        'muscle': muscle,
+        'n_mus_total': n_mus,
+    })
+    _recording_ids[(condition, tracking_type, muscle)] = rec_id
 
-                muscle = group.get('muscle', 'Unknown')
-                n_mus = emgfile['NUMBER_OF_MUS']
-                fsamp = emgfile['FSAMP']
-                ref_signal = emgfile['REF_SIGNAL'].values.flatten()
-                ref_max = ref_signal.max() if ref_signal.max() > 0 else 1.0
+    for _, row in group_df.iterrows():
+        def _val(v):
+            """Return float or None, handling NaN."""
+            try:
+                f = float(v)
+                return None if np.isnan(f) else f
+            except (TypeError, ValueError):
+                return None
 
-                # SIL values
-                sil_values = None
-                if 'ACCURACY' in emgfile and emgfile['ACCURACY'] is not None:
-                    sil_values = emgfile['ACCURACY'].values.flatten()
+        mu_data = {
+            'recording_id': rec_id,
+            'mu_idx': int(row['mu_idx']),
+            'sil': _val(row.get('sil')),
+            'cov_isi_pct': _val(row.get('cov_isi')),
+            'n_spikes': int(row.get('n_spikes', 0)),
+            'manually_cleaned': True,
+            'qc_passed': True,
+        }
 
-                # Insert recording
-                rec_id = db.insert_recording({
-                    'session_id': session_id,
-                    'block_number': block_number,
-                    'block_label': block_label,
-                    'training_mode_before': training_mode_before,
-                    'task_type': task_type,
-                    'muscle': muscle,
-                    'n_mus_total': n_mus,
-                })
-                _recording_ids[(block_number, task_type, muscle)] = rec_id
+        if task_type == 'Trapezoid':
+            mu_data.update({
+                'mean_dr_plateau_hz': _val(row.get('mean_dr')),
+                'peak_dr_hz': _val(row.get('peak_dr')),
+                'dr_at_rec_hz': _val(row.get('dr_at_rec')),
+                'dr_at_derec_hz': _val(row.get('dr_at_derec')),
+                'rt_pct_mvc': _val(row.get('rt_pct')),
+                'drt_pct_mvc': _val(row.get('drt_pct')),
+            })
+        else:
+            mu_data.update({
+                'mean_dr_pyramid_hz': _val(row.get('mean_dr')),
+                'peak_dr_pyramid_hz': _val(row.get('peak_dr')),
+                'rt_pct_pyramid_mvc': _val(row.get('rt_pct')),
+                'drt_pct_pyramid_mvc': _val(row.get('drt_pct')),
+            })
 
-                # Insert MUs
-                for mu_idx in range(n_mus):
-                    mupulses = emgfile['MUPULSES'][mu_idx]
-                    if len(mupulses) < 4:
-                        continue
+        db.insert_motor_unit(mu_data)
 
-                    spikes = np.array(mupulses)
-                    isi = np.diff(spikes) / fsamp
-                    isi = isi[isi > 0.01]
+    print(f"✓ {condition} | {task_type} | {muscle}: {n_mus} MUs (rec_id={rec_id})")
 
-                    if len(isi) < 2:
-                        continue
-
-                    inst_dr = 1.0 / isi
-                    mean_dr = float(np.mean(inst_dr))
-                    peak_dr = float(np.max(inst_dr))
-                    cov_isi = float((np.std(isi) / np.mean(isi)) * 100)
-
-                    first_spike, last_spike = spikes[0], spikes[-1]
-                    rt = float(ref_signal[first_spike] / ref_max * 100) if first_spike < len(ref_signal) else None
-                    drt = float(ref_signal[last_spike] / ref_max * 100) if last_spike < len(ref_signal) else None
-                    dr_at_rec = float(np.mean(inst_dr[:min(5, len(inst_dr))]))
-                    dr_at_derec = float(np.mean(inst_dr[max(0, len(inst_dr)-5):]))
-                    sil = float(sil_values[mu_idx]) if sil_values is not None and mu_idx < len(sil_values) else None
-
-                    mu_data = {
-                        'recording_id': rec_id,
-                        'mu_idx': mu_idx,
-                        'sil': sil,
-                        'cov_isi_pct': cov_isi,
-                        'n_spikes': len(spikes),
-                        'manually_cleaned': True,
-                        'qc_passed': True,
-                    }
-
-                    # Trapezoid: fill base DR fields (plateau will be updated in Cell 6)
-                    if task_type == 'Trapezoid':
-                        mu_data.update({
-                            'mean_dr_plateau_hz': mean_dr,   # overwritten after plateau selection
-                            'peak_dr_hz': peak_dr,
-                            'dr_at_rec_hz': dr_at_rec,
-                            'dr_at_derec_hz': dr_at_derec,
-                            'rt_pct_mvc': rt,
-                            'drt_pct_mvc': drt,
-                        })
-                    # Pyramid: fill pyramid DR fields
-                    elif task_type == 'Pyramid':
-                        mu_data.update({
-                            'mean_dr_pyramid_hz': mean_dr,
-                            'peak_dr_pyramid_hz': peak_dr,
-                            'rt_pct_pyramid_mvc': rt,
-                            'drt_pct_pyramid_mvc': drt,
-                        })
-
-                    db.insert_motor_unit(mu_data)
-
-                print(f"✓ {cond_name} | {task_type} | {muscle}: {n_mus} MUs inserted (recording_id={rec_id})")
-
-    print(f"\\n✓ MU extraction complete")
-else:
-    print("⚠ Skipped - no condition_result or openhdemg not available")'''
+print(f"\\n✓ MU insertion complete: {len(_recording_ids)} recordings")'''
     })
 
-    # -------------------------------------------------------------------------
-    # Cell 6: Plateau Selection + Update
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Cell 6: Plateau metrics
+    # -----------------------------------------------------------------------
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
 # PLATEAU METRICS (Trapezoid only)
-# Reads plateau_markers.json if available, else interactive selection
+# Reads plateau_markers from analysis/export/ if available
 # ============================================================
 
-from workfolder_analysis_helper import (  # noqa
-    select_plateau_interactive, recalculate_dr_plateau
-)
+df_pm = _read_export(EXPORT_DIR, 'plateau_markers')
 
-plateau_markers = {}
+if df_pm is not None:
+    print(f"✓ Loaded {len(df_pm)} plateau marker entries")
 
-if PLATEAU_MARKERS_FILE.exists():
-    with open(PLATEAU_MARKERS_FILE, 'r') as f:
-        plateau_markers = json.load(f)
-    print(f"✓ Loaded plateau markers from {PLATEAU_MARKERS_FILE.name}")
-    print(f"  Entries: {len(plateau_markers)}")
-else:
-    print("No plateau_markers.json found.")
-    print("Running interactive selection for Trapezoid files...")
-    print("(Or set plateau markers manually in the cell below)")
+    # If df_mu has a plateau-specific DR column, update DB
+    plateau_col = next(
+        (c for c in df_mu.columns if 'plateau' in c.lower() and 'dr' in c.lower()), None
+    )
 
-# Compute plateau-specific DR and update DB
-if condition_result and OPENHDEMG_AVAILABLE:
-    for cond_name, cond_data in condition_result['conditions'].items():
-        for tracking_type, groups in cond_data['tracking_types'].items():
-            if 'Trap' not in tracking_type:
+    if plateau_col:
+        for (condition, tracking_type, muscle), group_df in df_mu[
+                df_mu['tracking_type'].str.contains('Trap', case=False, na=False)
+        ].groupby(['condition', 'tracking_type', 'muscle'], observed=True):
+            rec_id = _recording_ids.get((condition, tracking_type, muscle))
+            if rec_id is None:
                 continue
-
-            block_str = cond_data.get('block', 'Block0')
-            block_number = int(block_str.replace('Block', ''))
-            task_type = 'Trapezoid'
-
-            for group in groups:
-                emgfile = group.get('concatenated')
-                if emgfile is None:
-                    continue
-
-                muscle = group.get('muscle', 'Unknown')
-                rec_key = (block_number, task_type, muscle)
-                rec_id = _recording_ids.get(rec_key)
-                if rec_id is None:
-                    continue
-
-                # Determine plateau indices for this file
-                group_name = group.get('name', '')
-                if group_name in plateau_markers:
-                    p_start = plateau_markers[group_name]['start_idx']
-                    p_end = plateau_markers[group_name]['end_idx']
-                    print(f"  {cond_name} | {muscle}: using saved plateau [{p_start}–{p_end}]")
-                else:
-                    print(f"\\n--- {cond_name} | {muscle} ---")
-                    p_start, p_end = select_plateau_interactive(emgfile, title=f"{cond_name} {muscle}")
-                    if p_start is not None:
-                        plateau_markers[group_name] = {'start_idx': p_start, 'end_idx': p_end}
-
-                if p_start is None:
-                    print(f"  ⚠ No plateau for {cond_name} | {muscle} - skipping plateau update")
-                    continue
-
-                # Recalculate plateau-specific DR
-                fsamp = emgfile['FSAMP']
-                plateau_df = recalculate_dr_plateau(emgfile, p_start, p_end)
-                ref_signal = emgfile['REF_SIGNAL'].values.flatten()
-                ref_max = ref_signal.max() if ref_signal.max() > 0 else 1.0
-
-                # Update each MU in DB with plateau metrics
-                mu_ids_df = db.get_mu_ids_for_recording(rec_id)
-
-                for _, row_df in plateau_df.iterrows():
-                    mu_idx = int(row_df['mu_idx'])
-                    mu_row = mu_ids_df[mu_ids_df['mu_idx'] == mu_idx]
-                    if mu_row.empty:
+            mu_ids_df = db.get_mu_ids_for_recording(rec_id)
+            updated = 0
+            for _, row in group_df.iterrows():
+                val = row.get(plateau_col)
+                try:
+                    if np.isnan(float(val)):
                         continue
-                    mu_id_val = int(mu_row.iloc[0]['mu_id'])
-
-                    db._conn.execute("""
-                        UPDATE motor_units SET
-                            mean_dr_plateau_hz = ?,
-                            cov_isi_plateau_pct = ?,
-                            n_spikes_plateau = ?
-                        WHERE mu_id = ?
-                    """, (
-                        row_df.get('mean_dr') if not np.isnan(row_df.get('mean_dr', float('nan'))) else None,
-                        row_df.get('cov_isi') if not np.isnan(row_df.get('cov_isi', float('nan'))) else None,
-                        int(row_df.get('n_spikes', 0)),
-                        mu_id_val
-                    ))
-                db._conn.commit()
-                print(f"  ✓ Plateau metrics updated for {cond_name} | {muscle}")
-
-# Save plateau markers for future runs
-if plateau_markers:
-    with open(PLATEAU_MARKERS_FILE, 'w') as f:
-        json.dump(plateau_markers, f, indent=2)
-    print(f"\\n✓ Plateau markers saved to {PLATEAU_MARKERS_FILE.name}")'''
+                except (TypeError, ValueError):
+                    continue
+                mu_row = mu_ids_df[mu_ids_df['mu_idx'] == row['mu_idx']]
+                if mu_row.empty:
+                    continue
+                mu_id_val = int(mu_row.iloc[0]['mu_id'])
+                db._conn.execute(
+                    "UPDATE motor_units SET mean_dr_plateau_hz = ? WHERE mu_id = ?",
+                    (float(val), mu_id_val)
+                )
+                updated += 1
+            db._conn.commit()
+            if updated:
+                print(f"  ✓ {condition} | {muscle}: {updated} plateau DR values updated")
+    else:
+        print("  (No plateau DR column in df_mu - using full-signal DR)")
+else:
+    print("  No plateau markers found (run plateau selection in 00_data_analysis.ipynb)")'''
     })
 
-    # -------------------------------------------------------------------------
-    # Cell 7: QC Flags
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Cell 7: QC flags
+    # -----------------------------------------------------------------------
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
 # QC FLAGS
-# Set qc_passed = FALSE for MUs below SIL or above CoV ISI threshold
 # ============================================================
 
 db.update_qc_flags(
@@ -3910,7 +3950,6 @@ db.update_qc_flags(
     cov_isi_threshold=COV_ISI_THRESHOLD
 )
 
-# Quick check
 df_qc = db.query("""
     SELECT
         COUNT(*) AS total,
@@ -3921,397 +3960,122 @@ df_qc = db.query("""
     JOIN sessions sess ON r.session_id = sess.session_id
     WHERE sess.subject_id = ?
 """, [SUBJECT_ID])
+print("QC summary:")
 print(df_qc.to_string(index=False))'''
     })
 
-    # -------------------------------------------------------------------------
-    # Cell 8: Duplicate Detection
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Cell 8: Tracking clusters (if available)
+    # -----------------------------------------------------------------------
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
-# DUPLICATE DETECTION
-# Detects within-recording duplicates from overlapping grids (64ch + 32ch)
-# Uses openhdemg.remove_duplicates_between()
+# TRACKING CLUSTERS (if available)
+# Reads tracking_results from analysis/export/
+# Expected columns: comparison, pre_mu_idx, post_mu_idx, xcc,
+#                   muscle, tracking_type, pre_condition, post_condition
 # ============================================================
 
-# This cell marks is_duplicate = TRUE for MUs identified as duplicates
-# across multiple grids of the same recording (same muscle, same block)
+df_tracking_export = _read_export(EXPORT_DIR, 'tracking_results')
 
-if condition_result and OPENHDEMG_AVAILABLE:
-    total_duplicates = 0
-
-    for cond_name, cond_data in condition_result['conditions'].items():
-        block_str = cond_data.get('block', 'Block0')
-        block_number = int(block_str.replace('Block', ''))
-
-        for tracking_type, groups in cond_data['tracking_types'].items():
-            task_type = 'Trapezoid' if 'Trap' in tracking_type else 'Pyramid'
-
-            # Group by muscle to find multi-grid recordings
-            by_muscle = {}
-            for group in groups:
-                muscle = group.get('muscle', 'Unknown')
-                if muscle not in by_muscle:
-                    by_muscle[muscle] = []
-                by_muscle[muscle].append(group)
-
-            for muscle, muscle_groups in by_muscle.items():
-                if len(muscle_groups) < 2:
-                    continue  # Only one grid, no duplicates possible
-
-                rec_key = (block_number, task_type, muscle)
-                rec_id = _recording_ids.get(rec_key)
-                if rec_id is None:
-                    continue
-
-                # Check each pair of grids for duplicates
-                for i in range(len(muscle_groups)):
-                    emg1 = muscle_groups[i].get('concatenated')
-                    for j in range(i + 1, len(muscle_groups)):
-                        emg2 = muscle_groups[j].get('concatenated')
-                        if emg1 is None or emg2 is None:
-                            continue
-
-                        try:
-                            # openhdemg duplicate detection (XCC-based)
-                            _, _, duplicates_df = emg.remove_duplicates_between(
-                                emgfile1=emg1,
-                                emgfile2=emg2,
-                                corr_thr=XCC_TRACKING_THRESHOLD,
-                                decomp_matrix=False,
-                                which="munumber",
-                                method="SIL",
-                            )
-
-                            if duplicates_df is not None and len(duplicates_df) > 0:
-                                for _, dup_row in duplicates_df.iterrows():
-                                    dup_mu_idx = int(dup_row.get('mu_file2', -1))
-                                    if dup_mu_idx >= 0:
-                                        db._conn.execute("""
-                                            UPDATE motor_units SET is_duplicate = TRUE
-                                            WHERE recording_id = ? AND mu_idx = ?
-                                        """, (rec_id, dup_mu_idx))
-                                        total_duplicates += 1
-
-                        except Exception as e:
-                            print(f"  ⚠ Duplicate detection failed for {cond_name}|{muscle}: {e}")
-
-    db._conn.commit()
-    print(f"✓ Duplicate detection complete: {total_duplicates} duplicates marked")
+if df_tracking_export is None or len(df_tracking_export) == 0:
+    print("No tracking results found — skipping cluster insertion")
 else:
-    print("⚠ Skipping duplicate detection - openhdemg not available")'''
-    })
+    print(f"✓ Loaded {len(df_tracking_export)} tracking pairs")
 
-    # -------------------------------------------------------------------------
-    # Cell 9: MU Tracking
-    # -------------------------------------------------------------------------
-    cells.append({
-        'cell_type': 'code',
-        'source': '''# ============================================================
-# MU TRACKING (4-Block + 6-Block)
-# Uses MUAP cross-correlation to link MUs across blocks
-# Creates tracking_clusters + mu_tracking entries
-# ============================================================
+    for (comparison, muscle, tracking_type), pairs_df in df_tracking_export.groupby(
+            ['comparison', 'muscle', 'tracking_type'], observed=True):
 
-# Determine which blocks to use for each tracking scope
-TRACKING_SCOPES = {
-    '4_block': [2, 3, 4, 5],  # Pre, Post_Train1, Post_Washout, Post_Train2
-    '6_block': [1, 2, 3, 4, 5, 6],  # All blocks
-}
+        scope = '4_block' if 'Pre_vs_Post' in comparison else '6_block'
+        task_type = 'Trapezoid' if 'Trap' in tracking_type else 'Pyramid'
 
-def _build_pairwise_tracking(emgfiles_by_block, xcc_threshold=0.8):
-    """
-    Build pairwise tracking: for each consecutive block pair, find matching MUs.
-    Returns dict: {(block_a, mu_idx_a): (block_b, mu_idx_b, xcc)}
-    """
-    matches = {}
-    block_numbers = sorted(emgfiles_by_block.keys())
+        cluster_id = db.insert_tracking_cluster({
+            'session_id': session_id,
+            'tracking_scope': scope,
+            'muscle': muscle,
+            'task_type': task_type,
+            'n_blocks_tracked': int(pairs_df['xcc'].count()),
+        })
 
-    for idx in range(len(block_numbers) - 1):
-        b1 = block_numbers[idx]
-        b2 = block_numbers[idx + 1]
-        emg1 = emgfiles_by_block[b1]
-        emg2 = emgfiles_by_block[b2]
+        for _, row in pairs_df.iterrows():
+            pre_cond = row.get('pre_condition', '')
+            post_cond = row.get('post_condition', '')
 
-        if emg1 is None or emg2 is None:
-            continue
-
-        try:
-            tracking_res = emg.tracking(
-                emgfile1=emg1,
-                emgfile2=emg2,
-                firings="all",
-                derivation="SD",
-                filter=False,
-                show=False,
-                gui=False,
-                gui_addrefsig=False,
-                gui_csv_separator=",",
+            pre_key = next(
+                ((c, tt, m) for (c, tt, m) in _recording_ids
+                 if c == pre_cond and m == muscle and tt == tracking_type), None
+            )
+            post_key = next(
+                ((c, tt, m) for (c, tt, m) in _recording_ids
+                 if c == post_cond and m == muscle and tt == tracking_type), None
             )
 
-            if tracking_res is None or len(tracking_res) == 0:
+            if pre_key is None or post_key is None:
                 continue
 
-            # tracking_res is a DataFrame with columns: MU_file1, MU_file2, XCC
-            for _, row in tracking_res.iterrows():
-                xcc = float(row.get('XCC', 0))
-                if xcc >= xcc_threshold:
-                    mu1 = int(row['MU_file1'])
-                    mu2 = int(row['MU_file2'])
-                    matches[(b1, mu1)] = (b2, mu2, xcc)
+            pre_mu_ids = db.get_mu_ids_for_recording(_recording_ids[pre_key])
+            post_mu_ids = db.get_mu_ids_for_recording(_recording_ids[post_key])
 
-        except Exception as e:
-            print(f"  ⚠ Tracking failed for blocks {b1}→{b2}: {e}")
+            pre_mu_row = pre_mu_ids[pre_mu_ids['mu_idx'] == row.get('pre_mu_idx', -1)]
+            post_mu_row = post_mu_ids[post_mu_ids['mu_idx'] == row.get('post_mu_idx', -1)]
 
-    return matches
-
-
-def _build_clusters(matches, emgfiles_by_block):
-    """
-    Build transitive clusters from pairwise matches.
-    If MU_A(b2) = MU_B(b3) and MU_B(b3) = MU_C(b4), they form one cluster.
-    Returns list of sets: [{(block, mu_idx), ...}, ...]
-    """
-    # Union-Find approach
-    parent = {}
-
-    def find(node):
-        if node not in parent:
-            parent[node] = node
-        if parent[node] != node:
-            parent[node] = find(parent[node])
-        return parent[node]
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-
-    # Seed all nodes
-    for block, emgfile in emgfiles_by_block.items():
-        if emgfile is None:
-            continue
-        for mu_idx in range(emgfile['NUMBER_OF_MUS']):
-            node = (block, mu_idx)
-            parent[node] = node
-
-    # Union matched pairs
-    for (b1, mu1), (b2, mu2, xcc) in matches.items():
-        union((b1, mu1), (b2, mu2))
-
-    # Group by root
-    from collections import defaultdict
-    clusters = defaultdict(set)
-    for node in parent:
-        clusters[find(node)].add(node)
-
-    # Only return clusters with MUs from at least 2 different blocks
-    multi_block_clusters = [
-        c for c in clusters.values()
-        if len(set(block for block, _ in c)) >= 2
-    ]
-
-    return multi_block_clusters
-
-
-if condition_result and OPENHDEMG_AVAILABLE:
-    # Build lookup: (block_number, task_type, muscle) -> emgfile
-    block_emg_lookup = {}
-    for cond_name, cond_data in condition_result['conditions'].items():
-        block_str = cond_data.get('block', 'Block0')
-        block_number = int(block_str.replace('Block', ''))
-        for tracking_type, groups in cond_data['tracking_types'].items():
-            task_type = 'Trapezoid' if 'Trap' in tracking_type else 'Pyramid'
-            for group in groups:
-                muscle = group.get('muscle', 'Unknown')
-                emgfile = group.get('concatenated')
-                key = (block_number, task_type, muscle)
-                block_emg_lookup[key] = emgfile
-
-    # Get unique (task_type, muscle) combinations
-    task_muscle_combos = set()
-    for (block, task_type, muscle) in block_emg_lookup:
-        task_muscle_combos.add((task_type, muscle))
-
-    for scope_name, scope_blocks in TRACKING_SCOPES.items():
-        print(f"\\nTracking scope: {scope_name} (blocks {scope_blocks})")
-
-        for task_type, muscle in sorted(task_muscle_combos):
-            # Build emgfiles dict for this scope
-            emgfiles_for_scope = {}
-            for block in scope_blocks:
-                key = (block, task_type, muscle)
-                emgfiles_for_scope[block] = block_emg_lookup.get(key)
-
-            # Skip if fewer than 2 blocks have data
-            valid_blocks = [b for b, e in emgfiles_for_scope.items() if e is not None]
-            if len(valid_blocks) < 2:
-                print(f"  {task_type}|{muscle}: only {len(valid_blocks)} blocks, skipping")
+            if pre_mu_row.empty or post_mu_row.empty:
                 continue
 
-            print(f"  {task_type}|{muscle}: tracking across blocks {valid_blocks}...")
+            db.insert_mu_tracking({
+                'cluster_id': cluster_id,
+                'mu_id': int(pre_mu_row.iloc[0]['mu_id']),
+                'block_position': 1,
+                'xcc_to_next': float(row.get('xcc', 0)),
+            })
+            db.insert_mu_tracking({
+                'cluster_id': cluster_id,
+                'mu_id': int(post_mu_row.iloc[0]['mu_id']),
+                'block_position': 2,
+                'xcc_to_next': None,
+            })
 
-            matches = _build_pairwise_tracking(emgfiles_for_scope, XCC_TRACKING_THRESHOLD)
-            clusters = _build_clusters(matches, emgfiles_for_scope)
-
-            print(f"    → {len(clusters)} tracking clusters found")
-
-            for cluster_set in clusters:
-                # Create cluster record
-                cluster_id = db.insert_tracking_cluster({
-                    'session_id': session_id,
-                    'muscle': muscle,
-                    'task_type': task_type,
-                    'tracking_scope': scope_name,
-                })
-
-                # Link MUs to cluster
-                for (block_number, mu_idx) in cluster_set:
-                    rec_key = (block_number, task_type, muscle)
-                    rec_id = _recording_ids.get(rec_key)
-                    if rec_id is None:
-                        continue
-
-                    mu_ids_df = db.get_mu_ids_for_recording(rec_id)
-                    mu_row = mu_ids_df[mu_ids_df['mu_idx'] == mu_idx]
-                    if mu_row.empty:
-                        continue
-
-                    mu_id_val = int(mu_row.iloc[0]['mu_id'])
-
-                    # Find XCC for this MU
-                    xcc_val = None
-                    for (b1, m1), (b2, m2, xcc) in matches.items():
-                        if (b1 == block_number and m1 == mu_idx) or (b2 == block_number and m2 == mu_idx):
-                            xcc_val = xcc
-                            break
-
-                    db.insert_mu_tracking(mu_id_val, cluster_id, xcc_val)
-
-    print("\\n✓ MU tracking complete")
-else:
-    print("⚠ Skipping tracking - openhdemg not available")'''
+    print("✓ Tracking clusters inserted")'''
     })
 
-    # -------------------------------------------------------------------------
-    # Cell 10: Recording-Level Metrics
-    # -------------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Cell 9: Recording-level metrics
+    # -----------------------------------------------------------------------
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
-# RECORDING-LEVEL METRICS UPDATE
-# Pool counts, CST, EMG, Force tracking
+# RECORDING-LEVEL METRICS (pool counts from DB)
 # ============================================================
 
-if condition_result and OPENHDEMG_AVAILABLE:
-    from scipy import signal as sp_signal
-
-    for cond_name, cond_data in condition_result['conditions'].items():
-        block_str = cond_data.get('block', 'Block0')
-        block_number = int(block_str.replace('Block', ''))
-
-        for tracking_type, groups in cond_data['tracking_types'].items():
-            task_type = 'Trapezoid' if 'Trap' in tracking_type else 'Pyramid'
-
-            for group in groups:
-                emgfile = group.get('concatenated')
-                if emgfile is None:
-                    continue
-
-                muscle = group.get('muscle', 'Unknown')
-                rec_key = (block_number, task_type, muscle)
-                rec_id = _recording_ids.get(rec_key)
-                if rec_id is None:
-                    continue
-
-                fsamp = emgfile['FSAMP']
-                n_mus = emgfile['NUMBER_OF_MUS']
-                ref_signal = emgfile['REF_SIGNAL'].values.flatten()
-                ref_max = ref_signal.max() if ref_signal.max() > 0 else 1.0
-
-                # --- Pool counts (via SQL) ---
-                df_counts = db.query("""
-                    SELECT
-                        COUNT(*) AS n_total,
-                        SUM(CASE WHEN qc_passed = 1 THEN 1 ELSE 0 END) AS n_qc,
-                        SUM(CASE WHEN is_duplicate = 0 AND qc_passed = 1 THEN 1 ELSE 0 END) AS n_unique
-                    FROM motor_units WHERE recording_id = ?
-                """, [rec_id])
-
-                n_total = int(df_counts.iloc[0]['n_total'])
-                n_qc = int(df_counts.iloc[0]['n_qc'])
-                n_unique = int(df_counts.iloc[0]['n_unique'])
-
-                # --- CST (cumulative spike train) - Trapezoid only ---
-                cst_plateau_mean = None
-                cst_plateau_sd = None
-                if task_type == 'Trapezoid' and PLATEAU_MARKERS_FILE.exists():
-                    with open(PLATEAU_MARKERS_FILE) as f:
-                        pm = json.load(f)
-                    group_name = group.get('name', '')
-                    if group_name in pm:
-                        p_start = pm[group_name]['start_idx']
-                        p_end = pm[group_name]['end_idx']
-
-                        # Sum all binary spike trains
-                        n_samples = len(ref_signal)
-                        cst = np.zeros(n_samples)
-                        binary_mus = emgfile.get('BINARY_MUS_FIRING')
-                        if binary_mus is not None:
-                            cst = binary_mus.values.sum(axis=1).values
-                        else:
-                            for mu_idx in range(n_mus):
-                                mupulses = emgfile['MUPULSES'][mu_idx]
-                                for spike in mupulses:
-                                    if 0 <= int(spike) < n_samples:
-                                        cst[int(spike)] += 1
-
-                        # Low-pass filter CST at 4 Hz
-                        b_lp, a_lp = sp_signal.butter(2, 4.0 / (fsamp / 2), btype='low')
-                        cst_filt = sp_signal.filtfilt(b_lp, a_lp, cst)
-
-                        plateau_cst = cst_filt[p_start:p_end]
-                        if len(plateau_cst) > 0:
-                            cst_plateau_mean = float(np.mean(plateau_cst))
-                            cst_plateau_sd = float(np.std(plateau_cst))
-
-                # --- Force tracking performance ---
-                ft_rmse = None
-                ft_r2 = None
-                ft_mean = None
-                if len(ref_signal) > 0:
-                    ft_mean = float(np.mean(ref_signal) / ref_max * 100)
-
-                # Update recordings table
-                db.update_recording_metrics(rec_id, {
-                    'n_mus_total': n_total,
-                    'n_mus_after_qc': n_qc,
-                    'n_mus_after_duplicate_removal': n_unique,
-                    'cst_plateau_mean_pps': cst_plateau_mean,
-                    'cst_plateau_sd_pps': cst_plateau_sd,
-                    'ft_mean_force_pct_mvc': ft_mean,
-                })
-                print(f"✓ {cond_name} | {task_type} | {muscle}: counts ({n_total}/{n_qc}/{n_unique}) updated")
-
-    print("\\n✓ Recording metrics updated")
-else:
-    print("⚠ Skipping recording metrics - openhdemg not available")'''
+for (condition, tracking_type, muscle), rec_id in _recording_ids.items():
+    df_counts = db.query("""
+        SELECT
+            COUNT(*) AS n_total,
+            SUM(CASE WHEN qc_passed = 1 THEN 1 ELSE 0 END) AS n_qc,
+            SUM(CASE WHEN is_duplicate = 0 AND qc_passed = 1 THEN 1 ELSE 0 END) AS n_unique
+        FROM motor_units WHERE recording_id = ?
+    """, [rec_id])
+    db.update_recording_metrics(rec_id, {
+        'n_mus_total': int(df_counts.iloc[0]['n_total']),
+        'n_mus_after_qc': int(df_counts.iloc[0]['n_qc']),
+        'n_mus_after_duplicate_removal': int(df_counts.iloc[0]['n_unique']),
     })
 
-    # -------------------------------------------------------------------------
-    # Cell 11: Validation
-    # -------------------------------------------------------------------------
+print("✓ Recording metrics updated")'''
+    })
+
+    # -----------------------------------------------------------------------
+    # Cell 10: Validation + close
+    # -----------------------------------------------------------------------
     cells.append({
         'cell_type': 'code',
         'source': '''# ============================================================
-# VALIDATION
+# VALIDATION + CLOSE
 # ============================================================
 
 db.validate(SUBJECT_ID)
 
-# Tracking summary
-df_tracking = db.query("""
+df_tracking_summary = db.query("""
     SELECT tc.tracking_scope, tc.muscle, tc.task_type,
            COUNT(DISTINCT tc.cluster_id) AS n_clusters,
            COUNT(mt.mu_id) AS n_tracked_mus
@@ -4322,28 +4086,14 @@ df_tracking = db.query("""
     GROUP BY tc.tracking_scope, tc.muscle, tc.task_type
 """, [SUBJECT_ID])
 
-if len(df_tracking) > 0:
+if len(df_tracking_summary) > 0:
     print("\\nTracking summary:")
-    print(df_tracking.to_string(index=False))
-else:
-    print("\\nNo tracking data found for this subject")'''
-    })
-
-    # -------------------------------------------------------------------------
-    # Cell 12: Close DB
-    # -------------------------------------------------------------------------
-    cells.append({
-        'cell_type': 'code',
-        'source': '''# ============================================================
-# CLOSE DB
-# ============================================================
+    print(df_tracking_summary.to_string(index=False))
 
 db.close()
-print(f"✓ {SUBJECT_ID} successfully exported to DB: {DB_PATH}")
-print("\\nNext steps:")
-print("  - Run this notebook for the next subject")
-print("  - Open 02_analyze_from_db.ipynb for cross-subject analysis")
-print("  - Connect DBeaver to mu_study.db for SQL exploration")'''
+print(f"\\n✓ {SUBJECT_ID} successfully exported to DB: {DB_PATH}")
+print("  Next: run this notebook for the next subject")
+print("  Then: connect DBeaver / run analysis queries on mu_study.db")'''
     })
 
     return cells
