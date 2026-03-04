@@ -33,11 +33,28 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_id              INTEGER PRIMARY KEY AUTOINCREMENT,
     subject_id              TEXT NOT NULL REFERENCES subjects(subject_id),
     session_date            TEXT NOT NULL,              -- 'YYYYMMDD'
+    session_type            TEXT,                       -- e.g. 'Day 2 - Intervention'
     mvc_pre_nm              REAL,
     mvc_post_nm             REAL,
     borg_cr10_post_con      REAL,
     borg_cr10_post_exz      REAL,
     doms_score_pre          INTEGER,
+    -- Contrex isokinetic dynamometer setup (from arrival_setup, use_from_ref fields)
+    contrex_sitzwinkel_deg          REAL,               -- seat angle (degrees)
+    contrex_sitzboden_laenge_mm     REAL,               -- seat depth (mm)
+    contrex_lever_height_mm         REAL,               -- lever arm height (mm)
+    contrex_lever_seat_position_mm  REAL,               -- lever arm seat position (mm)
+    -- Electrode grid configuration (set once per session in arrival_setup)
+    -- 64-channel grids (HD04MM1305 or HD08MM1305, 5×13 layout)
+    vm_grid_64_type         TEXT,                       -- e.g. 'HD08MM1305'
+    vm_grid_64_orientation  INTEGER CHECK(vm_grid_64_orientation IN (0, 180)),
+    vl_grid_64_type         TEXT,
+    vl_grid_64_orientation  INTEGER CHECK(vl_grid_64_orientation IN (0, 180)),
+    -- 32-channel grids (HD10MM0804 or HD05MM0804, 4×8 layout)
+    vm_grid_32_type         TEXT,                       -- e.g. 'HD10MM0804'
+    vm_grid_32_orientation  INTEGER CHECK(vm_grid_32_orientation IN (0, 180)),
+    vl_grid_32_type         TEXT,
+    vl_grid_32_orientation  INTEGER CHECK(vl_grid_32_orientation IN (0, 180)),
     created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(subject_id, session_date)
 );

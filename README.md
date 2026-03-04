@@ -51,7 +51,7 @@ In order to install hdsemg-pipe, follow the instructions in the [installation gu
 3. After the installation, you can run the application using from the command line:
 
 ```bash
-  python -m hdsemg-pipe
+  python -m hdsemg_pipe.main
 ```
 
 

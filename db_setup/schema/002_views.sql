@@ -22,11 +22,26 @@ SELECT
     -- Session
     sess.session_id,
     sess.session_date,
+    sess.session_type,
     sess.mvc_pre_nm,
     sess.mvc_post_nm,
     sess.borg_cr10_post_con,
     sess.borg_cr10_post_exz,
     sess.doms_score_pre,
+    -- Contrex setup
+    sess.contrex_sitzwinkel_deg,
+    sess.contrex_sitzboden_laenge_mm,
+    sess.contrex_lever_height_mm,
+    sess.contrex_lever_seat_position_mm,
+    -- Electrode grids
+    sess.vm_grid_64_type,
+    sess.vm_grid_64_orientation,
+    sess.vm_grid_32_type,
+    sess.vm_grid_32_orientation,
+    sess.vl_grid_64_type,
+    sess.vl_grid_64_orientation,
+    sess.vl_grid_32_type,
+    sess.vl_grid_32_orientation,
     -- Recording
     r.recording_id,
     r.block_number,
@@ -143,11 +158,30 @@ CREATE VIEW IF NOT EXISTS v_mu_crossover AS
 SELECT
     s.subject_id,
     s.first_training_mode,
+    sess.session_date,
+    sess.doms_score_pre,
     r.training_mode_before AS training_type,
     r.block_number,
     r.block_label,
     r.muscle,
     r.task_type,
+    -- Grid configuration for this muscle (64-ch and 32-ch)
+    CASE r.muscle
+        WHEN 'VM' THEN sess.vm_grid_64_type
+        WHEN 'VL' THEN sess.vl_grid_64_type
+    END AS grid_64_type,
+    CASE r.muscle
+        WHEN 'VM' THEN sess.vm_grid_64_orientation
+        WHEN 'VL' THEN sess.vl_grid_64_orientation
+    END AS grid_64_orientation,
+    CASE r.muscle
+        WHEN 'VM' THEN sess.vm_grid_32_type
+        WHEN 'VL' THEN sess.vl_grid_32_type
+    END AS grid_32_type,
+    CASE r.muscle
+        WHEN 'VM' THEN sess.vm_grid_32_orientation
+        WHEN 'VL' THEN sess.vl_grid_32_orientation
+    END AS grid_32_orientation,
     mu.mu_id,
     mu.mu_idx,
     mu.sil,
