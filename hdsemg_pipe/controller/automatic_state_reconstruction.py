@@ -448,32 +448,60 @@ def _roi_files(folderpath):
     return roi_file_path
 
 def _channel_selection_files(folderpath):
-    """Check if the channel selection files folder exists."""
-    channel_selection_file_path = os.path.join(folderpath, str(FolderNames.CHANNELSELECTION.value))
-    files = os.listdir(channel_selection_file_path)
+    """Reconstruct Step 7: Channel Selection state.
 
-    for file in files:
-        if file.endswith(".mat"):
-            file_path = os.path.join(channel_selection_file_path, file)
-            global_state.channel_selection_files.append(file_path)
+    Handles three cases:
+    - All cropped files processed  → mark step complete
+    - Some files processed         → keep step pending so the user can resume
+    - No files processed at all    → raise FileNotFoundError (step not started)
+    """
+    from hdsemg_pipe.actions.file_manager import get_channel_selection_status
 
-    channel_selection_files = global_state.channel_selection_files.copy()
-    if not channel_selection_files or len(channel_selection_files) == 0:
-        logger.warning(f"No channelselection files found in: {channel_selection_file_path}")
-        raise FileNotFoundError(f"No channelselection found in: {channel_selection_file_path}")
+    channel_sel_dir = os.path.join(folderpath, str(FolderNames.CHANNELSELECTION.value))
 
-    logger.debug(f"channelselection added to global state: {channel_selection_files}")
+    # Populate channel_selection_files with the kept MAT files
+    if os.path.isdir(channel_sel_dir):
+        for f in os.listdir(channel_sel_dir):
+            if f.endswith(".mat") and not os.path.isdir(os.path.join(channel_sel_dir, f)):
+                global_state.channel_selection_files.append(
+                    os.path.join(channel_sel_dir, f)
+                )
 
-    channel_selection_file_widget = global_state.get_widget("step7")
-    if channel_selection_file_widget:
-        channel_selection_file_widget.check()
-        logger.info("Step 7 state reconstructed: Channel selection completed normally")
+    if not global_state.channel_selection_files:
+        # Check whether there are any discarded files – if so the step was
+        # started but every file was discarded (partial or complete run).
+        discarded_dir = os.path.join(channel_sel_dir, "discarded")
+        n_discarded = 0
+        if os.path.isdir(discarded_dir):
+            n_discarded = sum(
+                1 for f in os.listdir(discarded_dir)
+                if not os.path.isdir(os.path.join(discarded_dir, f))
+            )
+        if n_discarded == 0:
+            logger.warning(f"No channel selection files found in: {channel_sel_dir}")
+            raise FileNotFoundError(f"No channel selection files found in: {channel_sel_dir}")
+
+    status = get_channel_selection_status(global_state.cropped_files, channel_sel_dir)
+    n_done = status["n_done"]
+    n_total = status["n_total"]
+
+    widget = global_state.get_widget("step7")
+    if not widget:
+        logger.warning("Channel selection widget not found in global state.")
+        raise ValueError("Channel selection widget not found in global state.")
+
+    widget.check()
+
+    if n_total > 0 and n_done >= n_total:
+        logger.info("Step 7 state reconstructed: Channel selection fully completed")
         global_state.complete_widget("step7")
     else:
-        logger.warning("channelselection widget not found in global state.")
-        raise ValueError("channelselection widget not found in global state.")
+        # Partial – leave step pending so the user can resume
+        logger.info(
+            f"Step 7 state reconstructed: {n_done}/{n_total} files done – step pending (resume available)"
+        )
 
-    return channel_selection_file_path
+    return channel_sel_dir
 
 def _decomposition_results_init():
     """Initialize Step 8: Decomposition Results monitoring and load mapping state."""

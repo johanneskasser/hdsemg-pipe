@@ -1,6 +1,8 @@
+import os
+
 from PyQt5.QtWidgets import QMessageBox
 
-from hdsemg_pipe.actions.file_manager import start_file_processing
+from hdsemg_pipe.actions.file_manager import start_file_processing, get_channel_selection_status
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe._log.log_config import logger
@@ -30,20 +32,21 @@ class ChannelSelectionWizardWidget(WizardStepWidget):
         self.buttons.append(self.btn_select_channels)
 
     def start_processing(self):
-        """Starts file processing and updates progress dynamically."""
+        """Starts (or resumes) file processing and updates progress dynamically."""
         if not global_state.cropped_files:
-            logger.warning("No .mat files found.")
+            logger.warning("No files found for channel selection.")
             return
         if not config.get(Settings.HDSEMG_SELECT_INSTALLED):
-            QMessageBox.information(self, "Warning", "hdsemg-select is not installed. Please install it in settings first.", QMessageBox.Ok)
+            QMessageBox.information(
+                self, "Warning",
+                "hdsemg-select is not installed. Please install it in settings first.",
+                QMessageBox.Ok
+            )
             self.setActionButtonsEnabled(False)
             return
         logger.debug("Starting channel selection processing.")
         self.btn_select_channels.setEnabled(False)
         self.btn_select_channels.start_loading()
-        self.processed_files = 0
-        self.total_files = len(global_state.cropped_files)
-        self.update_progress(self.processed_files, self.total_files)
 
         start_file_processing(self)
 
@@ -56,10 +59,8 @@ class ChannelSelectionWizardWidget(WizardStepWidget):
 
     def update_progress(self, processed, total):
         """Updates the progress display dynamically."""
-        # Update progress label
         self.additional_information_label.setText(f"{processed}/{total}")
 
-        # Mark step as complete when all files are processed
         if processed >= total > 0:
             self.btn_select_channels.stop_loading()
             self.complete_step()
@@ -68,9 +69,32 @@ class ChannelSelectionWizardWidget(WizardStepWidget):
         if config.get(Settings.HDSEMG_SELECT_INSTALLED) is False:
             self.warn("hdsemg-select is not installed. Please install it to proceed (see Settings).")
             self.setActionButtonsEnabled(False)
-        else:
-            self.clear_status()
-            self.setActionButtonsEnabled(True)
+            return
+
+        self.clear_status()
+
+        # Detect whether a partial or complete run already exists on disk
+        channel_sel_dir = global_state.get_channel_selection_path()
+        if (
+            global_state.cropped_files
+            and os.path.isdir(channel_sel_dir)
+        ):
+            status = get_channel_selection_status(global_state.cropped_files, channel_sel_dir)
+            n_done = status["n_done"]
+            n_total = status["n_total"]
+
+            if n_done > 0 and n_done < n_total:
+                # Partial run – offer to continue
+                self.btn_select_channels.setText("Continue Channel Selection")
+                self.additional_information_label.setText(f"{n_done}/{n_total}")
+                self.info(
+                    f"{n_done} of {n_total} files already processed. "
+                    "Click to continue where you left off."
+                )
+            else:
+                self.btn_select_channels.setText("Select Channels")
+
+        self.setActionButtonsEnabled(True)
 
     def complete_step(self, processed_files: int | None = None):
         # refresh counts
@@ -79,6 +103,9 @@ class ChannelSelectionWizardWidget(WizardStepWidget):
 
         # update the label *inline*
         self.additional_information_label.setText(f"{self.processed_files}/{self.total_files}")
+
+        # reset button label in case it was changed to "Continue"
+        self.btn_select_channels.setText("Select Channels")
 
         # make sure the loading spinner is off
         self.btn_select_channels.stop_loading()
