@@ -74,6 +74,10 @@ class ChannelSelectionWizardWidget(WizardStepWidget):
         self.clear_status()
 
         # Detect whether a partial or complete run already exists on disk
+        if not global_state.workfolder:
+            self.setActionButtonsEnabled(True)
+            return
+
         channel_sel_dir = global_state.get_channel_selection_path()
         if (
             global_state.cropped_files
