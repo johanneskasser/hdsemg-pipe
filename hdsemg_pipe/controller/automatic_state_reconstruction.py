@@ -2,6 +2,8 @@ import os
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.enum.FolderNames import FolderNames
+from hdsemg_pipe.actions.process_log import read_process_log
+from hdsemg_pipe.actions.skip_marker import check_skip_marker
 from hdsemg_pipe.state.global_state import global_state
 from PyQt5.QtWidgets import QMessageBox, QFileDialog
 from hdsemg_pipe.config.config_manager import config
@@ -17,7 +19,17 @@ def start_reconstruction_workflow(parent):
         selected_folder = QFileDialog.getExistingDirectory(parent, "Select existing pipeline folder", directory=workfolder_path)
         if selected_folder:
             try:
-                reconstruct_folder_state(folderpath=selected_folder)
+                next_step = reconstruct_folder_state(folderpath=selected_folder)
+                # Navigate to the next incomplete step - find the main window first
+                main_window = parent
+                while main_window and not hasattr(main_window, 'navigateToStep'):
+                    main_window = main_window.parent() if hasattr(main_window, 'parent') else None
+
+                if main_window and hasattr(main_window, 'navigateToStep'):
+                    logger.info(f"Navigating to step {next_step} after reconstruction")
+                    main_window.navigateToStep(next_step)
+                else:
+                    logger.warning("Could not find main window with navigateToStep method")
             except Exception as e:
                 global_state.reset()
                 logger.warning(f"Failed to reconstruct folder state: {e}")
@@ -50,68 +62,134 @@ def reconstruct_folder_state(folderpath):
         _associated_grid_files(folderpath)
     except FileNotFoundError as e:
         logger.info(f"Skipping grid association reconstruction: {e}")
+        global_state.skip_widget("step2")
 
     try:
         _line_noise_cleaned_files(folderpath)
     except FileNotFoundError as e:
         logger.info(f"Skipping line noise cleaned reconstruction: {e}")
+        global_state.skip_widget("step3")
 
     try:
         _analysis_files(folderpath)
     except FileNotFoundError as e:
         logger.info(f"Skipping RMS analysis reconstruction: {e}")
+        global_state.skip_widget("step4")
+
+    try:
+        _file_quality_selection(folderpath)
+    except Exception as e:
+        logger.info(f"Skipping file quality selection reconstruction: {e}")
+        global_state.skip_widget("step5")
 
     try:
         _roi_files(folderpath)
     except FileNotFoundError as e:
         logger.info(f"Skipping ROI reconstruction: {e}")
+        global_state.skip_widget("step6")
 
     try:
         _channel_selection_files(folderpath)
     except FileNotFoundError as e:
         logger.info(f"Skipping channel selection reconstruction: {e}")
+        global_state.skip_widget("step7")
 
-    # Always initialize decomposition results (Step 5)
+    # Always initialize decomposition results (Step 8)
     try:
         _decomposition_results_init()
     except Exception as e:
         logger.info(f"Skipping decomposition results reconstruction: {e}")
+        global_state.skip_widget("step8")
 
-    # Try to reconstruct multi-grid configuration (Step 6)
+    # Try to reconstruct CoVISI pre-filter (Step 9)
+    try:
+        _covisi_pre_filter()
+    except Exception as e:
+        logger.info(f"Skipping CoVISI pre-filter reconstruction: {e}")
+        global_state.skip_widget("step9")
+
+    # Try to reconstruct multi-grid configuration (Step 10)
     try:
         _multigrid_config()
     except Exception as e:
         logger.info(f"Skipping multi-grid configuration reconstruction: {e}")
+        global_state.skip_widget("step10")
 
-    # Try to reconstruct MUEdit cleaning (Step 7)
+    # Try to reconstruct MUEdit cleaning (Step 11)
     try:
         _muedit_cleaning()
     except Exception as e:
         logger.info(f"Skipping MUEdit cleaning reconstruction: {e}")
 
-    # Try to reconstruct final results (Step 8)
+    # Try to reconstruct CoVISI post-validation (Step 12)
+    try:
+        _covisi_post_validation()
+    except Exception as e:
+        logger.info(f"Skipping CoVISI post-validation reconstruction: {e}")
+        global_state.skip_widget("step12")
+
+    # Try to reconstruct final results (Step 13)
     try:
         _final_results()
     except Exception as e:
         logger.info(f"Skipping final results reconstruction: {e}")
 
+    # Apply process log overrides: use the recorded statuses as the authoritative
+    # source of truth, correcting any mis-detected statuses from file-based checks.
+    _apply_process_log_overrides(folderpath)
+
     msg_box = _show_restore_success(folderpath)
     msg_box.exec_()
     folder_content_widget.update_folder_content()
 
-    # Navigate wizard to the last completed step + 1 (or last step if all complete)
-    last_completed_step = _get_last_completed_step()
-    logger.info(f"Last completed step: {last_completed_step}")
+    # Log completion status for all steps (for debugging)
+    logger.info("=" * 50)
+    logger.info("Step completion status after reconstruction:")
+    for step_num in range(1, 14):
+        step_name = f"step{step_num}"
+        is_completed = global_state.is_widget_completed(step_name)
+        is_skipped = global_state.is_widget_skipped(step_name)
+        status = "✓ Completed" if is_completed and not is_skipped else "⏭ Skipped" if is_skipped else "○ Pending"
+        logger.info(f"  Step {step_num:2d}: {status}")
+    logger.info("=" * 50)
 
-    return last_completed_step
+    # Navigate wizard to the next incomplete step (or last step if all complete)
+    next_step = _get_next_incomplete_step()
+    logger.info(f"Next incomplete step: {next_step}")
+
+    # Refresh progress indicator to show correct visual states
+    # (completion status was updated via global_state without triggering UI updates)
+    parent_widget = global_state.get_widget("step1")
+    if parent_widget and hasattr(parent_widget, 'parent') and parent_widget.parent():
+        main_window = parent_widget.parent()
+        while main_window and not hasattr(main_window, 'progress_indicator'):
+            main_window = main_window.parent()
+        if main_window and hasattr(main_window, 'progress_indicator'):
+            main_window.progress_indicator.refreshStates()
+            logger.info("Progress indicator refreshed after reconstruction")
+
+        # Re-run check() on every step so their UIs reflect the restored state.
+        # This is equivalent to checkAllSteps() and ensures steps like
+        # FileQualitySelection populate their file lists after reconstruction.
+        if main_window and hasattr(main_window, 'checkAllSteps'):
+            main_window.checkAllSteps()
+            logger.info("All step UIs refreshed after reconstruction")
+
+    return next_step
 
 
-def _get_last_completed_step():
-    """Get the index of the last completed step."""
-    for step_index in range(9, -1, -1):  # Check from step 9 down to 0
-        if global_state.is_widget_completed(f"step{step_index}"):
+def _get_next_incomplete_step():
+    """Get the index of the next incomplete step (first step that is not completed).
+
+    Returns:
+        int: Step index (1-13) of the next incomplete step, or 13 if all steps are completed.
+    """
+    # Find first incomplete step
+    for step_index in range(1, 14):  # Check from step 1 to 13
+        if not global_state.is_widget_completed(f"step{step_index}"):
             return step_index
-    return 0  # No steps completed, return first step
+    # All steps completed - return last step
+    return 13
 
 
 def _show_restore_success(folderpath):
@@ -138,7 +216,14 @@ def _check_pipe_folder_structure(folderpath):
     logger.debug(f"Checking folder structure for: {folderpath}")
     # Define the expected subfolders (some are optional for backwards compatibility)
     expected_subfolders = FolderNames.list_values()
-    optional_folders = [FolderNames.DECOMPOSITION_RESULTS.value, FolderNames.ANALYSIS.value]
+    optional_folders = [
+        FolderNames.DECOMPOSITION_RESULTS.value,
+        FolderNames.ANALYSIS.value,
+        # These folders are created on-demand (CoVISI / duplicate removal / MUEdit export may never run)
+        FolderNames.DECOMPOSITION_COVISI_FILTERED.value,
+        FolderNames.DECOMPOSITION_REMOVED_DUPLICATES.value,
+        FolderNames.DECOMPOSITION_MUEDIT.value,
+    ]
 
     # Check if each expected subfolder exists
     for subfolder in expected_subfolders:
@@ -177,14 +262,16 @@ def _original_files(folderpath):
 
     logger.debug(f"Original files added to global state: {orig_files}")
 
-    original_files_widget = global_state.get_widget("step0")
+    original_files_widget = global_state.get_widget("step1")
     if original_files_widget:
         original_files_widget.check()
-        original_files_widget.complete_step()
+        # Mark directly in GlobalState without triggering navigation
+        logger.info("Step 1 state reconstructed: Original files loaded")
+        global_state.complete_widget("step1")
         original_files_widget.fileSelected.emit(folderpath)
     else:
         logger.warning("Original files widget not found in global state.")
-        raise ValueError("Original fi1les widget not found in global state.")
+        raise ValueError("Original files widget not found in global state.")
 
     return original_files_path
 
@@ -205,10 +292,18 @@ def _associated_grid_files(folderpath):
 
     logger.debug(f"associated grid added to global state: {associated_files}")
 
-    associated_grids_widget = global_state.get_widget("step1")
+    associated_grids_widget = global_state.get_widget("step2")
     if associated_grids_widget:
         associated_grids_widget.check()
-        associated_grids_widget.complete_step()
+        # Check if step was skipped
+        if check_skip_marker(associated_grids_path):
+            logger.info("Step 2 state reconstructed: Grid association was skipped")
+            # Mark directly in GlobalState without triggering navigation
+            global_state.skip_widget("step2")
+        else:
+            logger.info("Step 2 state reconstructed: Grid association completed normally")
+            # Mark directly in GlobalState without triggering navigation
+            global_state.complete_widget("step2")
     else:
         logger.warning("associated grid widget not found in global state.")
         raise ValueError("associated grid widget not found in global state.")
@@ -232,10 +327,18 @@ def _line_noise_cleaned_files(folderpath):
 
     logger.debug(f"Line noise cleaned files added to global state: {line_noise_cleaned_files}")
 
-    line_noise_cleaned_widget = global_state.get_widget("step2")
+    line_noise_cleaned_widget = global_state.get_widget("step3")
     if line_noise_cleaned_widget:
         line_noise_cleaned_widget.check()
-        line_noise_cleaned_widget.complete_step(processed_files=len(line_noise_cleaned_files))
+        # Check if step was skipped
+        if check_skip_marker(line_noise_cleaned_path):
+            logger.info("Step 3 state reconstructed: Line noise removal was skipped")
+            # Mark directly in GlobalState without triggering navigation
+            global_state.skip_widget("step3")
+        else:
+            logger.info("Step 3 state reconstructed: Line noise removal completed normally")
+            # Mark directly in GlobalState without triggering navigation
+            global_state.complete_widget("step3")
     else:
         logger.warning("Line noise removal widget not found in global state.")
         raise ValueError("Line noise removal widget not found in global state.")
@@ -252,24 +355,64 @@ def _analysis_files(folderpath):
 
     files = os.listdir(analysis_path)
 
+    # Check for skip marker (skip marker is sufficient even without analysis files)
+    has_skip_marker = check_skip_marker(analysis_path)
+
     # Check for analysis output files (PNG, CSV, or TXT)
     analysis_files = [f for f in files if f.endswith(('.png', '.csv', '.txt'))]
 
-    if not analysis_files or len(analysis_files) == 0:
-        logger.warning(f"No analysis files found in: {analysis_path}")
+    if not has_skip_marker and (not analysis_files or len(analysis_files) == 0):
+        logger.warning(f"No analysis files or skip marker found in: {analysis_path}")
         raise FileNotFoundError(f"No analysis files found in: {analysis_path}")
 
     logger.debug(f"Analysis files found: {analysis_files}")
 
-    rms_quality_widget = global_state.get_widget("step3")
+    rms_quality_widget = global_state.get_widget("step4")
     if rms_quality_widget:
         rms_quality_widget.check()
-        rms_quality_widget.complete_step()
+        # Check if step was skipped
+        if has_skip_marker:
+            logger.info("Step 4 state reconstructed: RMS quality analysis was skipped")
+            # Mark directly in GlobalState without triggering navigation
+            global_state.skip_widget("step4")
+        else:
+            logger.info("Step 4 state reconstructed: RMS quality analysis completed normally")
+            # Mark directly in GlobalState without triggering navigation
+            global_state.complete_widget("step4")
     else:
         logger.warning("RMS Quality Analysis widget not found in global state.")
         raise ValueError("RMS Quality Analysis widget not found in global state.")
 
     return analysis_path
+
+def _file_quality_selection(folderpath):
+    """Reconstruct Step 5: File Quality Selection state."""
+    analysis_path = os.path.join(folderpath, str(FolderNames.ANALYSIS.value))
+    sel_path = os.path.join(analysis_path, "file_quality_selection.json")
+
+    file_quality_widget = global_state.get_widget("step5")
+    if not file_quality_widget:
+        logger.warning("File quality selection widget not found in global state.")
+        raise ValueError("File quality selection widget not found in global state.")
+
+    if os.path.exists(sel_path):
+        try:
+            import json
+            with open(sel_path, 'r') as f:
+                data = json.load(f)
+            selected = data.get("selected", [])
+            if selected:
+                global_state.line_noise_cleaned_files = selected
+                logger.info(f"Step 5 state reconstructed: {len(selected)} files selected")
+                global_state.complete_widget("step5")
+                return
+        except Exception as e:
+            logger.warning(f"Could not read file_quality_selection.json: {e}")
+
+    # No selection file found — treat as skipped (all files pass through)
+    logger.info("Step 5: no file_quality_selection.json found — marking as skipped")
+    global_state.skip_widget("step5")
+
 
 def _roi_files(folderpath):
     """Check if the roi files folder exists."""
@@ -288,10 +431,16 @@ def _roi_files(folderpath):
 
     logger.debug(f"roi added to global state: {roi_files}")
 
-    roi_file_widget = global_state.get_widget("step4")
+    roi_file_widget = global_state.get_widget("step6")
     if roi_file_widget:
         roi_file_widget.check()
-        roi_file_widget.complete_step()
+        # Check if step was skipped
+        if check_skip_marker(roi_file_path):
+            logger.info("Step 6 state reconstructed: ROI cropping was skipped")
+            global_state.skip_widget("step6")
+        else:
+            logger.info("Step 6 state reconstructed: ROI cropping completed normally")
+            global_state.complete_widget("step6")
     else:
         logger.warning("roi widget not found in global state.")
         raise ValueError("roi widget not found in global state.")
@@ -299,87 +448,237 @@ def _roi_files(folderpath):
     return roi_file_path
 
 def _channel_selection_files(folderpath):
-    """Check if the channel selection files folder exists."""
-    channel_selection_file_path = os.path.join(folderpath, str(FolderNames.CHANNELSELECTION.value))
-    files = os.listdir(channel_selection_file_path)
+    """Reconstruct Step 7: Channel Selection state.
 
-    for file in files:
-        if file.endswith(".mat"):
-            file_path = os.path.join(channel_selection_file_path, file)
-            global_state.channel_selection_files.append(file_path)
+    Handles three cases:
+    - All cropped files processed  → mark step complete
+    - Some files processed         → keep step pending so the user can resume
+    - No files processed at all    → raise FileNotFoundError (step not started)
+    """
+    from hdsemg_pipe.actions.file_manager import get_channel_selection_status
 
-    channel_selection_files = global_state.channel_selection_files.copy()
-    if not channel_selection_files or len(channel_selection_files) == 0:
-        logger.warning(f"No channelselection files found in: {channel_selection_file_path}")
-        raise FileNotFoundError(f"No channelselection found in: {channel_selection_file_path}")
+    channel_sel_dir = os.path.join(folderpath, str(FolderNames.CHANNELSELECTION.value))
 
-    logger.debug(f"channelselection added to global state: {channel_selection_files}")
+    # Populate channel_selection_files with the kept MAT files
+    if os.path.isdir(channel_sel_dir):
+        for f in os.listdir(channel_sel_dir):
+            if f.endswith(".mat") and not os.path.isdir(os.path.join(channel_sel_dir, f)):
+                global_state.channel_selection_files.append(
+                    os.path.join(channel_sel_dir, f)
+                )
 
-    channel_selection_file_widget = global_state.get_widget("step5")
-    if channel_selection_file_widget:
-        channel_selection_file_widget.check()
-        channel_selection_file_widget.complete_step(processed_files=len(channel_selection_files))
+    if not global_state.channel_selection_files:
+        # Check whether there are any discarded files – if so the step was
+        # started but every file was discarded (partial or complete run).
+        discarded_dir = os.path.join(channel_sel_dir, "discarded")
+        n_discarded = 0
+        if os.path.isdir(discarded_dir):
+            n_discarded = sum(
+                1 for f in os.listdir(discarded_dir)
+                if not os.path.isdir(os.path.join(discarded_dir, f))
+            )
+        if n_discarded == 0:
+            logger.warning(f"No channel selection files found in: {channel_sel_dir}")
+            raise FileNotFoundError(f"No channel selection files found in: {channel_sel_dir}")
+
+    status = get_channel_selection_status(global_state.cropped_files, channel_sel_dir)
+    n_done = status["n_done"]
+    n_total = status["n_total"]
+
+    widget = global_state.get_widget("step7")
+    if not widget:
+        logger.warning("Channel selection widget not found in global state.")
+        raise ValueError("Channel selection widget not found in global state.")
+
+    widget.check()
+
+    if n_total > 0 and n_done >= n_total:
+        logger.info("Step 7 state reconstructed: Channel selection fully completed")
+        global_state.complete_widget("step7")
     else:
-        logger.warning("channelselection widget not found in global state.")
-        raise ValueError("channelselection widget not found in global state.")
+        # Partial – leave step pending so the user can resume
+        logger.info(
+            f"Step 7 state reconstructed: {n_done}/{n_total} files done – step pending (resume available)"
+        )
 
-    return channel_selection_file_path
+    return channel_sel_dir
 
 def _decomposition_results_init():
-    """Initialize Step 6: Decomposition Results monitoring and load mapping state."""
-    decomposition_widget = global_state.get_widget("step6")
+    """Initialize Step 8: Decomposition Results monitoring and load mapping state."""
+    decomposition_widget = global_state.get_widget("step8")
     if decomposition_widget:
         decomposition_widget.init_file_checking()
 
         # Check if mapping was completed (JSON file exists and files present)
         if decomposition_widget.decomp_mapping is not None and decomposition_widget.resultfiles:
-            logger.info("Step 6 state reconstructed: mapping loaded and files found")
-            decomposition_widget.complete_step()
+            logger.info("Step 8 state reconstructed: mapping loaded and files found")
+            global_state.complete_widget("step8")
     else:
         logger.warning("decomposition widget not found in global state.")
         raise ValueError("decomposition widget not found in global state.")
 
 def _multigrid_config():
-    """Reconstruct Step 7: Multi-Grid Configuration from JSON state."""
-    multigrid_widget = global_state.get_widget("step7")
+    """Reconstruct Step 10: Multi-Grid Configuration from JSON state."""
+    multigrid_widget = global_state.get_widget("step10")
     if multigrid_widget:
         multigrid_widget.init_file_checking()
 
-        # Check if step was completed (groupings JSON exists and MUEdit files present)
+        # Case 1: groupings JSON exists (empty or with groups) and all required MUEdit files exist
         if multigrid_widget.grid_groupings is not None and multigrid_widget.is_completed():
-            logger.info("Step 7 state reconstructed: groupings loaded and MUEdit files found")
-            multigrid_widget.complete_step()
+            if len(multigrid_widget.grid_groupings) > 0:
+                logger.info("Step 10 state reconstructed: groupings loaded and MUEdit files found")
+            else:
+                logger.info("Step 10 state reconstructed: no multi-grid groups (single grids only)")
+            global_state.complete_widget("step10")
+        # Case 2: No groupings JSON but MUEdit files exist (backwards compatibility)
+        elif multigrid_widget.grid_groupings == {} and multigrid_widget.is_completed():
+            logger.info("Step 10 state reconstructed: no groupings JSON but MUEdit files exist (backwards compat)")
+            multigrid_widget.save_groupings_to_json()
+            global_state.complete_widget("step10")
+        else:
+            logger.info("Step 10 not completed: no MUEdit files found or step not yet processed")
     else:
         logger.warning("Multi-grid configuration widget not found in global state.")
         raise ValueError("Multi-grid configuration widget not found in global state.")
 
+def _covisi_pre_filter():
+    """Reconstruct Step 9: CoVISI Pre-Filtering state."""
+    covisi_pre_filter_widget = global_state.get_widget("step9")
+    if covisi_pre_filter_widget:
+        covisi_pre_filter_widget.init_file_checking()
+
+        if covisi_pre_filter_widget.is_completed():
+            report_path = os.path.join(covisi_pre_filter_widget.expected_folder, "covisi_pre_filter_report.json")
+            filtering_skipped = False
+            if os.path.exists(report_path):
+                try:
+                    import json
+                    with open(report_path, 'r') as f:
+                        report = json.load(f)
+                        filtering_skipped = report.get("filtering_skipped", False)
+                except Exception as e:
+                    logger.warning(f"Could not read filtering_skipped status from report: {e}")
+
+            if filtering_skipped:
+                logger.info("Step 9 state reconstructed: CoVISI pre-filter was skipped")
+                global_state.skip_widget("step9")
+            else:
+                logger.info("Step 9 state reconstructed: CoVISI pre-filter was applied")
+                global_state.complete_widget("step9")
+
+    else:
+        logger.warning("CoVISI pre-filter widget not found in global state.")
+        raise ValueError("CoVISI pre-filter widget not found in global state.")
+
 def _muedit_cleaning():
-    """Reconstruct Step 8: MUEdit Cleaning state."""
-    muedit_cleaning_widget = global_state.get_widget("step8")
+    """Reconstruct Step 11: MUEdit Cleaning state."""
+    muedit_cleaning_widget = global_state.get_widget("step11")
     if muedit_cleaning_widget:
         muedit_cleaning_widget.init_file_checking()
 
-        # Check if edited files exist
         if muedit_cleaning_widget.is_completed():
-            logger.info("Step 8 state reconstructed: edited MUEdit files found")
-            muedit_cleaning_widget.complete_step()
+            logger.info("Step 11 state reconstructed: edited MUEdit files found")
+            global_state.complete_widget("step11")
     else:
         logger.warning("MUEdit cleaning widget not found in global state.")
         raise ValueError("MUEdit cleaning widget not found in global state.")
 
+def _covisi_post_validation():
+    """Reconstruct Step 12: CoVISI Post-Validation state."""
+    covisi_post_validation_widget = global_state.get_widget("step12")
+    if covisi_post_validation_widget:
+        covisi_post_validation_widget.init_file_checking()
+
+        if covisi_post_validation_widget.is_completed():
+            logger.info("Step 12 state reconstructed: CoVISI post-validation report found")
+            global_state.complete_widget("step12")
+    else:
+        logger.warning("CoVISI post-validation widget not found in global state.")
+        raise ValueError("CoVISI post-validation widget not found in global state.")
+
 def _final_results():
-    """Reconstruct Step 9: Final Results state."""
-    final_results_widget = global_state.get_widget("step9")
+    """Reconstruct Step 13: Final Results state."""
+    final_results_widget = global_state.get_widget("step13")
     if final_results_widget:
         final_results_widget.init_file_checking()
 
-        # Check if cleaned JSON files exist in decomposition_results folder
         if final_results_widget.is_completed():
-            logger.info("Step 9 state reconstructed: cleaned JSON files found in decomposition_results")
-            final_results_widget.complete_step()
+            logger.info("Step 13 state reconstructed: cleaned JSON files found in decomposition_results")
+            global_state.complete_widget("step13")
     else:
         logger.warning("Final results widget not found in global state.")
         raise ValueError("Final results widget not found in global state.")
 
+
+def _apply_process_log_overrides(folderpath: str) -> None:
+    """Override step statuses with the values recorded in the process log.
+
+    The process log (``hdsemg-pipe-process.log``) is written by
+    ``WizardStepWidget.complete_step()`` / ``skip_step()`` and is the
+    authoritative record of what the user actually did.  When the log exists,
+    it is used for ALL steps:
+
+    * Steps **in** the log → status from log (completed / skipped).
+    * Steps **absent** from the log → revert to pending.  The file-based
+      reconstruction may have incorrectly marked them as "skipped" (e.g. when
+      the user stopped partway through and the destination folder is empty).
+
+    For workfolders without a process log the function returns early and the
+    file-based reconstruction result is kept as-is (backwards compatibility).
+    """
+    log = read_process_log(folderpath)
+    steps = log.get("steps", {})
+
+    if not steps:
+        logger.info("Process log: no entries found — keeping file-based reconstruction results")
+        return
+
+    logger.info("Process log: applying overrides (%d recorded steps)", len(steps))
+
+    for step_num in range(1, 14):
+        step_key = f"step{step_num}"
+        if step_key not in global_state.widgets:
+            continue
+
+        step_data = steps.get(step_key)
+        log_status = step_data.get("status") if step_data else None
+
+        is_completed = global_state.is_widget_completed(step_key)
+        is_skipped = global_state.is_widget_skipped(step_key)
+
+        if log_status == "completed":
+            if not (is_completed and not is_skipped):
+                global_state.widgets[step_key]["completed_step"] = True
+                global_state.widgets[step_key]["skipped"] = False
+                logger.info("Process log override: %s → completed", step_key)
+
+        elif log_status == "skipped":
+            if not (is_completed and is_skipped):
+                global_state.widgets[step_key]["completed_step"] = True
+                global_state.widgets[step_key]["skipped"] = True
+                logger.info("Process log override: %s → skipped", step_key)
+
+        else:
+            # Step not recorded in log → was never done; revert to pending.
+            if is_completed:
+                global_state.widgets[step_key]["completed_step"] = False
+                global_state.widgets[step_key]["skipped"] = False
+                logger.info("Process log override: %s → pending (not in log)", step_key)
+
+    # Backwards compatibility for step9 (CoVISI pre-filter):
+    # The step may have been run before process-log support for this step was
+    # added, or the log entry was lost during a reconstruction cycle.  Use
+    # physical folder evidence as the authoritative signal in that case.
+    if "step9" in global_state.widgets and not steps.get("step9"):
+        covisi_folder = os.path.join(folderpath, FolderNames.DECOMPOSITION_COVISI_FILTERED.value)
+        if os.path.exists(covisi_folder) and any(
+            f.endswith('_covisi_filtered.json') for f in os.listdir(covisi_folder)
+        ):
+            global_state.widgets["step9"]["completed_step"] = True
+            global_state.widgets["step9"]["skipped"] = False
+            logger.info(
+                "Process log override: step9 → completed "
+                "(covisi_filtered folder evidence, backwards compat)"
+            )
 
 

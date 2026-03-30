@@ -33,19 +33,20 @@ class GlobalState:
         self.cropped_files = []
         self.channel_selection_files = []
         # Store widgets as a dictionary where each value is a dictionary
-        # with two keys: "widget" and "completed_step".
+        # with three keys: "widget", "completed_step", and "skipped".
         if not hasattr(self, "widgets"):
             self.widgets = {}
         for widget_data in self.widgets.values():
             widget_data["completed_step"] = False
+            widget_data["skipped"] = False
 
     def register_widget(self, widget, name=None):
-        """Register a widget globally with an auto-generated name and a completion flag."""
+        """Register a widget globally with an auto-generated name, completion flag, and skipped flag."""
         if name is None:
             name = f"step{self._widget_counter}"
             self._widget_counter += 1
 
-        self.widgets[name] = {"widget": widget, "completed_step": False}
+        self.widgets[name] = {"widget": widget, "completed_step": False, "skipped": False}
 
     def update_widget(self, name, widget):
         if name in self.widgets:
@@ -101,6 +102,27 @@ class GlobalState:
             return entry.get("completed_step", False)
         return False
 
+    def is_widget_skipped(self, name):
+        """Return True if the widget is registered and its skipped flag is True."""
+        entry = self.widgets.get(name)
+        if entry:
+            return entry.get("skipped", False)
+        return False
+
+    def skip_widget(self, name):
+        """
+        Mark a widget as both completed and skipped.
+        This is used when a step is completed but the user chose to skip its main functionality.
+        """
+        if name not in self.widgets:
+            logger.warning(f"Widget '{name}' not registered.")
+            return
+
+        # Mark as completed and skipped
+        self.widgets[name]["completed_step"] = True
+        self.widgets[name]["skipped"] = True
+        logger.info(f"Widget '{name}' marked as completed (skipped).")
+
     def get_associated_grids_path(self):
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
@@ -123,6 +145,24 @@ class GlobalState:
         if not self.workfolder:
             raise ValueError("Workfolder is not set.")
         path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_AUTO.value)
+        return os.path.normpath(path)
+
+    def get_decomposition_muedit_path(self):
+        if not self.workfolder:
+            raise ValueError("Workfolder is not set.")
+        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_MUEDIT.value)
+        return os.path.normpath(path)
+
+    def get_decomposition_covisi_filtered_path(self):
+        if not self.workfolder:
+            raise ValueError("Workfolder is not set.")
+        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_COVISI_FILTERED.value)
+        return os.path.normpath(path)
+
+    def get_decomposition_removed_duplicates_path(self):
+        if not self.workfolder:
+            raise ValueError("Workfolder is not set.")
+        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_REMOVED_DUPLICATES.value)
         return os.path.normpath(path)
 
     def get_decomposition_results_path(self):

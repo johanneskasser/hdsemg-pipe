@@ -9,6 +9,7 @@ from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.theme import Colors, Fonts, Spacing, BorderRadius
 from hdsemg_pipe.ui_elements.toast import toast_manager
+from hdsemg_pipe.actions.process_log import write_step_status
 
 
 class WizardStepWidget(QWidget):
@@ -195,9 +196,33 @@ class WizardStepWidget(QWidget):
 
     def complete_step(self):
         """Marks the step as completed."""
-        self.success(f"Step {self.step_index} completed successfully!")
+        # Show message only on first completion
+        if not self.step_completed:
+            self.success(f"Step {self.step_index} completed successfully!")
+
         self.step_completed = True
         global_state.complete_widget(f"step{self.step_index}")
+        write_step_status(f"step{self.step_index}", "completed")
+
+        # Always emit signal to trigger navigation (main.py checks if navigation is needed)
+        self.stepCompleted.emit(self.step_index)
+
+    def skip_step(self, message=None):
+        """Marks the step as completed but skipped.
+
+        Args:
+            message: Optional custom message to display
+        """
+        # Show message only on first completion
+        if not self.step_completed:
+            if message:
+                self.info(message)
+            else:
+                self.info(f"Step {self.step_index} completed (skipped).")
+
+        self.step_completed = True
+        global_state.skip_widget(f"step{self.step_index}")
+        write_step_status(f"step{self.step_index}", "skipped")
         self.stepCompleted.emit(self.step_index)
 
     def setActionButtonsEnabled(self, enabled, override=False):
