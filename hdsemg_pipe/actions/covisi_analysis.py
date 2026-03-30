@@ -481,11 +481,6 @@ def apply_covisi_filter_to_json(
 
     filtered_count = filtered_emgfile.get("NUMBER_OF_MUS", 0)
 
-    # Save filtered JSON
-    logger.info(f"Saving filtered JSON to: {output_path}")
-    emg.save_json_emgfile(filtered_emgfile, str(output_path), compresslevel=4)
-
-    # Build statistics
     removed_mask = report_df["status"] == "removed"
     stats = {
         "original_mu_count": original_count,
@@ -498,6 +493,21 @@ def apply_covisi_filter_to_json(
         ),
         "manual_overrides_applied": len(manual_overrides),
     }
+
+    # Do not save files with 0 MUs remaining — they are useless downstream
+    # and cause silent failures during MAT export and confuse file counts.
+    if filtered_count == 0:
+        logger.info(
+            f"All {original_count} MU(s) in {Path(json_path).name} exceeded the "
+            f"CoVISI threshold ({threshold}%). File excluded from output "
+            f"(not written to {Path(output_path).parent.name}/)."
+        )
+        stats["skipped_all_mus_removed"] = True
+        return stats
+
+    # Save filtered JSON
+    logger.info(f"Saving filtered JSON to: {output_path}")
+    emg.save_json_emgfile(filtered_emgfile, str(output_path), compresslevel=4)
 
     return stats
 
@@ -599,36 +609,62 @@ def compute_covisi_from_muedit_mat(
 
             distimeclean = edition["Distimeclean"]
 
-            # Handle different array structures
-            # MUedit stores as (ngrids x nMU) cell array of references
-            if distimeclean.ndim == 2:
-                n_grids, n_mus = distimeclean.shape
-                for mu_idx in range(n_mus):
-                    # Get discharge times for this MU (from first grid)
-                    ref = distimeclean[0, mu_idx]
-                    if isinstance(ref, h5py.Reference):
-                        data = np.array(f[ref]).flatten()
-                    else:
-                        data = np.array(ref).flatten()
+            # Distimeclean has a nested structure:
+            # - It's an object array (typically 1x1) containing a reference
+            # - That reference points to the actual cell array of discharge times
+            top = distimeclean[()]
+            inner_ref = top.flat[0]  # Extract the single reference
 
+            # Check if inner_ref is a valid reference
+            if not isinstance(inner_ref, (h5py.Reference, h5py.h5r.Reference)):
+                raise ValueError(
+                    f"Expected reference in Distimeclean, got {type(inner_ref)}"
+                )
+
+            # Dereference to get the actual cell array dataset
+            inner_cell_ds = f[inner_ref]
+
+            # Read the cell array using the helper function pattern from decomposition_export
+            def _is_valid_ref(ref):
+                """Check if an HDF5 reference is valid (non-null)."""
+                return isinstance(ref, (h5py.Reference, h5py.h5r.Reference)) and bool(ref)
+
+            def _cell_row_read(f_obj, ds):
+                """Read a MATLAB 1xN cell array dataset into a Python list of arrays."""
+                obj = ds[()]
+                if obj.ndim != 2:
+                    raise ValueError(f"Expected 2-D cell array, got {obj.ndim}D.")
+
+                # Normalize to a row
+                if obj.shape[0] == 1:
+                    refs = [obj[0, j] for j in range(obj.shape[1])]
+                elif obj.shape[1] == 1:
+                    refs = [obj[i, 0] for i in range(obj.shape[0])]
+                else:
+                    refs = [obj[0, j] for j in range(obj.shape[1])]
+
+                out = []
+                for r in refs:
+                    if _is_valid_ref(r):
+                        arr = np.array(f_obj[r])
+                        out.append(arr)
+                    else:
+                        out.append(None)
+                return out
+
+            # Read discharge times from the nested cell array
+            disc_nested = _cell_row_read(f, inner_cell_ds)
+
+            # Convert to 0-based indexing and store
+            for mu_timing in disc_nested:
+                if mu_timing is not None:
+                    data = np.squeeze(np.asarray(mu_timing, dtype='float64'))
                     # Convert from 1-based MATLAB to 0-based Python
-                    if len(data) > 0:
+                    if data.size > 0:
                         data = data - 1
-
                     discharge_times.append(data)
-            else:
-                # Single grid case
-                for mu_idx in range(len(distimeclean)):
-                    ref = distimeclean[mu_idx]
-                    if isinstance(ref, h5py.Reference):
-                        data = np.array(f[ref]).flatten()
-                    else:
-                        data = np.array(ref).flatten()
-
-                    if len(data) > 0:
-                        data = data - 1
-
-                    discharge_times.append(data)
+                else:
+                    discharge_times.append(np.array([]))
 
     except Exception as e:
         logger.error(f"Failed to read discharge times from {mat_path}: {e}")

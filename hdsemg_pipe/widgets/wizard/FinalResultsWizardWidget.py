@@ -12,8 +12,11 @@ from PyQt5.QtWidgets import QPushButton, QLabel, QVBoxLayout, QFrame, QProgressB
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
-from hdsemg_pipe.actions.decomposition_export import apply_muedit_edits_to_json
+from hdsemg_pipe.actions.decomposition_export import (
+    apply_muedit_edits_to_json
+)
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius, Fonts
+import json
 
 
 class JSONConversionWorker(QThread):
@@ -23,11 +26,35 @@ class JSONConversionWorker(QThread):
     finished = pyqtSignal(int, int, list)  # success_count, error_count, error_messages
     error = pyqtSignal(str)
 
-    def __init__(self, edited_files, decomp_folder, results_folder, parent=None):
+    def __init__(self, edited_files, decomp_folder, json_source_folder, results_folder,
+                 multigrid_groupings=None, parent=None):
         super().__init__(parent)
         self.edited_files = edited_files
-        self.decomp_folder = decomp_folder
+        self.decomp_folder = decomp_folder  # decomposition_auto/ (for state files)
+        self.json_source_folder = json_source_folder  # where source JSONs live (covisi_filtered or auto)
         self.results_folder = results_folder
+        self.multigrid_groupings = multigrid_groupings or {}  # group_name -> [json_filenames]
+
+    def _resolve_json_path(self, json_filename):
+        """Resolve the actual path for a JSON filename, checking both covisi_filtered and auto folders."""
+        stem = Path(json_filename).stem
+
+        # Try covisi_filtered version first
+        covisi_path = os.path.join(self.json_source_folder, f"{stem}_covisi_filtered.json")
+        if os.path.exists(covisi_path):
+            return covisi_path
+
+        # Try with .json extension
+        json_path = os.path.join(self.json_source_folder, json_filename)
+        if os.path.exists(json_path):
+            return json_path
+
+        # Try in decomp_auto folder as fallback
+        auto_path = os.path.join(self.decomp_folder, json_filename)
+        if os.path.exists(auto_path):
+            return auto_path
+
+        return None
 
     def run(self):
         """Run the conversion process."""
@@ -43,20 +70,31 @@ class JSONConversionWorker(QThread):
                     filename = os.path.basename(edited_mat)
                     self.progress.emit(idx, total, f"Converting {filename}...")
 
+                    # Single-grid file conversion only (multi-grid support removed)
                     # Find original JSON file
-                    # edited_mat is like: "file_muedit.mat_edited.mat" or "Group_multigrid_muedit.mat_edited.mat"
+                    # edited_mat is like: "file_muedit.mat_edited.mat" or "file_covisi_filtered_muedit.mat_edited.mat"
                     # Remove the "_edited.mat" suffix to get the original MAT filename
                     base_name = filename.replace('.mat_edited.mat', '')
 
-                    # Then remove the MUEdit suffixes to get the base name for JSON lookup
-                    base_name = base_name.replace('_muedit', '').replace('_multigrid_muedit', '')
+                    # Then remove the MUEdit suffix to get the base name for JSON lookup
+                    base_name = base_name.replace('_muedit', '')
 
-                    # Try to find corresponding JSON
-                    json_candidates = [
-                        os.path.join(self.decomp_folder, f"{base_name}.json"),
-                        # For multi-grid, we need to find the first JSON file that was in the group
-                        # For now, use a simple heuristic: look for any JSON with similar name
-                    ]
+                    # Try to find corresponding JSON in source folder
+                    # If CoVISI was applied: look for *_covisi_filtered.json
+                    # If duplicates removed: look for *_duplicates_removed.json
+                    # Otherwise: look for *.json
+                    json_candidates = []
+
+                    # Check for duplicate removal suffix
+                    if '_duplicates_removed' in base_name:
+                        json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
+                    # Check if this file came from CoVISI filtering (has _covisi_filtered in name)
+                    elif '_covisi_filtered' in base_name:
+                        # Look for the covisi_filtered JSON
+                        json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
+                    else:
+                        # Look for the original JSON
+                        json_candidates.append(os.path.join(self.json_source_folder, f"{base_name}.json"))
 
                     original_json = None
                     for candidate in json_candidates:
@@ -64,21 +102,16 @@ class JSONConversionWorker(QThread):
                             original_json = candidate
                             break
 
-                    # If not found, try finding any JSON in folder (fallback for multi-grid)
                     if not original_json:
-                        json_files = [f for f in os.listdir(self.decomp_folder) if f.endswith('.json')]
-                        if json_files:
-                            # Use first JSON as reference (multi-grid case)
-                            original_json = os.path.join(self.decomp_folder, json_files[0])
-                            logger.info(f"Using {json_files[0]} as reference for multi-grid file")
-
-                    if not original_json:
-                        raise FileNotFoundError(f"No original JSON found for {filename}")
+                        raise FileNotFoundError(
+                            f"No original JSON found for {filename}. "
+                            f"Searched in: {self.json_source_folder}"
+                        )
 
                     # Output path in results folder
                     output_json = os.path.join(self.results_folder, f"{base_name}_cleaned.json")
 
-                    # Convert
+                    # Convert using single-grid logic
                     apply_muedit_edits_to_json(original_json, edited_mat, output_json)
 
                     success_count += 1
@@ -96,6 +129,29 @@ class JSONConversionWorker(QThread):
             self.error.emit(f"Conversion worker failed: {str(e)}")
 
 
+class NotebookExportWorker(QThread):
+    """Worker thread for exporting analysis notebook."""
+
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, workfolder, parent=None):
+        super().__init__(parent)
+        self.workfolder = workfolder
+
+    def run(self):
+        """Run the notebook export process."""
+        from hdsemg_pipe.actions.notebook_export import export_analysis_notebook
+        try:
+            result = export_analysis_notebook(self.workfolder)
+            if 'error' in result:
+                self.error.emit(result['error'])
+            else:
+                self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(f"Notebook export failed: {str(e)}")
+
+
 class FinalResultsWizardWidget(WizardStepWidget):
     """
     Step 12: Convert edited files and show final results.
@@ -109,17 +165,20 @@ class FinalResultsWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Hardcoded step configuration
-        step_index = 12
+        step_index = 13
         step_name = "Final Results"
         description = "Convert edited MUEdit files back to JSON format and view cleaned results in openhdemg."
 
         super().__init__(step_index, step_name, description, parent)
 
-        self.decomp_folder = None
+        self.decomp_folder = None  # decomposition_auto/ (for state files)
+        self.json_source_folder = None  # where source JSONs live (covisi_filtered or auto)
         self.results_folder = None
         self.edited_files = []
         self.exported_files = []
         self.conversion_worker = None
+        self.notebook_worker = None
+        self.multigrid_groupings = {}  # group_name -> [json_filenames]
 
         # Create status UI
         self.create_status_ui()
@@ -181,14 +240,25 @@ class FinalResultsWizardWidget(WizardStepWidget):
         self.btn_show_results.setEnabled(False)
         self.buttons.append(self.btn_show_results)
 
+        self.btn_export_notebook = QPushButton("Export Analysis Notebook")
+        self.btn_export_notebook.setStyleSheet(Styles.button_secondary())
+        self.btn_export_notebook.setToolTip("Export Jupyter notebook for custom analysis")
+        self.btn_export_notebook.clicked.connect(self.start_notebook_export)
+        self.btn_export_notebook.setEnabled(False)
+        self.buttons.append(self.btn_export_notebook)
+
     def check(self):
         """Check if this step can be activated."""
         workfolder = global_state.workfolder
         if not workfolder:
             return False
 
-        self.decomp_folder = global_state.get_decomposition_path()
+        self.decomp_folder = global_state.get_decomposition_path()  # decomposition_auto/
+        self._update_json_source_folder()
         self.results_folder = global_state.get_decomposition_results_path()
+
+        # Load multi-grid groupings (needed for converting multi-grid files back to JSON)
+        self._load_multigrid_groupings()
 
         # Create results folder if needed
         if not os.path.exists(self.results_folder):
@@ -204,19 +274,67 @@ class FinalResultsWizardWidget(WizardStepWidget):
 
         return True
 
+    def _update_json_source_folder(self):
+        """Determine whether to read JSONs from covisi_filtered or decomposition_auto."""
+        covisi_folder = global_state.get_decomposition_covisi_filtered_path()
+
+        # Primary check: step state
+        covisi_applied_by_state = (
+            global_state.is_widget_completed("step9")
+            and not global_state.is_widget_skipped("step9")
+        )
+
+        # Fallback check: physical folder evidence.
+        # Handles backwards-compat workfolders where step9 wasn't recorded in the
+        # process log (e.g. CoVISI was run before process-log support or the log
+        # entry was lost during a reconstruction cycle).
+        covisi_applied_by_folder = os.path.exists(covisi_folder) and any(
+            f.endswith('_covisi_filtered.json') for f in os.listdir(covisi_folder)
+        )
+
+        if (covisi_applied_by_state or covisi_applied_by_folder) and os.path.exists(covisi_folder):
+            self.json_source_folder = covisi_folder
+        else:
+            self.json_source_folder = self.decomp_folder
+
+    def _load_multigrid_groupings(self):
+        """Load multi-grid groupings from JSON file."""
+        groupings_file = os.path.join(self.decomp_folder, "multigrid_groupings.json")
+
+        if not os.path.exists(groupings_file):
+            self.multigrid_groupings = {}
+            return
+
+        try:
+            with open(groupings_file, 'r') as f:
+                self.multigrid_groupings = json.load(f)
+            logger.info(f"Loaded {len(self.multigrid_groupings)} multi-grid group(s) from state file")
+        except Exception as e:
+            logger.warning(f"Could not load multi-grid groupings: {e}")
+            self.multigrid_groupings = {}
+
     def scan_files(self):
         """Scan for edited MUEdit files and exported JSON files."""
         if not os.path.exists(self.decomp_folder):
             return
 
-        # Find edited MUEdit files
+        # Find edited MUEdit files from both decomposition_auto and decomposition_muedit
         # MUEdit creates files by appending "_edited.mat" to the entire filename
         # e.g., "file_muedit.mat" -> "file_muedit.mat_edited.mat"
-        self.edited_files = []
-        for file in os.listdir(self.decomp_folder):
-            if file.endswith('.mat_edited.mat'):
-                full_path = os.path.join(self.decomp_folder, file)
-                self.edited_files.append(full_path)
+        edited_from_decomp = [
+            os.path.join(self.decomp_folder, file)
+            for file in os.listdir(self.decomp_folder)
+            if file.endswith('.mat_edited.mat')
+        ] if os.path.exists(self.decomp_folder) else []
+
+        muedit_folder = global_state.get_decomposition_muedit_path()
+        edited_from_multigrid = [
+            os.path.join(muedit_folder, file)
+            for file in os.listdir(muedit_folder)
+            if file.endswith('.mat_edited.mat')
+        ] if os.path.exists(muedit_folder) else []
+
+        self.edited_files = edited_from_decomp + edited_from_multigrid
 
         # Find exported JSON files in results folder
         self.exported_files = []
@@ -237,6 +355,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
 
         if self.exported_files:
             self.btn_show_results.setEnabled(True)
+            self.btn_export_notebook.setEnabled(True)
 
     def start_conversion(self):
         """Start the conversion process."""
@@ -257,7 +376,9 @@ class FinalResultsWizardWidget(WizardStepWidget):
         self.conversion_worker = JSONConversionWorker(
             self.edited_files,
             self.decomp_folder,
-            self.results_folder
+            self.json_source_folder,
+            self.results_folder,
+            multigrid_groupings=self.multigrid_groupings
         )
         self.conversion_worker.progress.connect(self.on_conversion_progress)
         self.conversion_worker.finished.connect(self.on_conversion_finished)
@@ -307,7 +428,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
             return
 
         try:
-            import openhdemg.gui as gui
+            import openhdemg.gui.openhdemg_gui as gui
 
             logger.info(f"Opening openhdemg GUI with results from: {self.results_folder}")
 
@@ -315,7 +436,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
             first_json = self.exported_files[0]
 
             # Launch openhdemg GUI
-            gui.openhdemg_gui(str(first_json))
+            gui.run_main()
 
             self.success("openhdemg GUI opened successfully!")
 
@@ -328,6 +449,58 @@ class FinalResultsWizardWidget(WizardStepWidget):
         except Exception as e:
             self.error(f"Failed to launch openhdemg GUI: {str(e)}\n\nResults are saved in: {self.results_folder}")
 
+    def start_notebook_export(self):
+        """Start notebook export in background thread."""
+        try:
+            import nbformat
+        except ImportError:
+            self.error(
+                "Jupyter notebook export requires 'nbformat' library.\n\n"
+                "Install with: pip install nbformat"
+            )
+            return
+
+        if not self.exported_files:
+            self.warn("No cleaned JSON files available. Please convert files first.")
+            return
+
+        # Disable button during export
+        self.btn_export_notebook.setEnabled(False)
+        self.status_label.setText("Generating analysis notebook...")
+
+        # Start worker
+        self.notebook_worker = NotebookExportWorker(global_state.workfolder)
+        self.notebook_worker.finished.connect(self.on_notebook_export_finished)
+        self.notebook_worker.error.connect(self.on_notebook_export_error)
+        self.notebook_worker.start()
+
+        logger.info("Starting notebook export...")
+
+    def on_notebook_export_finished(self, result):
+        """Handle notebook export completion."""
+        self.btn_export_notebook.setEnabled(True)
+        self.status_label.setText("")
+
+        helper_path = result.get('helper_path', '')
+        notebook_path = result.get('notebook_path', '')
+
+        self.success(
+            f"Analysis notebook exported successfully!\n\n"
+            f"Files created:\n"
+            f"  - {Path(helper_path).name}\n"
+            f"  - {Path(notebook_path).name}\n\n"
+            f"Open the notebook in Jupyter to begin analysis."
+        )
+
+        logger.info(f"Notebook exported: {notebook_path}")
+
+    def on_notebook_export_error(self, error_msg):
+        """Handle notebook export error."""
+        self.btn_export_notebook.setEnabled(True)
+        self.status_label.setText("")
+        self.error(f"Notebook export failed:\n{error_msg}")
+        logger.error(f"Notebook export error: {error_msg}")
+
     def is_completed(self):
         """Check if this step is completed."""
         # Step is completed when JSON files exist in results folder
@@ -336,6 +509,8 @@ class FinalResultsWizardWidget(WizardStepWidget):
     def init_file_checking(self):
         """Initialize file checking for state reconstruction."""
         self.decomp_folder = global_state.get_decomposition_path()
+        self._update_json_source_folder()
+        self._load_multigrid_groupings()
         self.results_folder = global_state.get_decomposition_results_path()
 
         # Create results folder if needed
@@ -345,4 +520,4 @@ class FinalResultsWizardWidget(WizardStepWidget):
 
         # Scan for files
         self.scan_files()
-        logger.info(f"File checking initialized for folders: {self.decomp_folder}, {self.results_folder}")
+        logger.info(f"File checking initialized for folders: {self.json_source_folder}, {self.results_folder}")

@@ -9,7 +9,7 @@ import subprocess
 from PyQt5.QtCore import QFileSystemWatcher, QTimer, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QFrame, QScrollArea,
-    QWidget, QProgressBar, QCheckBox
+    QWidget, QProgressBar
 )
 
 from hdsemg_pipe._log.log_config import logger
@@ -26,36 +26,28 @@ class MUFileScanWorker(QThread):
 
     scan_complete = pyqtSignal(list, dict)  # (valid_files, mu_check_cache)
 
-    def __init__(self, folder_path, parent=None):
+    def __init__(self, muedit_folder_path, parent=None):
         super().__init__(parent)
-        self.folder_path = folder_path
+        self.muedit_folder_path = muedit_folder_path
 
     def run(self):
-        """Scan folder and check which files have motor units."""
+        """Scan decomposition_muedit/ and check which files have motor units."""
         import h5py
         import scipy.io as sio
 
         valid_files = []
         mu_check_cache = {}
 
-        if not os.path.exists(self.folder_path):
-            self.scan_complete.emit(valid_files, mu_check_cache)
-            return
-
-        all_filenames = os.listdir(self.folder_path)
-
-        for file in all_filenames:
-            if file.endswith('_muedit.mat') or file.endswith('_multigrid_muedit.mat'):
-                full_path = os.path.join(self.folder_path, file)
-
-                # Check if file has motor units
-                has_mus = self._check_motor_units(full_path, h5py, sio)
-                mu_check_cache[full_path] = has_mus
-
-                if has_mus:
-                    valid_files.append(full_path)
-                else:
-                    logger.info(f"Skipping {file} - no motor units found")
+        if self.muedit_folder_path and os.path.exists(self.muedit_folder_path):
+            for file in os.listdir(self.muedit_folder_path):
+                if file.endswith('_muedit.mat'):
+                    full_path = os.path.join(self.muedit_folder_path, file)
+                    has_mus = self._check_motor_units(full_path, h5py, sio)
+                    mu_check_cache[full_path] = has_mus
+                    if has_mus:
+                        valid_files.append(full_path)
+                    else:
+                        logger.info(f"Skipping {file} - no motor units found")
 
         self.scan_complete.emit(valid_files, mu_check_cache)
 
@@ -111,6 +103,55 @@ class MUFileScanWorker(QThread):
             return True
 
 
+class JSONExportWorker(QThread):
+    """Worker thread for exporting JSON files to MUEdit MAT format."""
+
+    progress = pyqtSignal(int, int, str)  # current, total, message
+    finished = pyqtSignal(int, list)  # success_count, output_paths
+    error = pyqtSignal(str)
+
+    def __init__(self, json_files, output_folder, parent=None):
+        super().__init__(parent)
+        self.json_files = json_files
+        self.output_folder = output_folder
+
+    def run(self):
+        """Export JSON files to MAT format."""
+        try:
+            from hdsemg_pipe.actions.decomposition_export import export_to_muedit_mat
+
+            os.makedirs(self.output_folder, exist_ok=True)
+
+            success_count = 0
+            output_paths = []
+
+            for idx, json_path in enumerate(self.json_files):
+                filename = os.path.basename(json_path)
+                self.progress.emit(idx, len(self.json_files), f"Exporting {filename}...")
+
+                try:
+                    # Export JSON file to MAT (function loads JSON internally)
+                    output_path = export_to_muedit_mat(
+                        json_load_filepath=json_path,
+                        ngrid=None,  # Single-grid export
+                        output_dir=self.output_folder
+                    )
+                    output_paths.append(output_path)
+                    success_count += 1
+                    logger.info(f"Exported {filename} to {output_path}")
+
+                except Exception as e:
+                    logger.error(f"Failed to export {filename}: {e}")
+                    logger.exception(f"Full error for {filename}")
+                    continue
+
+            self.finished.emit(success_count, output_paths)
+
+        except Exception as e:
+            logger.exception("Export worker failed")
+            self.error.emit(f"Export failed: {str(e)}")
+
+
 class MUEditCleaningWizardWidget(WizardStepWidget):
     """
     Step 10: Manual cleaning with MUEdit.
@@ -125,22 +166,30 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
     def __init__(self, parent=None):
         # Hardcoded step configuration
-        step_index = 10
+        step_index = 11
         step_name = "MUEdit Manual Cleaning"
         description = "Launch MUEdit for manual cleaning and quality control of motor unit decomposition results."
 
         super().__init__(step_index, step_name, description, parent)
 
         self.expected_folder = None
+        self.muedit_folder = None
         self.muedit_files = []
         self.edited_files = []
         self.skipped_files = {}  # Dict: file_path -> skip_reason
         self.last_file_count = 0
 
-        # Cache for motor unit checks (to avoid re-scanning files every time)
-        self.mu_check_cache = {}
+        # Cache for motor unit checks (to avoid re-scanning files every time).
+        # None = never populated; {} = populated but no files with MUs found.
+        self.mu_check_cache = None
         self.scan_worker = None
         self.is_scanning = False
+        self.indexing_needed = False  # Flag to track if manual indexing is needed
+
+        # Export-related
+        self.json_files = []
+        self.export_worker = None
+        self.export_completed = False
 
         # Loading animation timer
         self.loading_animation_timer = QTimer(self)
@@ -149,11 +198,11 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         # Initialize file system watcher
         self.watcher = QFileSystemWatcher(self)
-        self.watcher.directoryChanged.connect(self.scan_muedit_files)
+        self.watcher.directoryChanged.connect(lambda: self.scan_muedit_files(skip_mu_check=self.indexing_needed))
 
         # Add polling timer for reliable file detection (QFileSystemWatcher can miss events on Windows)
         self.poll_timer = QTimer(self)
-        self.poll_timer.timeout.connect(self.scan_muedit_files)
+        self.poll_timer.timeout.connect(lambda: self.scan_muedit_files(skip_mu_check=self.indexing_needed))
         self.poll_timer.setInterval(2000)  # Check every 2 seconds
 
         # Create status UI
@@ -170,6 +219,17 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         status_layout.setSpacing(Spacing.SM)
         status_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Button to manually trigger motor unit indexing (hidden by default)
+        self.btn_index_motor_units = QPushButton("⚡ Index Motor Units")
+        self.btn_index_motor_units.setStyleSheet(Styles.button_secondary())
+        self.btn_index_motor_units.setToolTip(
+            "Scan MUEdit files and check which ones contain motor units.\n"
+            "This helps identify files that can be skipped."
+        )
+        self.btn_index_motor_units.clicked.connect(self._trigger_manual_indexing)
+        self.btn_index_motor_units.setVisible(False)
+        status_layout.addWidget(self.btn_index_motor_units)
+
         # Loading indicator (hidden by default)
         self.loading_label = QLabel("Scanning files and checking for motor units...")
         self.loading_label.setStyleSheet(f"""
@@ -185,13 +245,6 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         """)
         self.loading_label.setVisible(False)
         status_layout.addWidget(self.loading_label)
-
-        # Checkbox to skip original muedit files when covisi filtered versions exist
-        self.chk_skip_originals = QCheckBox("Nur CoVISI-gefilterte Dateien verwenden (Originale auslassen)")
-        self.chk_skip_originals.setStyleSheet(f"font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;")
-        self.chk_skip_originals.setChecked(False)
-        self.chk_skip_originals.toggled.connect(self.scan_muedit_files)
-        status_layout.addWidget(self.chk_skip_originals)
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -247,22 +300,50 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         if not workfolder:
             return False
 
-        self.expected_folder = global_state.get_decomposition_path()
+        # Priority order for source folder:
+        # 1. decomposition_removed_duplicates/ (if step 10 completed and not skipped)
+        # 2. decomposition_covisi_filtered/ (if step 9 completed and not skipped)
+        # 3. decomposition_auto/ (fallback)
+        removed_dups_folder = global_state.get_decomposition_removed_duplicates_path()
+        covisi_folder = global_state.get_decomposition_covisi_filtered_path()
+        auto_folder = global_state.get_decomposition_path()
+
+        # Check step 10 (Remove Duplicates)
+        if (global_state.is_widget_completed("step10") and
+            not global_state.is_widget_skipped("step10") and
+            removed_dups_folder and os.path.exists(removed_dups_folder)):
+            self.expected_folder = removed_dups_folder
+            logger.info("Using duplicate-removed files for MUEdit export")
+        # Check step 9 (CoVISI)
+        elif (global_state.is_widget_completed("step9") and
+              not global_state.is_widget_skipped("step9") and
+              covisi_folder and os.path.exists(covisi_folder)):
+            self.expected_folder = covisi_folder
+            logger.info("Using CoVISI-filtered files for MUEdit export")
+        # Fallback
+        else:
+            self.expected_folder = auto_folder
+            logger.info("Using decomposition_auto files for MUEdit export")
+
+        self.muedit_folder = global_state.get_decomposition_muedit_path()
 
         # Load skipped files from disk
         self.skipped_files = self._load_skipped_files()
 
-        # Add watcher
-        if os.path.exists(self.expected_folder):
-            if self.expected_folder not in self.watcher.directories():
-                self.watcher.addPath(self.expected_folder)
+        # Add watcher for multigrid folder (if it exists)
+        if os.path.exists(self.muedit_folder):
+            if self.muedit_folder not in self.watcher.directories():
+                self.watcher.addPath(self.muedit_folder)
 
-            # Start polling timer for reliable file detection
+        # Start polling timer for reliable file detection
+        if os.path.exists(self.muedit_folder):
             if not self.poll_timer.isActive():
                 self.poll_timer.start()
                 logger.info("Started MUEdit file polling timer (2s interval)")
 
-        # Always scan files to show status, even if step is not yet activated
+        # Always scan files to show status
+        # NOTE: MAT files should already exist from Step 10 (Remove Duplicates)
+        # This step no longer auto-exports - that's now done in Step 10
         self.scan_muedit_files()
 
         # Check if previous step is completed
@@ -270,6 +351,99 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             return False
 
         return True
+
+    def scan_json_files(self):
+        """Scan for JSON files in expected folder that need to be exported."""
+        if not self.expected_folder or not os.path.exists(self.expected_folder):
+            self.json_files = []
+            return
+
+        # State files to exclude
+        state_files = {
+            'decomposition_mapping.json',
+            'multigrid_groupings.json',
+            'covisi_pre_filter_report.json',
+            'duplicate_detection_params.json',
+            'duplicate_detection_report.json',
+            '.muedit_skipped_files.json',
+            '.skip_marker.json'
+        }
+
+        # Find all JSON files
+        self.json_files = []
+        all_files = os.listdir(self.expected_folder)
+        logger.debug(f"All files in {self.expected_folder}: {all_files}")
+
+        for filename in all_files:
+            if filename.endswith('.json') and filename not in state_files:
+                if not filename.startswith('algorithm_params') and not filename.startswith('.'):
+                    json_path = os.path.join(self.expected_folder, filename)
+                    self.json_files.append(json_path)
+                    logger.debug(f"  Including: {filename}")
+                else:
+                    logger.debug(f"  Skipping (algorithm_params or hidden): {filename}")
+            elif filename.endswith('.json'):
+                logger.debug(f"  Skipping (state file): {filename}")
+
+        logger.info(f"Found {len(self.json_files)} JSON files to export from {self.expected_folder}")
+        if self.json_files:
+            logger.info(f"Files to export: {[os.path.basename(f) for f in self.json_files]}")
+
+    def auto_export_json_files(self):
+        """Automatically export JSON files to MAT format."""
+        if not self.json_files:
+            return
+
+        logger.info(f"Starting auto-export of {len(self.json_files)} JSON files")
+
+        # Show progress
+        self.loading_label.setText(f"Exporting {len(self.json_files)} files to MUEdit format...")
+        self.loading_label.setVisible(True)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+
+        # Start export worker
+        self.export_worker = JSONExportWorker(
+            self.json_files,
+            self.muedit_folder
+        )
+        self.export_worker.progress.connect(self.on_export_progress)
+        self.export_worker.finished.connect(self.on_export_finished)
+        self.export_worker.error.connect(self.on_export_error)
+        self.export_worker.start()
+
+    def on_export_progress(self, current, total, message):
+        """Handle export progress updates."""
+        if total > 0:
+            progress = int((current / total) * 100)
+            self.progress_bar.setValue(progress)
+        self.loading_label.setText(message)
+
+    def on_export_finished(self, success_count, output_paths):
+        """Handle export completion."""
+        self.export_completed = True
+        self.export_worker = None
+
+        self.loading_label.setVisible(False)
+        self.progress_bar.setVisible(False)
+
+        logger.info(f"Export completed: {success_count}/{len(self.json_files)} files exported")
+
+        # Refresh MAT file list
+        self.scan_muedit_files()
+
+        # Show success message
+        self.success(f"Exported {success_count} files to MUEdit format")
+
+    def on_export_error(self, error_msg):
+        """Handle export error."""
+        self.export_worker = None
+
+        self.loading_label.setVisible(False)
+        self.progress_bar.setVisible(False)
+
+        logger.error(f"Export failed: {error_msg}")
+        self.error(f"Export failed: {error_msg}")
 
     def _get_skipped_files_path(self):
         """Get the path to the skipped files JSON file."""
@@ -307,9 +481,54 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         except Exception as e:
             logger.error(f"Failed to save skipped files: {e}")
 
+    def _trigger_manual_indexing(self):
+        """Manually trigger motor unit indexing in background thread."""
+        logger.info("Manual motor unit indexing triggered by user")
+        self.indexing_needed = False
+        self.btn_index_motor_units.setVisible(False)
+        self._start_initial_scan()
+
+    def _scan_files_fast(self):
+        """Fast file scanning without motor unit checking (for state reconstruction).
+
+        This method quickly lists all _muedit.mat and _edited.mat files without
+        checking if they contain motor units. Used during automatic state reconstruction
+        to avoid blocking the UI.
+        """
+        all_muedit_files = []
+        edited_files = []
+
+        # Scan decomposition_muedit only — all MAT files live here in the new design
+        if self.muedit_folder and os.path.exists(self.muedit_folder):
+            for file in os.listdir(self.muedit_folder):
+                # Only scan single-grid files (exclude multi-grid files)
+                if file.endswith('_muedit.mat') and '_multigrid_' not in file:
+                    full_path = os.path.join(self.muedit_folder, file)
+                    all_muedit_files.append(full_path)
+                    edited_path = os.path.join(self.muedit_folder, file + '_edited.mat')
+                    if os.path.exists(edited_path):
+                        edited_files.append(edited_path)
+
+        self.muedit_files = all_muedit_files
+        self.edited_files = edited_files
+
+        # Show indexing button only when cache has never been populated (None = never scanned)
+        if len(self.muedit_files) > 0 and self.mu_check_cache is None and not self.is_scanning:
+            self.indexing_needed = True
+            self.btn_index_motor_units.setVisible(True)
+        else:
+            self.indexing_needed = False
+            self.btn_index_motor_units.setVisible(False)
+
+        # Update UI
+        self.update_progress_ui()
+
+        # Enable button if files exist
+        self.btn_launch_muedit.setEnabled(len(self.muedit_files) > 0)
+
     def _start_initial_scan(self):
         """Start initial scan in background thread."""
-        if self.is_scanning or not self.expected_folder:
+        if self.is_scanning or not self.muedit_folder:
             return
 
         self.is_scanning = True
@@ -317,8 +536,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.loading_label.setVisible(True)
         self.loading_animation_timer.start(500)  # Update every 500ms
 
-        # Create and start worker thread
-        self.scan_worker = MUFileScanWorker(self.expected_folder)
+        # Create and start worker thread (scan decomposition_muedit only)
+        self.scan_worker = MUFileScanWorker(self.muedit_folder)
         self.scan_worker.scan_complete.connect(self._on_scan_complete)
         self.scan_worker.start()
 
@@ -412,7 +631,10 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
     def _on_new_files_scan_complete(self, cache_update):
         """Handle completion of new files scan."""
         self.is_scanning = False
-        self.mu_check_cache.update(cache_update)
+        if self.mu_check_cache is None:
+            self.mu_check_cache = cache_update
+        else:
+            self.mu_check_cache.update(cache_update)
         logger.info(f"New files scan complete, cache updated with {len(cache_update)} entries")
 
         # Trigger another scan to update UI
@@ -425,18 +647,32 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.loading_label.setVisible(False)
         self.mu_check_cache = mu_check_cache
 
+        # Hide indexing button now that indexing is complete
+        self.indexing_needed = False
+        self.btn_index_motor_units.setVisible(False)
+
         logger.info(f"Scan complete: {len(valid_files)} files with motor units found")
 
-        # Now do the normal scan
+        # Now do the normal scan (with cache populated, this will be fast)
         self.scan_muedit_files()
 
-    def scan_muedit_files(self):
-        """Scan for MUEdit files and track progress."""
-        if not os.path.exists(self.expected_folder):
+    def scan_muedit_files(self, skip_mu_check=False):
+        """Scan decomposition_muedit/ for MUEdit files and track progress.
+
+        Args:
+            skip_mu_check: If True, skip motor unit checking (fast path for state reconstruction)
+        """
+        if not self.muedit_folder or not os.path.exists(self.muedit_folder):
             return
 
-        # If cache is empty and we're not already scanning, start initial scan
-        if not self.mu_check_cache and not self.is_scanning:
+        # Fast path: Skip motor unit checking entirely (for state reconstruction)
+        if skip_mu_check:
+            self._scan_files_fast()
+            return
+
+        # If cache has never been populated and we're not already scanning, start initial scan.
+        # None = never scanned; {} = scanned but no MU files found (don't re-scan).
+        if self.mu_check_cache is None and not self.is_scanning:
             self._start_initial_scan()
             return
 
@@ -444,22 +680,22 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         if self.is_scanning:
             return
 
-        # Find all _muedit.mat files
+        # Scan decomposition_muedit only — all MAT files live here in the new design
         all_muedit_files = []
         edited_files = []
         new_files_found = []
 
-        all_filenames = os.listdir(self.expected_folder)
+        if self.muedit_folder not in self.watcher.directories():
+            self.watcher.addPath(self.muedit_folder)
 
-        for file in all_filenames:
-            if file.endswith('_muedit.mat') or file.endswith('_multigrid_muedit.mat'):
-                full_path = os.path.join(self.expected_folder, file)
+        for file in os.listdir(self.muedit_folder):
+            # Only scan single-grid files (exclude multi-grid files)
+            if file.endswith('_muedit.mat') and '_multigrid_' not in file:
+                full_path = os.path.join(self.muedit_folder, file)
 
-                # Check if file is in cache
                 if full_path not in self.mu_check_cache:
-                    # New file found - mark for scanning but include it for now
                     new_files_found.append(full_path)
-                    has_mus = True  # Assume True for new files until scanned
+                    has_mus = True
                 else:
                     has_mus = self.mu_check_cache[full_path]
 
@@ -467,11 +703,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                     continue
 
                 all_muedit_files.append(full_path)
-
-                # Check if edited version exists
-                # MUEdit creates files by appending "_edited.mat" to the entire filename
-                # e.g., "file_muedit.mat" -> "file_muedit.mat_edited.mat"
-                edited_path = os.path.join(self.expected_folder, file + '_edited.mat')
+                edited_path = os.path.join(self.muedit_folder, file + '_edited.mat')
                 if os.path.exists(edited_path):
                     edited_files.append(edited_path)
 
@@ -480,53 +712,20 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             logger.info(f"Found {len(new_files_found)} new files, starting background check")
             self._scan_new_files(new_files_found)
 
-        # Build set of originals that have a covisi filtered counterpart
-        # e.g. "base_covisi_filtered_muedit.mat" exists -> "base_muedit.mat" is the original to skip
-        covisi_filtered_names = set()
-        originals_with_covisi = set()
-        for f in all_muedit_files:
-            fname = os.path.basename(f)
-            if '_covisi_filtered_muedit.mat' in fname:
-                covisi_filtered_names.add(fname)
-                original_name = fname.replace('_covisi_filtered_muedit.mat', '_muedit.mat')
-                originals_with_covisi.add(original_name)
-
-        # Show/hide checkbox based on whether any covisi filtered muedit files exist
-        has_covisi = len(covisi_filtered_names) > 0
-        self.chk_skip_originals.setVisible(has_covisi)
-
-        # Filter out original muedit files when covisi filtered versions exist
-        if has_covisi and self.chk_skip_originals.isChecked():
-            muedit_files = [
-                f for f in all_muedit_files
-                if os.path.basename(f) not in originals_with_covisi
-            ]
-            # Also filter edited_files to only include those matching kept muedit_files
-            kept_basenames = {os.path.basename(f) for f in muedit_files}
-            edited_files = [
-                ef for ef in edited_files
-                if any(os.path.basename(ef).startswith(kb.replace('.mat', '')) for kb in kept_basenames)
-            ]
-        else:
-            muedit_files = all_muedit_files
-
         # Check if file count changed (for logging)
-        file_count = len(muedit_files) + len(edited_files)
-        file_count_changed = file_count != self.last_file_count
+        file_count = len(all_muedit_files) + len(edited_files)
         self.last_file_count = file_count
 
-        self.muedit_files = muedit_files
+        self.muedit_files = all_muedit_files
         self.edited_files = edited_files
 
         # Update UI
         self.update_progress_ui()
 
         # Enable button if files exist
-        self.btn_launch_muedit.setEnabled(len(muedit_files) > 0)
+        self.btn_launch_muedit.setEnabled(len(self.muedit_files) > 0)
 
-        # Only log when file count changes to avoid spam
-        if file_count_changed:
-            logger.info(f"MUEdit files: {len(muedit_files)}, Edited files: {len(edited_files)}")
+        logger.debug(f"MUEdit files: {len(self.muedit_files)}, Edited files: {len(self.edited_files)}")
 
     def update_progress_ui(self):
         """Update progress UI with current status."""
@@ -573,8 +772,10 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         # Check if completed (all files either edited or skipped)
         if total > 0 and completed >= total:
-            logger.info(f"All MUEdit files processed! {edited} edited, {skipped} skipped")
-            self.complete_step()
+            # Only complete if not already completed (prevent multiple emissions)
+            if not self.step_completed:
+                logger.info(f"All MUEdit files processed! {edited} edited, {skipped} skipped")
+                self.complete_step()
 
     def launch_muedit(self):
         """Launch MUEdit for manual cleaning."""
@@ -731,6 +932,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             edited_files=self.edited_files,
             folder_path=self.expected_folder,
             skipped_files=self.skipped_files,
+            muedit_folder_path=self.muedit_folder,
             parent=self
         )
         dialog.exec_()
@@ -753,8 +955,32 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         return total > 0 and completed >= total
 
     def init_file_checking(self):
-        """Initialize file checking for state reconstruction."""
-        self.expected_folder = global_state.get_decomposition_path()
+        """Initialize file checking for state reconstruction.
+
+        Uses fast path (skips motor unit checking) during state reconstruction
+        to avoid blocking the UI. If motor unit indexing is needed, a button
+        will be shown for the user to trigger it manually.
+        """
+        # Priority order for source folder (same as check())
+        removed_dups_folder = global_state.get_decomposition_removed_duplicates_path()
+        covisi_folder = global_state.get_decomposition_covisi_filtered_path()
+        auto_folder = global_state.get_decomposition_path()
+
+        # Check step 10
+        if (global_state.is_widget_completed("step10") and
+            not global_state.is_widget_skipped("step10") and
+            removed_dups_folder and os.path.exists(removed_dups_folder)):
+            self.expected_folder = removed_dups_folder
+        # Check step 9
+        elif (global_state.is_widget_completed("step9") and
+              not global_state.is_widget_skipped("step9") and
+              covisi_folder and os.path.exists(covisi_folder)):
+            self.expected_folder = covisi_folder
+        # Fallback
+        else:
+            self.expected_folder = auto_folder
+
+        self.muedit_folder = global_state.get_decomposition_muedit_path()
 
         # Load skipped files from disk
         self.skipped_files = self._load_skipped_files()
@@ -763,13 +989,20 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             if self.expected_folder not in self.watcher.directories():
                 self.watcher.addPath(self.expected_folder)
 
-            # Start polling timer for reliable file detection
+        if os.path.exists(self.muedit_folder):
+            if self.muedit_folder not in self.watcher.directories():
+                self.watcher.addPath(self.muedit_folder)
+
+        # Start polling timer for reliable file detection
+        if os.path.exists(self.expected_folder) or os.path.exists(self.muedit_folder):
             if not self.poll_timer.isActive():
                 self.poll_timer.start()
 
-        # Scan for files
-        self.scan_muedit_files()
-        logger.info(f"File checking initialized for folder: {self.expected_folder}")
+        # Use fast scan during state reconstruction (skip motor unit checking)
+        # This is much faster and doesn't block the UI
+        self.scan_muedit_files(skip_mu_check=True)
+
+        logger.info(f"File checking initialized for folder (fast mode): {self.expected_folder}")
 
     def cleanup(self):
         """Clean up timers and threads when widget is destroyed."""

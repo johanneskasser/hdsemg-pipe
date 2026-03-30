@@ -35,6 +35,11 @@ There are three ways to install hdsemg-pipe:
    pip install hdsemg-pipe
    ```
 
+3. **Start hdsemg-pipe**
+```bash
+   python -m hdsemg_pipe.main
+   ```
+
 ### Method 2: Install via Conda with PyPI package
 
 This method uses Conda to manage the core dependencies while installing hdsemg-pipe from PyPI.
@@ -49,6 +54,11 @@ This method uses Conda to manage the core dependencies while installing hdsemg-p
    ```bash
    conda env create -f environment.yml
    conda activate hdsemg-pipe
+   ```
+
+3. **Start hdsemg-pipe**
+   ```bash
+   python -m hdsemg_pipe.main
    ```
 
 The environment will automatically install hdsemg-pipe and all its dependencies.
@@ -100,8 +110,6 @@ After installing the dependencies, you need to compile the Qt resources:
    ```bash
    pyrcc5 resources.qrc -o resources_rc.py
    ```
-
-## Start Application
 
 After installation, you can start the application with the following command:
 

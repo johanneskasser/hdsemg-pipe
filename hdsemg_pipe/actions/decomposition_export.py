@@ -11,6 +11,7 @@ from hdsemg_pipe._log.log_config import logger
 
 try:
     import openhdemg.library as emg
+    import openhdemg.library.tools as emg_tools
     OPENHDEMG_AVAILABLE = True
 except ImportError:
     OPENHDEMG_AVAILABLE = False
@@ -149,7 +150,7 @@ def extract_grid_metadata_from_extras(extras_field):
     return grid_metadata
 
 
-def export_to_muedit_mat(json_load_filepath, ngrid=None):
+def export_to_muedit_mat(json_load_filepath, ngrid=None, output_dir=None):
     """
     Export openhdemg JSON decomposition results to MUEdit MAT format.
 
@@ -214,9 +215,21 @@ def export_to_muedit_mat(json_load_filepath, ngrid=None):
             mat_save_filepath = str(json_path).replace(".json", "_muedit.mat")
             logger.info("Single-grid export")
 
+        # Redirect to output_dir if provided (keeps filename, changes parent directory)
+        if output_dir is not None:
+            import os as _os
+            mat_save_filepath = _os.path.join(str(output_dir), Path(mat_save_filepath).name)
+
         # Extract dimensions
         nMU = json_from_openhdemg["IPTS"].shape[1]
         nCH = json_from_openhdemg["RAW_SIGNAL"].shape[1]
+
+        if nMU == 0:
+            logger.info(
+                f"Skipping MAT export for {json_path.name}: file contains 0 motor units. "
+                "This is expected if all MUs were filtered (CoVISI, duplicates, etc.)."
+            )
+            return None
 
         logger.debug(f"Converting file with {nMU} motor units and {nCH} channels across {ngrid} grid(s)")
 
@@ -396,7 +409,11 @@ def get_muedit_filepath(json_filepath, multi_grid=False):
 
 def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
     """
-    Export multiple openhdemg JSON files as a single multi-grid MUEdit MAT file.
+    DEPRECATED: Export multiple openhdemg JSON files as a single multi-grid MUEdit MAT file.
+
+    **This function is deprecated and will be removed in a future version.**
+    Use the new duplicate detection step (Step 10) in hdsemg-pipe instead,
+    which detects duplicates within the Python pipeline before MUEdit export.
 
     This function combines decomposition results from multiple grids (recorded from
     the same muscle with common motor units) into a single MUEdit MAT file. This
@@ -423,6 +440,12 @@ def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
         ... )
         'Biceps_multigrid_muedit.mat'
     """
+    # Deprecation warning
+    logger.warning(
+        "DEPRECATED: export_multi_grid_to_muedit() is deprecated and will be removed in a future version. "
+        "Use the new duplicate detection step (Step 10) in hdsemg-pipe instead."
+    )
+
     if not OPENHDEMG_AVAILABLE:
         raise ImportError("openhdemg library is required for this function")
 
@@ -593,6 +616,23 @@ def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
         # Save to MAT file
         sio.savemat(str(mat_save_filepath), dict_for_muedit, do_compression=True, long_field_names=True)
 
+        # Save JSON mapping file to track which original JSONs this multi-grid was created from
+        # This file is used when converting the edited MAT file back to openhdemg JSON format
+        mapping_file = mat_save_filepath.with_suffix('.multigrid.json')
+        mapping_data = {
+            'group_name': group_name,
+            'safe_filename': safe_group_name,
+            'mat_file': mat_save_filepath.name,
+            'original_jsons': [p.name for p in json_paths],
+            'ngrid': ngrid,
+            'created': str(pd.Timestamp.now())
+        }
+
+        import json as json_lib
+        with open(mapping_file, 'w') as f:
+            json_lib.dump(mapping_data, f, indent=2)
+        logger.debug(f"Saved multi-grid mapping: {mapping_file.name}")
+
         logger.info(f"Successfully created multi-grid MUEdit file: {mat_save_filepath.name}")
         logger.info(f"  - {ngrid} grids combined")
         logger.info(f"  - {total_channels} total channels")
@@ -603,6 +643,416 @@ def export_multi_grid_to_muedit(json_filepaths, group_name, output_dir=None):
     except Exception as e:
         logger.error(f"Failed to create multi-grid MUEdit file for group '{group_name}': {str(e)}")
         raise ValueError(f"Multi-grid export failed: {str(e)}") from e
+
+
+def extract_file_basename_from_path(filename):
+    """
+    Extract the file basename (complete experiment identifier) from a filename.
+
+    This function removes grid dimensions, muscle names, and suffixes to extract
+    the core experimental identifier (proband, block, condition, trial).
+
+    Args:
+        filename (str): Filename to parse
+
+    Returns:
+        str: File basename
+
+    Example:
+        >>> extract_file_basename_from_path('1_20260202_112952_FT_Block1_Pyramid_1_10mm_4x8_2_VastusMedialisRight_covisi_filtered_cleaned.json')
+        '1_20260202_112952_FT_Block1_Pyramid_1'
+    """
+    import os
+    import re
+
+    # Remove directory path
+    name = os.path.basename(filename)
+
+    # Remove file extensions
+    for ext in ['.json', '.pkl', '.mat']:
+        if name.endswith(ext):
+            name = name[:-len(ext)]
+
+    # Remove known suffixes (most specific first)
+    suffixes = [
+        '_covisi_filtered_muedit.mat_edited',
+        '_covisi_filtered_muedit',
+        '_muedit.mat_edited',
+        '_covisi_filtered_cleaned',
+        '_covisi_filtered',
+        '_muedit',
+        '_edited',
+        '_cleaned',
+    ]
+    for suffix in suffixes:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+
+    # Extract and remove muscle name (last CamelCase part)
+    muscle_name = extract_muscle_name_from_path(filename)
+    if muscle_name and name.endswith(muscle_name):
+        name = name[:-len(muscle_name)]
+        if name.endswith('_'):
+            name = name[:-1]
+
+    # Remove grid dimension patterns with optional trailing number
+    # Pattern: Xmm_YxZ or Xmm_YxZ_N (e.g., 10mm_4x8, 8mm_5x13_2)
+    name = re.sub(r'_\d+mm_\d+x\d+(_\d+)?', '', name)
+
+    return name if name else filename
+
+
+def extract_muscle_name_from_path(filename):
+    """
+    Extract muscle name from filename using CamelCase pattern matching.
+
+    The muscle name is identified as the last CamelCase component in the filename
+    after removing known suffixes.
+
+    Args:
+        filename (str): Filename to parse
+
+    Returns:
+        str or None: Muscle name if found (e.g., 'VastusLateralisRight'), None otherwise
+
+    Example:
+        >>> extract_muscle_name_from_path('bl3_trap1_8mm_5x13_2_VastusLateralisRight.json')
+        'VastusLateralisRight'
+    """
+    import os
+
+    # Remove directory path
+    basename = os.path.basename(filename)
+
+    # Remove known suffixes in order of specificity
+    suffixes_to_remove = [
+        '_covisi_filtered_muedit.mat_edited.mat',
+        '_covisi_filtered_muedit.mat',
+        '_muedit.mat_edited.mat',
+        '_covisi_filtered.json',
+        '_muedit.mat',
+        '_edited.mat',
+        '.json',
+        '.pkl',
+        '.mat',
+    ]
+
+    for suffix in suffixes_to_remove:
+        if basename.endswith(suffix):
+            basename = basename[:-len(suffix)]
+            break
+
+    # Split by underscore and find CamelCase parts
+    parts = basename.split('_')
+
+    # Find the last CamelCase part (muscle name)
+    for part in reversed(parts):
+        if len(part) > 1 and any(c.isupper() for c in part) and any(c.islower() for c in part):
+            return part
+
+    return None
+
+
+def concatenate_emgfiles(emgfile_list):
+    """
+    Concatenate multiple openhdemg emgfiles into a single combined file.
+
+    This function merges motor units from multiple EMG files (e.g., different grids
+    recording the same muscle) into one unified emgfile. Useful for analyzing all
+    motor units together.
+
+    Args:
+        emgfile_list (list): List of openhdemg emgfile dictionaries to concatenate
+
+    Returns:
+        dict: Combined openhdemg emgfile with all motor units, or None if input is empty
+
+    Note:
+        - Uses the first file's RAW_SIGNAL, REF_SIGNAL, FSAMP, and EMG_LENGTH
+        - All files should have the same sampling rate and signal length
+        - Motor units are appended in the order of input files
+
+    Example:
+        >>> emgfile1 = emg.emg_from_json('grid1.json')
+        >>> emgfile2 = emg.emg_from_json('grid2.json')
+        >>> combined = concatenate_emgfiles([emgfile1, emgfile2])
+        >>> print(f"Total MUs: {combined['NUMBER_OF_MUS']}")
+    """
+    import copy
+    import numpy as np
+    import pandas as pd
+
+    if not emgfile_list:
+        return None
+
+    if len(emgfile_list) == 1:
+        return copy.deepcopy(emgfile_list[0])
+
+    # Start with a deep copy of the first file
+    merged = copy.deepcopy(emgfile_list[0])
+
+    # Track source files
+    source_files = [merged.get('FILENAME', 'unknown')]
+
+    # Concatenate motor units from additional files
+    for idx, emgfile in enumerate(emgfile_list[1:], start=2):
+        source_files.append(emgfile.get('FILENAME', f'unknown_{idx}'))
+
+        # Concatenate IPTS (handle both DataFrame and list types)
+        if 'IPTS' in emgfile and 'IPTS' in merged:
+            try:
+                if isinstance(merged['IPTS'], pd.DataFrame):
+                    merged['IPTS'] = pd.concat([merged['IPTS'], emgfile['IPTS']], ignore_index=True)
+                elif isinstance(merged['IPTS'], list):
+                    merged['IPTS'].extend(emgfile['IPTS'])
+            except Exception as e:
+                logger.warning(f"Could not concatenate IPTS: {e}")
+
+        # Concatenate MUPULSES (handle both DataFrame and list types)
+        if 'MUPULSES' in emgfile and 'MUPULSES' in merged:
+            try:
+                if isinstance(merged['MUPULSES'], pd.DataFrame):
+                    merged['MUPULSES'] = pd.concat([merged['MUPULSES'], emgfile['MUPULSES']], ignore_index=True)
+                elif isinstance(merged['MUPULSES'], list):
+                    merged['MUPULSES'].extend(emgfile['MUPULSES'])
+            except Exception as e:
+                logger.warning(f"Could not concatenate MUPULSES: {e}")
+
+        # Concatenate binary firing patterns
+        # Note: BINARY_MUS_FIRING has shape (time_samples, n_MUs), so concatenate along axis 1 (columns)
+        if 'BINARY_MUS_FIRING' in emgfile and 'BINARY_MUS_FIRING' in merged:
+            try:
+                if isinstance(merged['BINARY_MUS_FIRING'], pd.DataFrame):
+                    # DataFrame: concatenate columns (MUs)
+                    merged['BINARY_MUS_FIRING'] = pd.concat([
+                        merged['BINARY_MUS_FIRING'],
+                        emgfile['BINARY_MUS_FIRING']
+                    ], axis=1, ignore_index=True)
+                else:
+                    # numpy array: horizontal stack (add columns)
+                    merged['BINARY_MUS_FIRING'] = np.hstack([
+                        merged['BINARY_MUS_FIRING'],
+                        emgfile['BINARY_MUS_FIRING']
+                    ])
+            except Exception as e:
+                logger.warning(f"Could not concatenate BINARY_MUS_FIRING: {e}")
+
+        # Concatenate accuracy/CoVISI values
+        if 'ACCURACY' in emgfile and 'ACCURACY' in merged:
+            try:
+                if isinstance(merged['ACCURACY'], pd.DataFrame) and isinstance(emgfile['ACCURACY'], pd.DataFrame):
+                    merged['ACCURACY'] = pd.concat([
+                        merged['ACCURACY'],
+                        emgfile['ACCURACY']
+                    ], ignore_index=True)
+            except Exception as e:
+                logger.warning(f"Could not concatenate ACCURACY: {e}")
+
+    # Update total motor unit count
+    merged['NUMBER_OF_MUS'] = sum(f['NUMBER_OF_MUS'] for f in emgfile_list)
+
+    # Add metadata about concatenation
+    merged['SOURCE'] = f"Concatenated from {len(emgfile_list)} files"
+    merged['SOURCE_FILES'] = source_files
+    merged['FILENAME'] = f"merged_{len(emgfile_list)}_files"
+
+    logger.info(f"Concatenated {len(emgfile_list)} emgfiles: {merged['NUMBER_OF_MUS']} total MUs")
+
+    merged = emg_tools.sort_mus(merged)
+
+    return merged
+
+
+def create_emgfile_groups(emgfiles, strategy='file_and_muscle', concatenate=True):
+    """
+    Group loaded openhdemg files by file basename and/or muscle name.
+
+    This function analyzes a list of loaded openhdemg files and creates logical
+    groupings based on filename patterns. Optionally concatenates motor units
+    within each group for unified analysis.
+
+    Args:
+        emgfiles (list): List of dictionaries with loaded emgfile data. Each dict should have:
+            - 'filename': Filename (str)
+            - 'path': File path (Path or str)
+            - 'data': Loaded emgfile dictionary from openhdemg
+        strategy (str): Grouping strategy:
+            - 'file_and_muscle': Group by unique (file_basename, muscle) combination (default)
+            - 'muscle_only': Group by muscle name only
+        concatenate (bool): If True, create a merged emgfile with all MUs for each group (default: True)
+
+    Returns:
+        dict: Dictionary with structure:
+            {
+                'groups': [
+                    {
+                        'name': str,           # Display name for the group
+                        'muscle': str,         # Muscle name
+                        'file_base': str,      # File basename (only for 'file_and_muscle' strategy)
+                        'count': int,          # Number of files in group
+                        'files': [             # List of individual file dictionaries
+                            {
+                                'filename': str,
+                                'path': Path,
+                                'data': dict  # openhdemg data
+                            },
+                            ...
+                        ],
+                        'concatenated': dict   # Combined emgfile with all MUs (if concatenate=True)
+                    },
+                    ...
+                ],
+                'ungrouped': [  # Files that don't fit any group (single files)
+                    {
+                        'filename': str,
+                        'path': Path,
+                        'data': dict
+                    },
+                    ...
+                ],
+                'summary': {
+                    'total_files': int,
+                    'grouped_files': int,
+                    'ungrouped_files': int,
+                    'group_count': int,
+                    'strategy': str
+                }
+            }
+
+    Example:
+        >>> import openhdemg.library as emg
+        >>> from pathlib import Path
+        >>>
+        >>> # Load files
+        >>> emgfiles = []
+        >>> for json_path in Path('decomposition_auto').glob('*.json'):
+        ...     emgfile = emg.emg_from_json(str(json_path))
+        ...     emgfiles.append({
+        ...         'filename': json_path.name,
+        ...         'path': json_path,
+        ...         'data': emgfile
+        ...     })
+        >>>
+        >>> # Create groups with concatenation
+        >>> result = create_emgfile_groups(emgfiles, strategy='file_and_muscle', concatenate=True)
+        >>>
+        >>> # Access individual files in groups
+        >>> for group in result['groups']:
+        ...     print(f"{group['name']}: {group['count']} files")
+        ...     for file in group['files']:
+        ...         print(f"  - {file['filename']}: {file['data']['NUMBER_OF_MUS']} MUs")
+        >>>
+        >>> # Access concatenated emgfile for analysis
+        >>> for group in result['groups']:
+        ...     combined = group['concatenated']
+        ...     print(f"{group['name']}: {combined['NUMBER_OF_MUS']} total MUs")
+        ...     # Analyze all MUs together
+        ...     covisi_values = combined['ACCURACY'].values.flatten()
+    """
+    if not emgfiles:
+        return {
+            'groups': [],
+            'ungrouped': [],
+            'summary': {
+                'total_files': 0,
+                'grouped_files': 0,
+                'ungrouped_files': 0,
+                'group_count': 0,
+                'strategy': strategy
+            }
+        }
+
+    logger.info(f"Creating groups using strategy: {strategy}")
+
+    # Analyze files and create groupings
+    groupings = {}
+    ungrouped = []
+    parse_errors = []
+
+    for emgfile_entry in emgfiles:
+        filename = emgfile_entry['filename']
+        file_base = extract_file_basename_from_path(filename)
+        muscle = extract_muscle_name_from_path(filename)
+
+        # Validate parsing
+        if not muscle:
+            logger.warning(f"Could not extract muscle name from: {filename}")
+            parse_errors.append(filename)
+            ungrouped.append(emgfile_entry)
+            continue
+
+        # Create group key based on strategy
+        if strategy == 'file_and_muscle':
+            if not file_base:
+                logger.warning(f"Could not extract file basename from: {filename}")
+                parse_errors.append(filename)
+                ungrouped.append(emgfile_entry)
+                continue
+            group_key = f"{file_base}_{muscle}"
+            display_name = f"{file_base} - {muscle}"
+        elif strategy == 'muscle_only':
+            group_key = muscle
+            display_name = muscle
+        else:
+            raise ValueError(f"Invalid strategy: {strategy}. Use 'file_and_muscle' or 'muscle_only'")
+
+        # Add to group
+        if group_key not in groupings:
+            groupings[group_key] = {
+                'name': display_name,
+                'muscle': muscle,
+                'file_base': file_base if strategy == 'file_and_muscle' else None,
+                'files': []
+            }
+        groupings[group_key]['files'].append(emgfile_entry)
+
+    # Filter out single-file groups (move to ungrouped) and optionally concatenate
+    multi_file_groups = []
+    for group_key, group_data in groupings.items():
+        if len(group_data['files']) >= 2:
+            group_data['count'] = len(group_data['files'])
+
+            # Concatenate emgfiles in this group if requested
+            if concatenate:
+                emgfile_data_list = [f['data'] for f in group_data['files']]
+                group_data['concatenated'] = concatenate_emgfiles(emgfile_data_list)
+                logger.debug(f"Concatenated {len(emgfile_data_list)} files in group '{group_data['name']}'")
+            else:
+                group_data['concatenated'] = None
+
+            multi_file_groups.append(group_data)
+        else:
+            # Single file groups become ungrouped
+            ungrouped.extend(group_data['files'])
+
+    # Sort groups by name
+    multi_file_groups.sort(key=lambda x: x['name'])
+
+    # Calculate summary
+    grouped_file_count = sum(group['count'] for group in multi_file_groups)
+    total_files = len(emgfiles)
+
+    summary = {
+        'total_files': total_files,
+        'grouped_files': grouped_file_count,
+        'ungrouped_files': len(ungrouped),
+        'group_count': len(multi_file_groups),
+        'strategy': strategy,
+        'parse_errors': len(parse_errors)
+    }
+
+    # Log summary
+    logger.info(f"Grouping complete: {summary['group_count']} groups created")
+    logger.info(f"  - {summary['grouped_files']} files in groups")
+    logger.info(f"  - {summary['ungrouped_files']} files ungrouped")
+    if parse_errors:
+        logger.warning(f"  - {len(parse_errors)} files with parsing errors")
+
+    return {
+        'groups': multi_file_groups,
+        'ungrouped': ungrouped,
+        'summary': summary
+    }
 
 
 def _is_valid_ref(ref):
@@ -652,6 +1102,152 @@ def _cell_row_read(f, ds):
         else:
             out.append(None)
     return out
+
+
+def apply_muedit_edits_multigrid_to_json(json_in_paths, mat_edited_path, json_out_path):
+    """
+    Convert a multi-grid edited MUEdit MAT file to a consolidated openhdemg JSON file.
+
+    This function takes multiple original JSON files (that were combined into a multi-grid
+    MAT file), loads and concatenates them, then applies the MUEdit edits from the edited
+    MAT file to create a single consolidated openhdemg JSON file with all motor units.
+
+    Args:
+        json_in_paths (list of str or Path): Paths to the original openhdemg JSON files
+            that were used to create the multi-grid MAT file (in the correct order)
+        mat_edited_path (str or Path): Path to the edited multi-grid MUEdit MAT file
+        json_out_path (str or Path): Path where the consolidated JSON should be saved
+
+    Returns:
+        str: Path to the created JSON file
+
+    Raises:
+        ImportError: If openhdemg or h5py libraries are not available
+        FileNotFoundError: If any of the original JSON files are not found
+        KeyError: If required fields are not found in the MAT file
+
+    Example:
+        >>> apply_muedit_edits_multigrid_to_json(
+        ...     ['grid1.json', 'grid2.json'],
+        ...     'combined_multigrid_muedit.mat_edited.mat',
+        ...     'consolidated_cleaned.json'
+        ... )
+    """
+    # Deprecation warning
+    logger.warning(
+        "DEPRECATED: apply_muedit_edits_multigrid_to_json() is deprecated and will be removed in a future version. "
+        "Multi-grid MAT files are no longer created in the new workflow."
+    )
+
+    if not OPENHDEMG_AVAILABLE:
+        raise ImportError("openhdemg library is required for this function")
+
+    try:
+        import h5py
+    except ImportError:
+        raise ImportError("h5py library is required for reading MATLAB v7.3 files (pip install h5py)")
+
+    json_in_paths = [Path(p) for p in json_in_paths]
+    mat_edited_path = Path(mat_edited_path)
+    json_out_path = Path(json_out_path)
+
+    logger.info(f"Converting multi-grid edited MUEdit file to consolidated openhdemg format...")
+    logger.debug(f"Input JSONs ({len(json_in_paths)}): {[p.name for p in json_in_paths]}")
+    logger.debug(f"Edited MAT: {mat_edited_path.name}")
+    logger.debug(f"Output JSON: {json_out_path.name}")
+
+    # Verify all original JSON files exist
+    for json_path in json_in_paths:
+        if not json_path.exists():
+            raise FileNotFoundError(f"Original JSON file not found: {json_path}")
+
+    # Load and concatenate all original JSON files (to get RAW_SIGNAL, REF_SIGNAL, etc.)
+    emgfiles = []
+    for json_path in json_in_paths:
+        logger.debug(f"Loading {json_path.name}...")
+        emgfile = emg.emg_from_json(str(json_path))
+        emgfiles.append(emgfile)
+
+    # Concatenate emgfiles to create the base structure
+    json_dict = concatenate_emgfiles(emgfiles)
+    logger.info(f"Concatenated {len(emgfiles)} files into base emgfile structure")
+
+    # Read edited MUEdit MAT (v7.3) using h5py to get the cleaned MU data
+    with h5py.File(str(mat_edited_path), 'r') as f:
+        if 'edition' not in f:
+            raise KeyError(f"'edition' group not found in {mat_edited_path.name}. "
+                          "The MAT file may not be a valid MUEdit edited file.")
+        edit = f['edition']
+
+        # SIL: 1 x ngrid cell, each double
+        if 'silval' not in edit:
+            raise KeyError("edition.silval not found in edited MAT.")
+        silval = _cell_row_read(f, edit['silval'])
+
+        # Pulsetrain: 1 x ngrid cell; each cell: (nMU_g x n_samples)
+        if 'Pulsetrainclean' not in edit:
+            raise KeyError("edition.Pulsetrainclean not found in edited MAT.")
+        pulsetrain_cells = _cell_row_read(f, edit['Pulsetrainclean'])
+
+        # Dischargetimes: ngrid x maxMU cell; each cell: (1 x nDischarges) or (nDischarges,)
+        top = edit['Distimeclean'][()]           # object array, shape (1,1)
+        inner_ref = top.flat[0]                  # the only reference
+        inner_cell_ds = f[inner_ref]             # dataset: the 1×nMU cell
+
+        # Now read that inner row cell into a Python list of arrays (length = nMU)
+        disc_nested = _cell_row_read(f, inner_cell_ds)
+
+    # JSON expects IPTS as DataFrame (time x nMU)
+    pulsetrain_data = pulsetrain_cells[0]
+
+    # Handle empty case (all MUs deleted in MUEdit)
+    if pulsetrain_data.size == 0 or len(disc_nested) == 0:
+        logger.warning(f"No motor units found in edited multi-grid file: {mat_edited_path.name}. Creating empty structure.")
+        json_dict['IPTS'] = pd.DataFrame()
+        json_dict['MUPULSES'] = []
+        json_dict['BINARY_MUS_FIRING'] = pd.DataFrame()
+        json_dict['FILENAME'] = f"multigrid_consolidated_from_{mat_edited_path.name}"
+        json_dict['ACCURACY'] = pd.DataFrame()
+        json_dict['NUMBER_OF_MUS'] = 0
+    else:
+        IPTS_df = pd.DataFrame(pulsetrain_data)
+
+        # Build MUPULSES (0-based) from Dischargetimes
+        MUPULSES_list = []
+        for mu_timing in disc_nested:
+            MUPULSES_list.append(np.squeeze(np.asarray(mu_timing, dtype='int32')) - 1)
+
+        # Update the edited fields in the new JSON
+        json_dict['IPTS'] = IPTS_df
+        json_dict['MUPULSES'] = MUPULSES_list
+
+        # Create binary firing matrix
+        nMU = min(IPTS_df.shape)
+        spikeMat = np.zeros((nMU, max(IPTS_df.shape)))
+        for i in range(nMU):
+            spikeMat[i, MUPULSES_list[i]] = 1
+        json_dict['BINARY_MUS_FIRING'] = pd.DataFrame(spikeMat.T)
+        json_dict['FILENAME'] = f"multigrid_consolidated_from_{mat_edited_path.name}"
+
+        # Handle ACCURACY/silval safely
+        silval_array = np.array(silval)
+        if silval_array.size == 0:
+            json_dict['ACCURACY'] = pd.DataFrame()
+        else:
+            silval_squeezed = np.squeeze(silval_array)
+            # Ensure at least 1-d
+            if silval_squeezed.ndim == 0:
+                silval_squeezed = np.array([silval_squeezed])
+            json_dict['ACCURACY'] = pd.DataFrame(silval_squeezed)
+
+        json_dict['NUMBER_OF_MUS'] = nMU
+
+    # Save consolidated JSON in openhdemg format
+    emg.save_json_emgfile(json_dict, str(json_out_path), compresslevel=4)
+    logger.info(f"Successfully converted multi-grid to consolidated openhdemg format: {json_out_path.name}")
+    logger.info(f"Consolidated {len(emgfiles)} grids into single JSON with {nMU if pulsetrain_data.size > 0 else 0} motor units")
+
+    return str(json_out_path)
 
 
 def apply_muedit_edits_to_json(json_in_path, mat_edited_path, json_out_path):
@@ -733,26 +1329,49 @@ def apply_muedit_edits_to_json(json_in_path, mat_edited_path, json_out_path):
         disc_nested = _cell_row_read(f, inner_cell_ds)
 
     # JSON expects IPTS as DataFrame (time x nMU)
-    IPTS_df = pd.DataFrame(pulsetrain_cells[0])
+    pulsetrain_data = pulsetrain_cells[0]
 
-    # Build MUPULSES (0-based) from Dischargetimes
-    MUPULSES_list = []
-    for mu_timing in disc_nested:
-        MUPULSES_list.append(np.squeeze(np.asarray(mu_timing, dtype='int32')) - 1)
+    # Handle empty case (all MUs deleted in MUEdit)
+    if pulsetrain_data.size == 0 or len(disc_nested) == 0:
+        logger.warning(f"No motor units found in edited file: {mat_edited_path.name}. Creating empty structure.")
+        json_dict['IPTS'] = pd.DataFrame()
+        json_dict['MUPULSES'] = []
+        json_dict['BINARY_MUS_FIRING'] = pd.DataFrame()
+        json_dict['FILENAME'] = str(mat_edited_path)
+        json_dict['ACCURACY'] = pd.DataFrame()
+        json_dict['NUMBER_OF_MUS'] = 0
+    else:
+        IPTS_df = pd.DataFrame(pulsetrain_data)
 
-    # Update the edited fields in the new JSON
-    json_dict['IPTS'] = IPTS_df
-    json_dict['MUPULSES'] = MUPULSES_list
+        # Build MUPULSES (0-based) from Dischargetimes
+        MUPULSES_list = []
+        for mu_timing in disc_nested:
+            MUPULSES_list.append(np.squeeze(np.asarray(mu_timing, dtype='int32')) - 1)
 
-    # Create binary firing matrix
-    nMU = min(IPTS_df.shape)
-    spikeMat = np.zeros((nMU, max(IPTS_df.shape)))
-    for i in range(nMU):
-        spikeMat[i, MUPULSES_list[i]] = 1
-    json_dict['BINARY_MUS_FIRING'] = pd.DataFrame(spikeMat.T)
-    json_dict['FILENAME'] = str(mat_edited_path)
-    json_dict['ACCURACY'] = pd.DataFrame(np.squeeze(np.array(silval)))
-    json_dict['NUMBER_OF_MUS'] = nMU
+        # Update the edited fields in the new JSON
+        json_dict['IPTS'] = IPTS_df
+        json_dict['MUPULSES'] = MUPULSES_list
+
+        # Create binary firing matrix
+        nMU = min(IPTS_df.shape)
+        spikeMat = np.zeros((nMU, max(IPTS_df.shape)))
+        for i in range(nMU):
+            spikeMat[i, MUPULSES_list[i]] = 1
+        json_dict['BINARY_MUS_FIRING'] = pd.DataFrame(spikeMat.T)
+        json_dict['FILENAME'] = str(mat_edited_path)
+
+        # Handle ACCURACY/silval safely
+        silval_array = np.array(silval)
+        if silval_array.size == 0:
+            json_dict['ACCURACY'] = pd.DataFrame()
+        else:
+            silval_squeezed = np.squeeze(silval_array)
+            # Ensure at least 1-d
+            if silval_squeezed.ndim == 0:
+                silval_squeezed = np.array([silval_squeezed])
+            json_dict['ACCURACY'] = pd.DataFrame(silval_squeezed)
+
+        json_dict['NUMBER_OF_MUS'] = nMU
 
     # Save updated JSON in openhdemg format
     emg.save_json_emgfile(json_dict, str(json_out_path), compresslevel=4)
