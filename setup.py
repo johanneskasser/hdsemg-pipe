@@ -46,7 +46,7 @@ setup(
         "torch>=1.10.0",
         "requests>=2.26.0",
         "hdsemg-shared>=0.11.1",
-        "hdsemg-select>=0.1.1",
+        "hdsemg-select>=0.2.2",
         "pefile>=2023.2.7; sys_platform != 'win32'",
     ],
     python_requires=">=3.7",
