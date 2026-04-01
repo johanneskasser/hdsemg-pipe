@@ -40,14 +40,14 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.convert_pkl_to_scd_edition import (
+sys.path.insert(0, str(Path(__file__).parent))
+from convert_pkl_to_scd_edition import (
     find_mat_for_pkl,
     convert,
     load_emg_from_mat,
     detect_plateau_from_mat,
 )
-from utils.detect_and_upgrade_pkl import (
+from detect_and_upgrade_pkl import (
     detect_format,
     FORMAT_OLD,
     FORMAT_NEW,

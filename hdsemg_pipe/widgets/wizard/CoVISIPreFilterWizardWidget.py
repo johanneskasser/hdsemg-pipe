@@ -49,6 +49,8 @@ from hdsemg_pipe.actions.covisi_analysis import (
     get_ref_signal_for_plotting,
     save_covisi_report,
 )
+from hdsemg_pipe.actions.decomposition_file import DecompositionFile
+from hdsemg_pipe.actions.process_log import read_manual_cleaning_tool
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.theme import (
     BorderRadius,
@@ -199,6 +201,169 @@ class CoVISIFilterWorker(QThread):
             self.error.emit(f"CoVISI filtering failed: {str(e)}")
 
 
+class PklPrepWorker(QThread):
+    """Prepare merged multi-port PKL files for the scd-edition path.
+
+    Runs upgrade (detect_and_upgrade_pkl) then merge (merge_grid_pkls) on the
+    decomposition_auto folder.  The result is one PKL per contraction with all
+    grids as ports, written back into decomposition_auto.
+    """
+
+    finished = pyqtSignal(list)   # list of merged PKL paths
+    error = pyqtSignal(str)
+    progress = pyqtSignal(str)
+
+    def __init__(self, decomp_auto_path: str, channelselection_path: str, parent=None):
+        super().__init__(parent)
+        self.decomp_auto_path = decomp_auto_path
+        self.channelselection_path = channelselection_path
+
+    def run(self):
+        try:
+            from hdsemg_pipe.scd_utils import detect_and_upgrade_pkl, merge_grid_pkls
+
+            target = Path(self.decomp_auto_path)
+            channelselection = Path(self.channelselection_path)
+
+            # Step 1: upgrade old-format PKLs in-place
+            self.progress.emit("Checking PKL format compatibility…")
+            detect_and_upgrade_pkl.process_path(target)
+
+            # Step 2: merge single-grid PKLs into multi-port PKLs
+            self.progress.emit("Merging single-grid PKLs into multi-port files…")
+            mat_dirs = [str(channelselection)] if channelselection.is_dir() else []
+            merge_grid_pkls.process(
+                target=target,
+                out_dir=target,
+                mat_dirs=mat_dirs,
+            )
+
+            # Collect merged multi-port PKLs (no grid key in stem)
+            import re as _re
+            _GRID_KEY_RE = _re.compile(r'\d+mm_\d+x\d+(?:_\d+)?')
+            merged = [
+                str(p) for p in sorted(target.glob("*.pkl"))
+                if not p.name.endswith(".bak")
+                and not _GRID_KEY_RE.search(p.stem)
+            ]
+            self.finished.emit(merged)
+
+        except Exception as exc:
+            import traceback
+            logger.error("PKL preparation failed: %s\n%s", exc, traceback.format_exc())
+            self.error.emit(str(exc))
+
+
+class PklCoVISIComputeWorker(QThread):
+    """Compute CoVISI for merged PKL files (scd_edition path)."""
+
+    progress = pyqtSignal(int, int, str)          # current, total, filename
+    result = pyqtSignal(str, object, float)        # pkl_path, covisi_df or error, duration
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, pkl_files, parent=None):
+        super().__init__(parent)
+        self.pkl_files = pkl_files
+
+    def run(self):
+        try:
+            total = len(self.pkl_files)
+            for idx, pkl_path in enumerate(self.pkl_files):
+                filename = os.path.basename(pkl_path)
+                self.progress.emit(idx, total, filename)
+                try:
+                    decomp = DecompositionFile.load(Path(pkl_path))
+                    covisi_df = decomp.compute_covisi()
+                    self.result.emit(pkl_path, covisi_df, 0.0)
+                except Exception as exc:
+                    logger.error("CoVISI compute failed for %s: %s", filename, exc)
+                    self.result.emit(pkl_path, str(exc), 0.0)
+            self.finished.emit()
+        except Exception as exc:
+            self.error.emit(f"CoVISI PKL computation failed: {exc}")
+
+
+class PklCoVISIFilterWorker(QThread):
+    """Apply CoVISI filtering to merged PKL files and save to covisi_filtered/."""
+
+    progress = pyqtSignal(int, int, str)
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, pkl_files, threshold, covisi_filtered_folder,
+                 manual_overrides=None, parent=None):
+        super().__init__(parent)
+        self.pkl_files = pkl_files
+        self.threshold = threshold
+        self.covisi_filtered_folder = covisi_filtered_folder
+        self.manual_overrides = manual_overrides or {}
+
+    def run(self):
+        try:
+            overall_stats = {
+                "files_processed": 0,
+                "files_skipped_no_mus": 0,
+                "skipped_filenames": [],
+                "total_mus_original": 0,
+                "total_mus_filtered": 0,
+                "total_mus_removed": 0,
+                "per_file_stats": {},
+                "manual_overrides_applied": len(self.manual_overrides),
+            }
+
+            total = len(self.pkl_files)
+            out_dir = Path(self.covisi_filtered_folder)
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            for idx, pkl_path in enumerate(self.pkl_files):
+                filename = os.path.basename(pkl_path)
+                self.progress.emit(idx, total, f"Filtering {filename}…")
+                try:
+                    decomp = DecompositionFile.load(Path(pkl_path))
+                    n_before = decomp.get_motor_unit_count()
+
+                    # Build per-PKL overrides keyed by (port_idx, mu_idx)
+                    file_overrides = {
+                        k: v for k, v in self.manual_overrides.items()
+                        if isinstance(k, tuple) and len(k) == 3 and k[0] == filename
+                    }
+                    mapped_overrides = {(k[1], k[2]): v for k, v in file_overrides.items()}
+
+                    filtered = decomp.filter_mus_by_covisi(
+                        self.threshold, overrides=mapped_overrides
+                    )
+                    n_after = filtered.get_motor_unit_count()
+                    removed = n_before - n_after
+
+                    if n_after == 0:
+                        overall_stats["files_skipped_no_mus"] += 1
+                        overall_stats["skipped_filenames"].append(filename)
+                    else:
+                        stem = Path(pkl_path).stem
+                        out_path = out_dir / f"{stem}_covisi_filtered.pkl"
+                        filtered.save(out_path)
+                        overall_stats["files_processed"] += 1
+                        overall_stats["total_mus_original"] += n_before
+                        overall_stats["total_mus_filtered"] += n_after
+                        overall_stats["total_mus_removed"] += removed
+
+                    overall_stats["per_file_stats"][filename] = {
+                        "original_mu_count": n_before,
+                        "filtered_mu_count": n_after,
+                        "removed_count": removed,
+                    }
+
+                except Exception as exc:
+                    logger.error("PKL filtering failed for %s: %s", filename, exc)
+                    overall_stats["per_file_stats"][filename] = {"error": str(exc)}
+
+            self.finished.emit(overall_stats)
+
+        except Exception as exc:
+            self.error.emit(f"PKL CoVISI filtering failed: {exc}")
+
+
 class CoVISIPreFilterWizardWidget(WizardStepWidget):
     """
     Step 8.5: CoVISI Pre-Filtering.
@@ -225,6 +390,8 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         self.expected_folder = None
         self.json_files = []
+        self.pkl_files = []   # merged multi-port PKL files (scd_edition path)
+        self._use_pkl = False  # True when manual_cleaning_tool == "scd_edition"
         self.covisi_data = {}  # filename -> covisi_df
         self.threshold = DEFAULT_COVISI_THRESHOLD
         self.compute_worker = None
@@ -669,12 +836,46 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         return True
 
     def scan_json_files(self):
-        """Scan for JSON files in decomposition folder."""
+        """Scan for decomposition files (JSON or PKL) in decomposition folder."""
         if not os.path.exists(self.expected_folder):
             self.status_label.setText("Decomposition folder not found.")
             return
 
-        # State files to exclude (all known non-data JSONs in decomposition_auto)
+        # Determine active tool
+        self._use_pkl = read_manual_cleaning_tool() == "scd_edition"
+
+        if self._use_pkl:
+            # scd-edition path: scan for merged multi-port PKLs (no grid key in stem)
+            import re as _re
+            _GRID_KEY_RE = _re.compile(r'\d+mm_\d+x\d+(?:_\d+)?')
+            self.pkl_files = [
+                os.path.join(self.expected_folder, f)
+                for f in os.listdir(self.expected_folder)
+                if f.endswith(".pkl")
+                and not f.endswith(".bak")
+                and not _GRID_KEY_RE.search(Path(f).stem)
+                and "_covisi_filtered" not in f
+                and "_duplicates_removed" not in f
+                and "_edited" not in f
+            ]
+            count = len(self.pkl_files)
+            if count:
+                self.status_label.setText(
+                    f"Found {count} PKL file(s) (scd-edition). "
+                    "Click 'Analyze CoVISI' to compute quality metrics."
+                )
+                self.btn_compute.setEnabled(True)
+                self.btn_skip.setEnabled(True)
+            else:
+                self.status_label.setText(
+                    "No merged PKL files found yet. "
+                    "Click 'Analyze CoVISI' to prepare and merge PKL files first."
+                )
+                self.btn_compute.setEnabled(True)  # prep may create them
+                self.btn_skip.setEnabled(True)
+            return
+
+        # MUedit path: scan for JSON files
         state_files = {
             "decomposition_mapping.json",
             "multigrid_groupings.json",
@@ -684,7 +885,6 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
             "duplicate_detection_report.json",
         }
 
-        # Find JSON files (exclude state files, algorithm_params, and already-filtered files)
         self.json_files = [
             os.path.join(self.expected_folder, f)
             for f in os.listdir(self.expected_folder)
@@ -708,6 +908,10 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
     def start_compute(self):
         """Start computing CoVISI values."""
+        if self._use_pkl:
+            self._start_compute_pkl()
+            return
+
         if not self.json_files:
             self.warn("No JSON files to analyze.")
             return
@@ -754,6 +958,55 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
 
         method_str = "steady-state" if self.analysis_method == COVISI_METHOD_STEADY else "auto (rec/derec)"
         logger.info(f"Starting CoVISI computation ({method_str}) for {len(self.json_files)} file(s)...")
+
+    def _start_compute_pkl(self):
+        """Run PKL preparation then CoVISI computation for the scd-edition path."""
+        self.btn_compute.setEnabled(False)
+        self.btn_apply_filter.setEnabled(False)
+        self.btn_skip.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.covisi_data.clear()
+        self.manual_overrides.clear()
+        self.results_table.setRowCount(0)
+
+        decomp_auto = global_state.get_decomposition_path()
+        channelselection = global_state.get_channelselection_path()
+
+        self.status_label.setText("Preparing PKL files (upgrade + merge)…")
+        self.prep_worker = PklPrepWorker(decomp_auto, channelselection)
+        self.prep_worker.progress.connect(self.status_label.setText)
+        self.prep_worker.finished.connect(self._on_pkl_prep_finished)
+        self.prep_worker.error.connect(self._on_pkl_prep_error)
+        self.prep_worker.start()
+        logger.info("Starting PKL preparation for scd-edition CoVISI path…")
+
+    def _on_pkl_prep_error(self, error_msg):
+        self.progress_bar.setVisible(False)
+        self.btn_compute.setEnabled(True)
+        self.btn_skip.setEnabled(True)
+        self.error(error_msg)
+        self.status_label.setText(f"PKL preparation error: {error_msg}")
+
+    def _on_pkl_prep_finished(self, merged_pkl_paths):
+        if not merged_pkl_paths:
+            self.progress_bar.setVisible(False)
+            self.btn_compute.setEnabled(True)
+            self.btn_skip.setEnabled(True)
+            self.warn("No merged PKL files found after preparation.")
+            return
+        self.pkl_files = merged_pkl_paths
+        self.progress_bar.setMaximum(len(self.pkl_files))
+        self.status_label.setText(
+            f"PKL prep complete. Computing CoVISI for {len(self.pkl_files)} file(s)…"
+        )
+        self.compute_worker = PklCoVISIComputeWorker(self.pkl_files)
+        self.compute_worker.progress.connect(self.on_compute_progress)
+        self.compute_worker.result.connect(self.on_compute_result)
+        self.compute_worker.finished.connect(self.on_compute_finished)
+        self.compute_worker.error.connect(self.on_compute_error)
+        self.compute_worker.start()
+        logger.info("PKL prep done, starting CoVISI computation for %d file(s)…", len(self.pkl_files))
 
     def on_compute_progress(self, current, total, filename):
         """Handle computation progress."""
@@ -1056,16 +1309,24 @@ class CoVISIPreFilterWizardWidget(WizardStepWidget):
         # Show progress
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.progress_bar.setMaximum(len(self.json_files))
 
-        # Create output folder for filtered JSONs
         covisi_filtered_folder = global_state.get_decomposition_covisi_filtered_path()
         os.makedirs(covisi_filtered_folder, exist_ok=True)
-        self.filter_worker = CoVISIFilterWorker(
-            self.json_files, self.threshold, self.expected_folder,
-            manual_overrides=self.manual_overrides.copy(),
-            covisi_filtered_folder=covisi_filtered_folder,
-        )
+
+        if self._use_pkl:
+            self.progress_bar.setMaximum(len(self.pkl_files))
+            self.filter_worker = PklCoVISIFilterWorker(
+                self.pkl_files, self.threshold, covisi_filtered_folder,
+                manual_overrides=self.manual_overrides.copy(),
+            )
+        else:
+            self.progress_bar.setMaximum(len(self.json_files))
+            self.filter_worker = CoVISIFilterWorker(
+                self.json_files, self.threshold, self.expected_folder,
+                manual_overrides=self.manual_overrides.copy(),
+                covisi_filtered_folder=covisi_filtered_folder,
+            )
+
         self.filter_worker.progress.connect(self.on_filter_progress)
         self.filter_worker.finished.connect(self.on_filter_finished)
         self.filter_worker.error.connect(self.on_filter_error)

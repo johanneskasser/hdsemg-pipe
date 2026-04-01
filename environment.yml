@@ -17,6 +17,7 @@ dependencies:
   - pip
   - pip:
       - pyqt5-tools>=5.15.9.3.3
+      - scd-edition @ git+https://github.com/AgneGris/scd-edition.git
       - mne>=1.0.0
       - nbformat>=5.0.0
       # Optional: Octave support (requires Octave to be installed separately)

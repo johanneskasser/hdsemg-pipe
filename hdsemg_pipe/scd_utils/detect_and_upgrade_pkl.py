@@ -41,8 +41,8 @@ import numpy as np
 import torch
 
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.convert_pkl_to_scd_edition import CPUUnpickler, convert
+sys.path.insert(0, str(Path(__file__).parent))
+from convert_pkl_to_scd_edition import CPUUnpickler, convert
 
 
 FORMAT_OLD = "old"
@@ -89,7 +89,7 @@ def upgrade_in_place(path: Path, data: dict, sampling_rate: int = 2000, backup: 
 
     emg = n_ch = ch_idx = None
     if mat_dirs:
-        from utils.convert_pkl_to_scd_edition import find_mat_for_pkl, load_emg_from_mat
+        from convert_pkl_to_scd_edition import find_mat_for_pkl, load_emg_from_mat
         n_pkl_samples = len(data.get("source", [{}])[0]) if data.get("source") else None
         mat_file, grid_key = find_mat_for_pkl(path, [Path(d) for d in mat_dirs])
         if mat_file:
@@ -129,7 +129,7 @@ def _get_electrode_type(mat_file: Path, grid_key: str | None) -> str | None:
     """
     if not mat_file or not grid_key:
         return None
-    from utils.scd_channel_utils import load_channel_selection_json, get_grids_from_json
+    from scd_channel_utils import load_channel_selection_json, get_grids_from_json
     json_data = load_channel_selection_json(mat_file)
     if not json_data:
         return None
@@ -381,7 +381,7 @@ def _add_emg_to_new(path: Path, data: dict, mat_dirs: list, dry_run: bool) -> bo
     Also patches preprocessing_config if keys are missing.
     Returns True if action was taken (or would be taken in dry-run).
     """
-    from utils.convert_pkl_to_scd_edition import find_mat_for_pkl, load_emg_from_mat
+    from convert_pkl_to_scd_edition import find_mat_for_pkl, load_emg_from_mat
 
     # n_samples from pulse_trains shape
     pt = data.get("pulse_trains", [[]])[0]
@@ -464,7 +464,7 @@ def process_path(target: Path, sampling_rate=2000, dry_run=False, no_backup=Fals
                         changed = True
                     # Fix electrodes if still None and mat_dirs available
                     if data.get("electrodes", [None])[0] is None and mat_dirs:
-                        from utils.convert_pkl_to_scd_edition import find_mat_for_pkl
+                        from convert_pkl_to_scd_edition import find_mat_for_pkl
                         mat_file, grid_key = find_mat_for_pkl(path, [Path(d) for d in mat_dirs])
                         etype = _get_electrode_type(mat_file, grid_key)
                         if etype is not None:
