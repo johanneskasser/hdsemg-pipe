@@ -11,6 +11,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QPushButton, QLabel, QVBoxLayout, QFrame, QProgressBar, QDialog
 
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.enum.FolderNames import FolderNames
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.GridGroupingDialog import GridGroupingDialog
@@ -457,7 +458,7 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
 
     def save_groupings_to_json(self):
         """Save the multi-grid groupings to a JSON file for state persistence."""
-        decomp_auto_folder = os.path.join(global_state.workfolder, "decomposition_auto")
+        decomp_auto_folder = os.path.join(global_state.workfolder, FolderNames.DECOMPOSITION_AUTO.value)
 
         # Ensure folder exists
         if not os.path.exists(decomp_auto_folder):
@@ -476,7 +477,7 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
 
     def load_groupings_from_json(self):
         """Load the multi-grid groupings from JSON file for state reconstruction."""
-        decomp_auto_folder = os.path.join(global_state.workfolder, "decomposition_auto")
+        decomp_auto_folder = os.path.join(global_state.workfolder, FolderNames.DECOMPOSITION_AUTO.value)
         groupings_file = os.path.join(decomp_auto_folder, "multigrid_groupings.json")
 
         if os.path.exists(groupings_file):

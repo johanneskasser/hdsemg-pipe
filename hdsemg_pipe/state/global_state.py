@@ -189,6 +189,30 @@ class GlobalState:
         path = os.path.join(self.workfolder, FolderNames.ANALYSIS.value)
         return os.path.normpath(path)
 
+    def get_decomposition_scd_edition_path(self):
+        if not self.workfolder:
+            raise ValueError("Workfolder is not set.")
+        path = os.path.join(self.workfolder, FolderNames.DECOMPOSITION_SCD_EDITION.value)
+        return os.path.normpath(path)
+
+    def create_all_workfolders(self):
+        """Create all pipe-owned subfolders inside the current workfolder.
+
+        Called immediately after the workfolder is set so the full folder
+        structure is visible to the user upfront.  Safe to call on existing
+        workfolders — os.makedirs with exist_ok=True is idempotent.
+        """
+        if not self.workfolder:
+            logger.error("Cannot create workfolders: workfolder is not set.")
+            return
+        for folder_name in FolderNames:
+            path = os.path.normpath(os.path.join(self.workfolder, folder_name.value))
+            try:
+                os.makedirs(path, exist_ok=True)
+                logger.debug(f"Ensured folder exists: {path}")
+            except Exception as e:
+                logger.error(f"Failed to create folder {path}: {e}")
+
     def get_original_files(self):
         """Get a copy of the original files list"""
         return self._original_files.copy()

@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.enum.FolderNames import FolderNames
 from hdsemg_pipe.state.global_state import global_state
 
 LOG_FILENAME = "hdsemg-pipe-process.log"
@@ -159,11 +160,11 @@ def read_manual_cleaning_tool(workfolder: str = None) -> str:
     if not folder:
         return "muedit"
 
-    muedit_dir = os.path.join(folder, "decomposition_muedit")
+    muedit_dir = os.path.join(folder, FolderNames.DECOMPOSITION_MUEDIT.value)
     if os.path.isdir(muedit_dir) and _glob.glob(os.path.join(muedit_dir, "*_muedit.mat")):
         return "muedit"
 
-    covisi_filtered_dir = os.path.join(folder, "decomposition_covisi_filtered")
+    covisi_filtered_dir = os.path.join(folder, FolderNames.DECOMPOSITION_COVISI_FILTERED.value)
     if os.path.isdir(covisi_filtered_dir) and _glob.glob(
         os.path.join(covisi_filtered_dir, "*_covisi_filtered.pkl")
     ):

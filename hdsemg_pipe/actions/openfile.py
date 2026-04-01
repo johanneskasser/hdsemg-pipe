@@ -6,7 +6,6 @@ import numpy as np
 from PyQt5.QtWidgets import QFileDialog
 
 from hdsemg_pipe._log.log_config import logger
-from hdsemg_pipe.actions.enum.FolderNames import FolderNames
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_shared.fileio.file_io import EMGFile
@@ -90,49 +89,11 @@ def create_work_folder(workfolder_path, file_path=None):
         os.makedirs(new_folder_path, exist_ok=True)
         logger.info(f"Created folder: {new_folder_path}")
         global_state.workfolder = new_folder_path
-        create_sub_work_folders(new_folder_path)
+        global_state.create_all_workfolders()
     except Exception as e:
         logger.error(f"Failed to create folder {new_folder_path}: {e}")
 
 
-def create_sub_work_folders(workfolder_path):
-    if not workfolder_path or not os.path.isdir(workfolder_path):
-        logger.error("Created workfolder path does not exist. Please check.")
-        return
-
-
-    original_files_foldername = os.path.join(workfolder_path, FolderNames.ORIGINAL_FILES.value)
-    original_files_foldername = os.path.normpath(original_files_foldername)
-    channelselection_foldername = os.path.join(workfolder_path, FolderNames.CHANNELSELECTION.value)
-    channelselection_foldername = os.path.normpath(channelselection_foldername)
-    associated_grids_foldername = os.path.join(workfolder_path, FolderNames.ASSOCIATED_GRIDS.value)
-    associated_grids_foldername = os.path.normpath(associated_grids_foldername)
-    line_noise_cleaned_foldername = os.path.join(workfolder_path, FolderNames.LINE_NOISE_CLEANED.value)
-    line_noise_cleaned_foldername = os.path.normpath(line_noise_cleaned_foldername)
-    decomposition_foldername = os.path.join(workfolder_path, FolderNames.DECOMPOSITION_AUTO.value)
-    decomposition_foldername = os.path.normpath(decomposition_foldername)
-    cropped_signal_foldername = os.path.join(workfolder_path, FolderNames.CROPPED_SIGNAL.value)
-    cropped_signal_foldername = os.path.normpath(cropped_signal_foldername)
-    analysis_foldername = os.path.join(workfolder_path, FolderNames.ANALYSIS.value)
-    analysis_foldername = os.path.normpath(analysis_foldername)
-
-    try:
-        os.makedirs(original_files_foldername, exist_ok=True)
-        logger.info(f"Created original_file Folder: {original_files_foldername}")
-        os.makedirs(associated_grids_foldername, exist_ok=True)
-        logger.info(f"Created associated_grids folder: {associated_grids_foldername}")
-        os.makedirs(line_noise_cleaned_foldername, exist_ok=True)
-        logger.info(f"Created line_noise_cleaned folder: {line_noise_cleaned_foldername}")
-        os.makedirs(decomposition_foldername, exist_ok=True)
-        logger.info(f"Created decomposition folder: {decomposition_foldername}")
-        os.makedirs(channelselection_foldername, exist_ok=True)
-        logger.info(f"Created channelselection folder: {channelselection_foldername}")
-        os.makedirs(cropped_signal_foldername, exist_ok=True)
-        logger.info(f"Created cropped_signal folder: {cropped_signal_foldername}")
-        os.makedirs(analysis_foldername, exist_ok=True)
-        logger.info(f"Created analysis folder: {analysis_foldername}")
-    except Exception as e:
-        logger.error(f"Failed to create sub-folder: {e}")
 
 
 def pre_process_files(filepaths):

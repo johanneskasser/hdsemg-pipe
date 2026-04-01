@@ -1,7 +1,7 @@
 import os
 
 from hdsemg_pipe._log.log_config import logger
-from hdsemg_pipe.actions.enum.FolderNames import FolderNames
+from hdsemg_pipe.actions.enum.FolderNames import FolderNames, FOLDER_NAME_MIGRATIONS
 from hdsemg_pipe.actions.process_log import read_process_log
 from hdsemg_pipe.actions.skip_marker import check_skip_marker
 from hdsemg_pipe.state.global_state import global_state
@@ -45,6 +45,7 @@ def reconstruct_folder_state(folderpath):
 
     # initial checks
     _check_folder_existence(folderpath)
+    _migrate_old_folder_names(folderpath)
     _check_pipe_folder_structure(folderpath)
 
     global_state.workfolder = folderpath
@@ -200,6 +201,33 @@ def _show_restore_success(folderpath):
     return msg_box
 
 
+def _migrate_old_folder_names(folderpath: str) -> None:
+    """Rename old (un-numbered) pipe folders to their new numbered equivalents.
+
+    Only renames; never deletes.  Safe to call repeatedly — skips any pair
+    where the old folder is absent, the new folder already exists, or the old
+    path is a file rather than a directory.
+    """
+    for old_name, new_name in FOLDER_NAME_MIGRATIONS.items():
+        old_path = os.path.join(folderpath, old_name)
+        new_path = os.path.join(folderpath, new_name)
+
+        if not os.path.exists(old_path):
+            continue  # nothing to rename
+        if not os.path.isdir(old_path):
+            logger.warning(f"Migration skipped: {old_path} exists but is not a directory")
+            continue
+        if os.path.exists(new_path):
+            logger.debug(f"Migration skipped: target {new_path} already exists")
+            continue
+
+        try:
+            os.rename(old_path, new_path)
+            logger.info(f"Migrated folder: {old_name!r} → {new_name!r}")
+        except Exception as e:
+            logger.warning(f"Failed to migrate folder {old_path} → {new_path}: {e}")
+
+
 def _check_folder_existence(folderpath):
     """Check if the folder exists and is a directory."""
     logger.debug(f"Checking if folder exists: {folderpath}")
@@ -219,10 +247,11 @@ def _check_pipe_folder_structure(folderpath):
     optional_folders = [
         FolderNames.DECOMPOSITION_RESULTS.value,
         FolderNames.ANALYSIS.value,
-        # These folders are created on-demand (CoVISI / duplicate removal / MUEdit export may never run)
+        # These folders are created on-demand (CoVISI / duplicate removal / MUEdit / SCD may never run)
         FolderNames.DECOMPOSITION_COVISI_FILTERED.value,
         FolderNames.DECOMPOSITION_REMOVED_DUPLICATES.value,
         FolderNames.DECOMPOSITION_MUEDIT.value,
+        FolderNames.DECOMPOSITION_SCD_EDITION.value,
     ]
 
     # Check if each expected subfolder exists
