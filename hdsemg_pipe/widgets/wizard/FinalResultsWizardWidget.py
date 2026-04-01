@@ -15,6 +15,7 @@ from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.actions.decomposition_export import (
     apply_muedit_edits_to_json
 )
+from hdsemg_pipe.actions.process_log import read_manual_cleaning_tool
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius, Fonts
 import json
 
@@ -152,6 +153,51 @@ class NotebookExportWorker(QThread):
             self.error.emit(f"Notebook export failed: {str(e)}")
 
 
+class PklConversionWorker(QThread):
+    """Worker thread for converting edited PKL files to per-port JSON files."""
+
+    progress = pyqtSignal(int, int, str)
+    finished = pyqtSignal(int, int, list)  # success_count, error_count, error_messages
+    error = pyqtSignal(str)
+
+    def __init__(self, edited_pkl_files, results_folder, parent=None):
+        super().__init__(parent)
+        self.edited_pkl_files = list(edited_pkl_files)
+        self.results_folder = results_folder
+
+    def run(self):
+        from pathlib import Path as _Path
+        from hdsemg_pipe.actions.decomposition_file import DecompositionFile
+
+        success_count = 0
+        error_count = 0
+        error_messages = []
+        total = len(self.edited_pkl_files)
+
+        try:
+            for idx, pkl_path in enumerate(self.edited_pkl_files):
+                filename = os.path.basename(pkl_path)
+                self.progress.emit(idx, total, f"Converting {filename}...")
+                try:
+                    stem = os.path.splitext(filename)[0]
+                    pkl_stem = stem[: -len("_edited")]
+                    decomp = DecompositionFile.load(_Path(pkl_path))
+                    output_paths = decomp.to_json(_Path(self.results_folder), pkl_stem)
+                    success_count += 1
+                    logger.info("Converted %s → %d JSON file(s)", filename, len(output_paths))
+                except Exception as e:
+                    error_count += 1
+                    msg = f"Failed to convert {filename}: {str(e)}"
+                    error_messages.append(msg)
+                    logger.error(msg)
+
+            self.finished.emit(success_count, error_count, error_messages)
+
+        except Exception as e:
+            logger.exception("PklConversionWorker failed")
+            self.error.emit(f"PKL conversion failed: {str(e)}")
+
+
 class FinalResultsWizardWidget(WizardStepWidget):
     """
     Step 12: Convert edited files and show final results.
@@ -175,10 +221,12 @@ class FinalResultsWizardWidget(WizardStepWidget):
         self.json_source_folder = None  # where source JSONs live (covisi_filtered or auto)
         self.results_folder = None
         self.edited_files = []
+        self.edited_pkl_files = []
         self.exported_files = []
         self.conversion_worker = None
         self.notebook_worker = None
         self.multigrid_groupings = {}  # group_name -> [json_filenames]
+        self._use_pkl = False
 
         # Create status UI
         self.create_status_ui()
@@ -256,6 +304,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
         self.decomp_folder = global_state.get_decomposition_path()  # decomposition_auto/
         self._update_json_source_folder()
         self.results_folder = global_state.get_decomposition_results_path()
+        self._use_pkl = (read_manual_cleaning_tool() == "scd_edition")
 
         # Load multi-grid groupings (needed for converting multi-grid files back to JSON)
         self._load_multigrid_groupings()
@@ -314,7 +363,11 @@ class FinalResultsWizardWidget(WizardStepWidget):
             self.multigrid_groupings = {}
 
     def scan_files(self):
-        """Scan for edited MUEdit files and exported JSON files."""
+        """Scan for edited files and exported JSON files."""
+        if self._use_pkl:
+            self._scan_pkl_files()
+            return
+
         if not os.path.exists(self.decomp_folder):
             return
 
@@ -357,8 +410,60 @@ class FinalResultsWizardWidget(WizardStepWidget):
             self.btn_show_results.setEnabled(True)
             self.btn_export_notebook.setEnabled(True)
 
+    def _scan_pkl_files(self):
+        """Scan for edited PKL files (scd-edition path)."""
+        removed_dups = global_state.get_decomposition_removed_duplicates_path()
+        covisi_filtered = global_state.get_decomposition_covisi_filtered_path()
+        auto_folder = self.decomp_folder
+
+        source_dir = None
+        if removed_dups and os.path.isdir(removed_dups) and any(
+            f.endswith("_duplicates_removed.pkl") for f in os.listdir(removed_dups)
+        ):
+            source_dir = removed_dups
+        elif covisi_filtered and os.path.isdir(covisi_filtered) and any(
+            f.endswith("_covisi_filtered.pkl") for f in os.listdir(covisi_filtered)
+        ):
+            source_dir = covisi_filtered
+        elif auto_folder and os.path.isdir(auto_folder):
+            source_dir = auto_folder
+
+        self.edited_pkl_files = []
+        if source_dir:
+            self.edited_pkl_files = [
+                os.path.join(source_dir, f)
+                for f in os.listdir(source_dir)
+                if f.endswith("_edited.pkl")
+            ]
+
+        # Scan exported JSON files in results folder
+        self.exported_files = []
+        if self.results_folder and os.path.exists(self.results_folder):
+            self.exported_files = [
+                os.path.join(self.results_folder, f)
+                for f in os.listdir(self.results_folder)
+                if f.endswith(".json")
+            ]
+
+        if self.edited_pkl_files:
+            self.status_label.setText(
+                f"Found {len(self.edited_pkl_files)} edited PKL file(s) ready for conversion"
+            )
+            self.btn_convert.setEnabled(True)
+        else:
+            self.status_label.setText("Waiting for edited PKL files...")
+            self.btn_convert.setEnabled(False)
+
+        if self.exported_files:
+            self.btn_show_results.setEnabled(True)
+            self.btn_export_notebook.setEnabled(True)
+
     def start_conversion(self):
         """Start the conversion process."""
+        if self._use_pkl:
+            self._start_pkl_conversion()
+            return
+
         if not self.edited_files:
             self.warn("No edited files to convert.")
             return
@@ -386,6 +491,29 @@ class FinalResultsWizardWidget(WizardStepWidget):
         self.conversion_worker.start()
 
         logger.info(f"Starting conversion of {len(self.edited_files)} file(s)...")
+
+    def _start_pkl_conversion(self):
+        """Start PKL→JSON conversion for scd-edition path."""
+        if not self.edited_pkl_files:
+            self.warn("No edited PKL files to convert.")
+            return
+
+        self.btn_convert.setEnabled(False)
+        self.btn_show_results.setEnabled(False)
+
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setMaximum(len(self.edited_pkl_files))
+
+        self.conversion_worker = PklConversionWorker(
+            self.edited_pkl_files, self.results_folder
+        )
+        self.conversion_worker.progress.connect(self.on_conversion_progress)
+        self.conversion_worker.finished.connect(self.on_conversion_finished)
+        self.conversion_worker.error.connect(self.on_conversion_error)
+        self.conversion_worker.start()
+
+        logger.info("Starting PKL→JSON conversion for %d file(s)...", len(self.edited_pkl_files))
 
     def on_conversion_progress(self, current, total, message):
         """Handle conversion progress updates."""
@@ -512,6 +640,7 @@ class FinalResultsWizardWidget(WizardStepWidget):
         self._update_json_source_folder()
         self._load_multigrid_groupings()
         self.results_folder = global_state.get_decomposition_results_path()
+        self._use_pkl = (read_manual_cleaning_tool() == "scd_edition")
 
         # Create results folder if needed
         if not os.path.exists(self.results_folder):

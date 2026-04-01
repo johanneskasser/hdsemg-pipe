@@ -54,6 +54,7 @@ from hdsemg_pipe.ui_elements.theme import (
     Spacing,
     Styles,
 )
+from hdsemg_pipe.actions.process_log import read_manual_cleaning_tool
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 
 try:
@@ -178,6 +179,85 @@ class PostValidationWorker(QThread):
         return None
 
 
+class PklPostValidationWorker(QThread):
+    """Worker thread for computing post-cleaning validation from PKL files."""
+
+    progress = pyqtSignal(int, int, str)
+    result = pyqtSignal(str, dict)
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, edited_pkl_files, parent=None):
+        super().__init__(parent)
+        self.edited_pkl_files = list(edited_pkl_files)
+
+    def run(self):
+        from pathlib import Path as _Path
+        from hdsemg_pipe.actions.decomposition_file import DecompositionFile
+
+        overall_report = {
+            "files_validated": 0,
+            "total_mus_pre": 0,
+            "total_mus_post": 0,
+            "avg_improvement": [],
+            "mus_exceeding_threshold": 0,
+            "per_file_reports": {},
+        }
+        try:
+            total = len(self.edited_pkl_files)
+            for idx, edited_path in enumerate(self.edited_pkl_files):
+                edited_path = _Path(edited_path)
+                filename = edited_path.name
+                self.progress.emit(idx, total, f"Validating {filename}...")
+                try:
+                    # Derive source PKL by stripping _edited from stem
+                    stem = edited_path.stem
+                    source_stem = stem[: -len("_edited")]
+                    source_path = edited_path.parent / f"{source_stem}.pkl"
+
+                    if not source_path.exists():
+                        logger.warning("Source PKL not found: %s", source_path)
+                        continue
+
+                    pre_covisi = DecompositionFile.load(source_path).compute_covisi()
+                    post_covisi = DecompositionFile.load(edited_path).compute_covisi()
+
+                    comparison = compare_pre_post_covisi(pre_covisi, post_covisi)
+                    comparison["source_path"] = str(source_path)
+                    comparison["edited_path"] = str(edited_path)
+
+                    self.result.emit(filename, comparison)
+
+                    overall_report["files_validated"] += 1
+                    overall_report["total_mus_pre"] += comparison["pre_mu_count"]
+                    overall_report["total_mus_post"] += comparison["post_mu_count"]
+                    overall_report["mus_exceeding_threshold"] += len(
+                        comparison["mus_exceeding_threshold"]
+                    )
+                    if comparison["avg_improvement_percent"] is not None:
+                        overall_report["avg_improvement"].append(
+                            comparison["avg_improvement_percent"]
+                        )
+                    overall_report["per_file_reports"][filename] = comparison
+
+                except Exception as e:
+                    logger.error("Failed to validate %s: %s", filename, e)
+                    overall_report["per_file_reports"][filename] = {"error": str(e)}
+
+            if overall_report["avg_improvement"]:
+                overall_report["avg_improvement_overall"] = np.mean(
+                    overall_report["avg_improvement"]
+                )
+            else:
+                overall_report["avg_improvement_overall"] = None
+
+            self.finished.emit(overall_report)
+
+        except Exception as e:
+            logger.exception("PklPostValidationWorker failed")
+            self.error.emit(f"PKL post-validation failed: {str(e)}")
+
+
 class CoVISIPostValidationWizardWidget(WizardStepWidget):
     """
     Step 9.5: CoVISI Post-Validation.
@@ -205,6 +285,8 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.json_source_folder = None  # where source JSONs live (covisi_filtered or auto)
         self.edited_files = []
         self.json_files = []
+        self.edited_pkl_files = []
+        self._use_pkl = False
         self.multigrid_skipped_count = 0  # count of multigrid files skipped (not validatable)
         self.fsamp_dict = {}
         self.validation_results = {}
@@ -464,8 +546,9 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
         self.muedit_folder = global_state.get_decomposition_muedit_path()
         self._update_json_source_folder()
+        self._use_pkl = (read_manual_cleaning_tool() == "scd_edition")
 
-        if not OPENHDEMG_AVAILABLE:
+        if not OPENHDEMG_AVAILABLE and not self._use_pkl:
             self.status_label.setText(
                 "⚠️ openhdemg library not available. Validation disabled."
             )
@@ -501,7 +584,11 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             self.json_source_folder = global_state.get_decomposition_path()  # decomposition_auto
 
     def scan_files(self):
-        """Scan for edited MAT files (from decomposition_muedit/) and corresponding JSON files."""
+        """Scan for edited files and corresponding source files."""
+        if self._use_pkl:
+            self._scan_pkl_files()
+            return
+
         if not os.path.exists(self.muedit_folder):
             self.status_label.setText("MUEdit folder not found.")
             return
@@ -582,8 +669,52 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             self.btn_accept.setEnabled(False)
             self.btn_return_muedit.setEnabled(False)
 
+    def _scan_pkl_files(self):
+        """Scan for edited PKL files for scd-edition post-validation."""
+        removed_dups = global_state.get_decomposition_removed_duplicates_path()
+        covisi_filtered = global_state.get_decomposition_covisi_filtered_path()
+        auto_folder = global_state.get_decomposition_path()
+
+        source_dir = None
+        if removed_dups and os.path.isdir(removed_dups) and any(
+            f.endswith("_duplicates_removed.pkl") for f in os.listdir(removed_dups)
+        ):
+            source_dir = removed_dups
+        elif covisi_filtered and os.path.isdir(covisi_filtered) and any(
+            f.endswith("_covisi_filtered.pkl") for f in os.listdir(covisi_filtered)
+        ):
+            source_dir = covisi_filtered
+        elif auto_folder and os.path.isdir(auto_folder):
+            source_dir = auto_folder
+
+        self.edited_pkl_files = []
+        if source_dir:
+            self.edited_pkl_files = [
+                os.path.join(source_dir, f)
+                for f in os.listdir(source_dir)
+                if f.endswith("_edited.pkl")
+            ]
+
+        if self.edited_pkl_files:
+            self.status_label.setText(
+                f"Found {len(self.edited_pkl_files)} edited PKL file(s). "
+                "Click 'Run Validation' to compare CoVISI values."
+            )
+            self.btn_validate.setEnabled(True)
+            self.btn_accept.setEnabled(True)
+            self.btn_return_muedit.setEnabled(True)
+        else:
+            self.status_label.setText("No edited PKL files found for validation.")
+            self.btn_validate.setEnabled(False)
+            self.btn_accept.setEnabled(False)
+            self.btn_return_muedit.setEnabled(False)
+
     def start_validation(self):
         """Start the validation process."""
+        if self._use_pkl:
+            self._start_pkl_validation()
+            return
+
         if not self.edited_files:
             self.warn("No edited files to validate.")
             return
@@ -618,6 +749,35 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         logger.info(
             f"Starting post-validation for {len(self.edited_files)} file(s)..."
         )
+
+    def _start_pkl_validation(self):
+        """Start post-validation for PKL files (scd-edition path)."""
+        if not self.edited_pkl_files:
+            self.warn("No edited PKL files to validate.")
+            return
+
+        self.btn_validate.setEnabled(False)
+        self.btn_accept.setEnabled(False)
+        self.btn_filter.setEnabled(False)
+        self.btn_return_muedit.setEnabled(False)
+
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setMaximum(len(self.edited_pkl_files))
+
+        self.validation_results.clear()
+        self.results_table.setRowCount(0)
+        self.summary_frame.setVisible(False)
+        self.warning_frame.setVisible(False)
+
+        self.validation_worker = PklPostValidationWorker(self.edited_pkl_files)
+        self.validation_worker.progress.connect(self.on_validation_progress)
+        self.validation_worker.result.connect(self.on_validation_result)
+        self.validation_worker.finished.connect(self.on_validation_finished)
+        self.validation_worker.error.connect(self.on_validation_error)
+        self.validation_worker.start()
+
+        logger.info("Starting PKL post-validation for %d file(s)...", len(self.edited_pkl_files))
 
     def on_validation_progress(self, current, total, message):
         """Handle validation progress."""
@@ -1041,6 +1201,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         """Initialize file checking for state reconstruction."""
         self.muedit_folder = global_state.get_decomposition_muedit_path()
         self._update_json_source_folder()
+        self._use_pkl = (read_manual_cleaning_tool() == "scd_edition")
         self.scan_files()
 
         if self.is_completed():

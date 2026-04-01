@@ -21,6 +21,22 @@ In order to install hdsemg-pipe, follow the instructions in the [installation gu
 
 ### Quick Installation
 
+#### Installation from PyPi
+
+1. Available as a Python package and can be installed via pip:
+
+```bash
+  pip install hdsemg-pipe
+```
+
+2. After the installation, you can run the application from the command line:
+
+```bash
+  python -m hdsemg_pipe.main
+```
+
+#### Installation from source
+
 1. Create a virtual environment (recommended):
 
 ```bash
@@ -42,25 +58,16 @@ In order to install hdsemg-pipe, follow the instructions in the [installation gu
     
 ```
 
-2. hdsemg-pipe is available as a Python package and can be installed via pip:
-
-```bash
-  pip install hdsemg-pipe
-```
-
-3. After the installation, you can run the application using from the command line:
-
-```bash
-  python -m hdsemg_pipe.main
-```
-
-
 ## Features
 
 - 📁 File management and preprocessing
 - 🔗 Grid association and ROI definition
 - 🎚️ Channel selection and decomposition result visualization
-- ⚡️ Integration with external tools like openhdemg
+- ⚡️ Integration with external tools like
+  - [openhdemg](https://github.com/GiacomoValliPhD/openhdemg)
+  - [Swarm Contrastive Decomposition](https://github.com/AgneGris/swarm-contrastive-decomposition)
+  - [SCD Edition](https://github.com/AgneGris/scd-edition)
+  - [MUedit](https://github.com/simonavrillon/MUedit)
 
 ## Acknowledgments
 

@@ -5,6 +5,7 @@ This step launches MUEdit for manual cleaning of decomposition results
 and monitors progress.
 """
 import os
+import re
 import subprocess
 from PyQt5.QtCore import QFileSystemWatcher, QTimer, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -19,6 +20,13 @@ from hdsemg_pipe.widgets.MUEditInstructionDialog import MUEditInstructionDialog
 from hdsemg_pipe.config.config_enums import Settings, MUEditLaunchMethod
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius, Fonts
+from hdsemg_pipe.actions.process_log import (
+    read_manual_cleaning_tool,
+    read_process_log,
+    write_manual_cleaning_tool,
+)
+
+_GRID_KEY_RE = re.compile(r'\d+mm_\d+x\d+(?:_\d+)?')
 
 
 class MUFileScanWorker(QThread):
@@ -152,6 +160,100 @@ class JSONExportWorker(QThread):
             self.error.emit(f"Export failed: {str(e)}")
 
 
+class ScdEditionWorker(QThread):
+    """Worker thread for sequential scd-edition manual cleaning of PKL files."""
+
+    progress = pyqtSignal(int, int, str)   # current, total, message
+    file_done = pyqtSignal(str)            # path of successfully produced _edited.pkl
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, pkl_files, parent=None):
+        super().__init__(parent)
+        self.pkl_files = list(pkl_files)
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        total = len(self.pkl_files)
+        done = 0
+        try:
+            for pkl_path in self.pkl_files:
+                if self._cancelled:
+                    break
+                stem = os.path.splitext(os.path.basename(pkl_path))[0]
+                output_path = os.path.join(os.path.dirname(pkl_path), f"{stem}_edited.pkl")
+                if os.path.exists(output_path):
+                    done += 1
+                    self.file_done.emit(output_path)
+                    self.progress.emit(done, total, f"Already edited: {stem}")
+                    continue
+                self.progress.emit(done, total, f"Editing: {stem}...")
+                proc = subprocess.Popen([
+                    "scd-edition",
+                    "--open", pkl_path,
+                    "--output", output_path,
+                    "--quit-after-save",
+                ])
+                proc.wait()
+                if os.path.exists(output_path):
+                    done += 1
+                    self.file_done.emit(output_path)
+                    self.progress.emit(done, total, f"Done: {stem}")
+                else:
+                    logger.warning("scd-edition closed without saving: %s", pkl_path)
+        except Exception as e:
+            logger.exception("ScdEditionWorker failed")
+            self.error.emit(str(e))
+        self.finished.emit()
+
+
+class _PklMergeWorker(QThread):
+    """Upgrade old-format PKLs then merge single-grid PKLs into multi-port PKLs.
+
+    Thin wrapper around detect_and_upgrade_pkl and merge_grid_pkls.
+    Emits ``finished`` with the list of merged PKL paths on success.
+    """
+
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, decomp_auto_path: str, channelselection_path: str, parent=None):
+        super().__init__(parent)
+        self.decomp_auto_path = decomp_auto_path
+        self.channelselection_path = channelselection_path
+
+    def run(self):
+        try:
+            from pathlib import Path as _Path
+            from hdsemg_pipe.scd_utils import detect_and_upgrade_pkl, merge_grid_pkls
+
+            target = _Path(self.decomp_auto_path)
+            channelselection = _Path(self.channelselection_path)
+
+            self.progress.emit("Checking PKL format compatibility…")
+            detect_and_upgrade_pkl.process_path(target)
+
+            self.progress.emit("Merging single-grid PKLs into multi-port files…")
+            mat_dirs = [str(channelselection)] if channelselection.is_dir() else []
+            merge_grid_pkls.process(target=target, out_dir=target, mat_dirs=mat_dirs)
+
+            merged = [
+                str(p) for p in sorted(target.glob("*.pkl"))
+                if not p.name.endswith(".bak")
+                and not _GRID_KEY_RE.search(p.stem)
+                and not p.stem.endswith("_edited")
+            ]
+            self.finished.emit(merged)
+        except Exception as exc:
+            import traceback
+            logger.error("PKL merge failed: %s\n%s", exc, traceback.format_exc())
+            self.error.emit(str(exc))
+
+
 class MUEditCleaningWizardWidget(WizardStepWidget):
     """
     Step 10: Manual cleaning with MUEdit.
@@ -191,6 +293,13 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.export_worker = None
         self.export_completed = False
 
+        # scd-edition path state
+        self.pkl_files = []
+        self.edited_pkl_files = []
+        self.scd_worker = None
+        self.pkl_merge_worker = None
+        self._use_pkl = False
+
         # Loading animation timer
         self.loading_animation_timer = QTimer(self)
         self.loading_animation_timer.timeout.connect(self._update_loading_animation)
@@ -198,11 +307,11 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         # Initialize file system watcher
         self.watcher = QFileSystemWatcher(self)
-        self.watcher.directoryChanged.connect(lambda: self.scan_muedit_files(skip_mu_check=self.indexing_needed))
+        self.watcher.directoryChanged.connect(self._poll_scan)
 
         # Add polling timer for reliable file detection (QFileSystemWatcher can miss events on Windows)
         self.poll_timer = QTimer(self)
-        self.poll_timer.timeout.connect(lambda: self.scan_muedit_files(skip_mu_check=self.indexing_needed))
+        self.poll_timer.timeout.connect(self._poll_scan)
         self.poll_timer.setInterval(2000)  # Check every 2 seconds
 
         # Create status UI
@@ -287,12 +396,19 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
     def create_buttons(self):
         """Create buttons for this step."""
-        self.btn_launch_muedit = QPushButton("Open MUEdit")
+        self.btn_launch_muedit = QPushButton("Edit with MUedit")
         self.btn_launch_muedit.setStyleSheet(Styles.button_primary())
-        self.btn_launch_muedit.setToolTip("Launch MUEdit for manual cleaning")
-        self.btn_launch_muedit.clicked.connect(self.launch_muedit)
+        self.btn_launch_muedit.setToolTip("Launch MUEdit (MATLAB-based) for manual cleaning")
+        self.btn_launch_muedit.clicked.connect(self._on_choose_muedit)
         self.btn_launch_muedit.setEnabled(False)
         self.buttons.append(self.btn_launch_muedit)
+
+        self.btn_launch_scd = QPushButton("Edit with scd-edition")
+        self.btn_launch_scd.setStyleSheet(Styles.button_secondary())
+        self.btn_launch_scd.setToolTip("Launch scd-edition (Python-native) for manual cleaning")
+        self.btn_launch_scd.clicked.connect(self._on_choose_scd)
+        self.btn_launch_scd.setEnabled(False)
+        self.buttons.append(self.btn_launch_scd)
 
     def check(self):
         """Check if this step can be activated."""
@@ -327,24 +443,33 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         self.muedit_folder = global_state.get_decomposition_muedit_path()
 
-        # Load skipped files from disk
+        # Load skipped files from disk (MAT path only; harmless on PKL path)
         self.skipped_files = self._load_skipped_files()
 
-        # Add watcher for multigrid folder (if it exists)
-        if os.path.exists(self.muedit_folder):
-            if self.muedit_folder not in self.watcher.directories():
-                self.watcher.addPath(self.muedit_folder)
+        # Detect which tool to use and route accordingly
+        tool = read_manual_cleaning_tool()
+        self._use_pkl = (tool == "scd_edition")
 
-        # Start polling timer for reliable file detection
-        if os.path.exists(self.muedit_folder):
-            if not self.poll_timer.isActive():
-                self.poll_timer.start()
-                logger.info("Started MUEdit file polling timer (2s interval)")
+        if self._use_pkl:
+            if self.expected_folder and os.path.exists(self.expected_folder):
+                if self.expected_folder not in self.watcher.directories():
+                    self.watcher.addPath(self.expected_folder)
+            if self.expected_folder and os.path.exists(self.expected_folder):
+                if not self.poll_timer.isActive():
+                    self.poll_timer.start()
+                    logger.info("Started PKL file polling timer (2s interval)")
+            self._scan_pkl_files()
+        else:
+            if os.path.exists(self.muedit_folder):
+                if self.muedit_folder not in self.watcher.directories():
+                    self.watcher.addPath(self.muedit_folder)
+            if os.path.exists(self.muedit_folder):
+                if not self.poll_timer.isActive():
+                    self.poll_timer.start()
+                    logger.info("Started MUEdit file polling timer (2s interval)")
+            self.scan_muedit_files()
 
-        # Always scan files to show status
-        # NOTE: MAT files should already exist from Step 10 (Remove Duplicates)
-        # This step no longer auto-exports - that's now done in Step 10
-        self.scan_muedit_files()
+        self._update_button_states()
 
         # Check if previous step is completed
         if not global_state.is_widget_completed(f"step{self.step_index - 1}"):
@@ -522,9 +647,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         # Update UI
         self.update_progress_ui()
-
-        # Enable button if files exist
-        self.btn_launch_muedit.setEnabled(len(self.muedit_files) > 0)
+        self._update_button_states()
 
     def _start_initial_scan(self):
         """Start initial scan in background thread."""
@@ -721,14 +844,15 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
 
         # Update UI
         self.update_progress_ui()
-
-        # Enable button if files exist
-        self.btn_launch_muedit.setEnabled(len(self.muedit_files) > 0)
+        self._update_button_states()
 
         logger.debug(f"MUEdit files: {len(self.muedit_files)}, Edited files: {len(self.edited_files)}")
 
     def update_progress_ui(self):
         """Update progress UI with current status."""
+        if self._use_pkl:
+            self._update_pkl_progress_ui()
+            return
         total = len(self.muedit_files)
         edited = len(self.edited_files)
         skipped = len([f for f in self.muedit_files if f in self.skipped_files])
@@ -944,9 +1068,262 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         # Refresh UI to show updated skipped status
         self.update_progress_ui()
 
+    # ------------------------------------------------------------------
+    # Tool routing helpers
+    # ------------------------------------------------------------------
+
+    def _poll_scan(self):
+        """Dispatch file-change polling to the correct scanner."""
+        if self._use_pkl:
+            self._scan_pkl_files()
+        else:
+            self.scan_muedit_files(skip_mu_check=self.indexing_needed)
+
+    def _get_stored_tool(self):
+        """Return the explicitly stored manual_cleaning_tool value, or None."""
+        return read_process_log().get("manual_cleaning_tool")
+
+    def _has_any_pkl(self) -> bool:
+        """Return True if any PKL (including single-grid) exists in the priority chain."""
+        removed_dups = global_state.get_decomposition_removed_duplicates_path()
+        covisi_filtered = global_state.get_decomposition_covisi_filtered_path()
+        auto_folder = global_state.get_decomposition_path()
+
+        if (removed_dups and os.path.isdir(removed_dups) and
+                any(f.endswith("_duplicates_removed.pkl") for f in os.listdir(removed_dups))):
+            return True
+        if (covisi_filtered and os.path.isdir(covisi_filtered) and
+                any(f.endswith("_covisi_filtered.pkl") for f in os.listdir(covisi_filtered))):
+            return True
+        if auto_folder and os.path.isdir(auto_folder):
+            return any(
+                f.endswith(".pkl") and not f.endswith(".pkl.bak")
+                for f in os.listdir(auto_folder)
+            )
+        return False
+
+    def _update_button_states(self):
+        """Enable/disable tool buttons based on stored tool choice and file availability."""
+        _LOCKED_TIP = (
+            "Tool already chosen for this workfolder. "
+            "Start a new workfolder to use a different tool."
+        )
+        stored = self._get_stored_tool()
+        has_mat = bool(self.muedit_files)
+        # Enable scd button if merged PKLs are ready OR if any PKL exists (can be merged on click)
+        has_pkl = bool(self.pkl_files) or self._has_any_pkl()
+
+        if stored == "muedit":
+            self.btn_launch_muedit.setEnabled(has_mat)
+            self.btn_launch_scd.setEnabled(False)
+            self.btn_launch_scd.setToolTip(_LOCKED_TIP)
+        elif stored == "scd_edition":
+            self.btn_launch_scd.setEnabled(has_pkl)
+            self.btn_launch_muedit.setEnabled(False)
+            self.btn_launch_muedit.setToolTip(_LOCKED_TIP)
+        else:
+            # No explicit choice yet — enable each button only if its files exist
+            self.btn_launch_muedit.setEnabled(has_mat)
+            self.btn_launch_scd.setEnabled(has_pkl)
+
+    def _on_choose_muedit(self):
+        """Handle 'Edit with MUedit' button click."""
+        if not self._get_stored_tool():
+            write_manual_cleaning_tool("muedit")
+            self._use_pkl = False
+            self._update_button_states()
+        self.launch_muedit()
+
+    def _on_choose_scd(self):
+        """Handle 'Edit with scd-edition' button click."""
+        if not self._get_stored_tool():
+            write_manual_cleaning_tool("scd_edition")
+            self._use_pkl = True
+            self._update_button_states()
+        # If merged PKLs are already scanned, start immediately.
+        # Otherwise run upgrade+merge first, then start.
+        if self.pkl_files:
+            self._start_scd_edition()
+        else:
+            self._run_pkl_merge_then_edit()
+
+    def _run_pkl_merge_then_edit(self):
+        """Run PKL upgrade+merge in background, then start scd-edition."""
+        auto_folder = global_state.get_decomposition_path()
+        channelselection = global_state.get_channel_selection_path()
+        if not auto_folder or not os.path.isdir(auto_folder):
+            self.error("decomposition_auto folder not found.")
+            return
+
+        self.btn_launch_scd.setEnabled(False)
+        self.loading_label.setText("Preparing PKL files…")
+        self.loading_label.setVisible(True)
+
+        self.pkl_merge_worker = _PklMergeWorker(auto_folder, channelselection or "")
+        self.pkl_merge_worker.progress.connect(self._on_pkl_merge_progress)
+        self.pkl_merge_worker.finished.connect(self._on_pkl_merge_finished)
+        self.pkl_merge_worker.error.connect(self._on_pkl_merge_error)
+        self.pkl_merge_worker.start()
+
+    def _on_pkl_merge_progress(self, msg: str):
+        self.loading_label.setText(msg)
+
+    def _on_pkl_merge_finished(self, _merged_paths: list):
+        self.pkl_merge_worker = None
+        self.loading_label.setVisible(False)
+        self._scan_pkl_files()
+        if self.pkl_files:
+            self._start_scd_edition()
+        else:
+            self.error("PKL merge produced no files. Check decomposition_auto/ folder.")
+            self._update_button_states()
+
+    def _on_pkl_merge_error(self, msg: str):
+        self.pkl_merge_worker = None
+        self.loading_label.setVisible(False)
+        self.error(f"PKL preparation failed: {msg}")
+        self._update_button_states()
+
+    # ------------------------------------------------------------------
+    # PKL path: scanning and progress UI
+    # ------------------------------------------------------------------
+
+    def _scan_pkl_files(self):
+        """Scan for PKL files using the scd-edition priority chain."""
+        removed_dups = global_state.get_decomposition_removed_duplicates_path()
+        covisi_filtered = global_state.get_decomposition_covisi_filtered_path()
+        auto_folder = global_state.get_decomposition_path()
+
+        source_dir = None
+        if (removed_dups and os.path.isdir(removed_dups) and
+                any(f.endswith("_duplicates_removed.pkl") for f in os.listdir(removed_dups))):
+            source_dir = removed_dups
+        elif (covisi_filtered and os.path.isdir(covisi_filtered) and
+              any(f.endswith("_covisi_filtered.pkl") for f in os.listdir(covisi_filtered))):
+            source_dir = covisi_filtered
+        elif auto_folder and os.path.isdir(auto_folder):
+            source_dir = auto_folder
+
+        if not source_dir:
+            self.pkl_files = []
+            self.edited_pkl_files = []
+            self._update_button_states()
+            return
+
+        if source_dir not in self.watcher.directories():
+            self.watcher.addPath(source_dir)
+
+        pkl_files = []
+        for fname in os.listdir(source_dir):
+            if not fname.endswith(".pkl") or fname.endswith(".pkl.bak"):
+                continue
+            stem = fname[:-4]
+            if stem.endswith("_edited"):
+                continue  # output file, not a source
+            if source_dir == auto_folder and _GRID_KEY_RE.search(stem):
+                continue  # single-grid PKL in auto folder — skip
+            pkl_files.append(os.path.join(source_dir, fname))
+
+        edited_pkl_files = []
+        for pkl in pkl_files:
+            stem = os.path.splitext(os.path.basename(pkl))[0]
+            edited = os.path.join(source_dir, f"{stem}_edited.pkl")
+            if os.path.exists(edited):
+                edited_pkl_files.append(edited)
+
+        self.pkl_files = pkl_files
+        self.edited_pkl_files = edited_pkl_files
+        self._update_pkl_progress_ui()
+        self._update_button_states()
+
+    def _update_pkl_progress_ui(self):
+        """Update progress UI for scd-edition PKL path."""
+        total = len(self.pkl_files)
+        edited = len(self.edited_pkl_files)
+
+        self.progress_bar.setMaximum(total if total > 0 else 1)
+        self.progress_bar.setValue(edited)
+        self.progress_bar.setFormat(
+            f"{edited} edited / {total} total "
+            f"({int(edited / total * 100) if total > 0 else 0}%)"
+        )
+
+        while self.file_status_layout.count():
+            child = self.file_status_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        edited_stems = {os.path.splitext(os.path.basename(ep))[0] for ep in self.edited_pkl_files}
+        for pkl_path in self.pkl_files:
+            stem = os.path.splitext(os.path.basename(pkl_path))[0]
+            status_label = QLabel()
+            if stem + "_edited" in edited_stems:
+                status_label.setText(f"✓ {stem}.pkl")
+                status_label.setStyleSheet(
+                    f"color: {Colors.GREEN_700}; font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;"
+                )
+            else:
+                status_label.setText(f"⏳ {stem}.pkl")
+                status_label.setStyleSheet(
+                    f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;"
+                )
+            self.file_status_layout.addWidget(status_label)
+
+        if total > 0 and edited >= total and not self.step_completed:
+            logger.info(f"All PKL files edited! {edited} total")
+            self.complete_step()
+
+    # ------------------------------------------------------------------
+    # PKL path: scd-edition worker
+    # ------------------------------------------------------------------
+
+    def _start_scd_edition(self):
+        """Start sequential scd-edition processing for all PKL files."""
+        if not self.pkl_files:
+            self.error("No PKL files found to edit.")
+            return
+
+        self.scd_worker = ScdEditionWorker(self.pkl_files)
+        self.scd_worker.progress.connect(self._on_scd_progress)
+        self.scd_worker.file_done.connect(self._on_scd_file_done)
+        self.scd_worker.finished.connect(self._on_scd_finished)
+        self.scd_worker.error.connect(self._on_scd_error)
+        self.scd_worker.start()
+        self.loading_label.setText(f"Opening scd-edition for {len(self.pkl_files)} file(s)...")
+        self.loading_label.setVisible(True)
+        self.btn_launch_scd.setEnabled(False)
+
+    def _on_scd_progress(self, current, total, message):
+        self.progress_bar.setMaximum(total if total > 0 else 1)
+        self.progress_bar.setValue(current)
+        self.loading_label.setText(message)
+
+    def _on_scd_file_done(self, edited_path):
+        if edited_path not in self.edited_pkl_files:
+            self.edited_pkl_files.append(edited_path)
+        self._update_pkl_progress_ui()
+
+    def _on_scd_finished(self):
+        self.scd_worker = None
+        self.loading_label.setVisible(False)
+        self._scan_pkl_files()
+        self._update_button_states()
+        self.success("scd-edition session complete.")
+
+    def _on_scd_error(self, error_msg):
+        self.scd_worker = None
+        self.loading_label.setVisible(False)
+        logger.error("scd-edition worker error: %s", error_msg)
+        self.error(f"scd-edition error: {error_msg}")
+
     def is_completed(self):
         """Check if this step is completed."""
-        # Step is completed when all MUEdit files have been either edited or skipped
+        if self._use_pkl:
+            total = len(self.pkl_files)
+            edited = len(self.edited_pkl_files)
+            return total > 0 and edited >= total
+
+        # MAT path: completed when all MUEdit files have been either edited or skipped
         total = len(self.muedit_files)
         edited = len(self.edited_files)
         skipped = len([f for f in self.muedit_files if f in self.skipped_files])
@@ -998,9 +1375,15 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             if not self.poll_timer.isActive():
                 self.poll_timer.start()
 
-        # Use fast scan during state reconstruction (skip motor unit checking)
-        # This is much faster and doesn't block the UI
-        self.scan_muedit_files(skip_mu_check=True)
+        # Detect tool and use appropriate fast scan
+        tool = read_manual_cleaning_tool()
+        self._use_pkl = (tool == "scd_edition")
+
+        if self._use_pkl:
+            self._scan_pkl_files()
+        else:
+            # Fast scan: skip motor unit checking to avoid blocking the UI
+            self.scan_muedit_files(skip_mu_check=True)
 
         logger.info(f"File checking initialized for folder (fast mode): {self.expected_folder}")
 
@@ -1015,6 +1398,14 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         if hasattr(self, 'scan_worker') and self.scan_worker and self.scan_worker.isRunning():
             self.scan_worker.quit()
             self.scan_worker.wait(1000)  # Wait up to 1 second
+
+        if hasattr(self, 'scd_worker') and self.scd_worker and self.scd_worker.isRunning():
+            self.scd_worker.cancel()
+            self.scd_worker.wait(2000)
+
+        if hasattr(self, 'pkl_merge_worker') and self.pkl_merge_worker and self.pkl_merge_worker.isRunning():
+            self.pkl_merge_worker.quit()
+            self.pkl_merge_worker.wait(2000)
 
         logger.debug("MUEditCleaningWizardWidget cleanup completed")
 

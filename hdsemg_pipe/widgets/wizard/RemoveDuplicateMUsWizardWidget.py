@@ -38,6 +38,8 @@ from PyQt5.QtWidgets import (
 )
 
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.decomposition_file import DecompositionFile
+from hdsemg_pipe.actions.process_log import read_manual_cleaning_tool
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.GridGroupingDialog import GridGroupingDialog
@@ -341,6 +343,103 @@ class JSONExportWorker(QThread):
             self.error.emit(f"Export failed: {str(e)}")
 
 
+class PklDuplicateWorker(QThread):
+    """Duplicate detection + removal for merged PKL files (scd-edition path).
+
+    Each port in the PKL is treated as a separate "file" for the duplicate
+    detection algorithm.  Identified duplicates are removed from the PKL and
+    the result is saved as ``*_duplicates_removed.pkl``.
+    """
+
+    progress = pyqtSignal(int, int, str)
+    finished = pyqtSignal(int, int)   # saved_count, skipped_count
+    error = pyqtSignal(str)
+
+    def __init__(self, pkl_files, output_folder, maxlag=512, jitter=0.05, tol=0.8,
+                 parent=None):
+        super().__init__(parent)
+        self.pkl_files = pkl_files
+        self.output_folder = output_folder
+        self.maxlag = maxlag
+        self.jitter = jitter
+        self.tol = tol
+
+    def run(self):
+        try:
+            os.makedirs(self.output_folder, exist_ok=True)
+            saved = 0
+            skipped = 0
+            total = len(self.pkl_files)
+
+            for idx, pkl_path in enumerate(self.pkl_files):
+                filename = os.path.basename(pkl_path)
+                self.progress.emit(idx, total, f"Processing {filename}…")
+                try:
+                    decomp = DecompositionFile.load(Path(pkl_path))
+                    fsamp = decomp.get_sampling_rate() or 2048.0
+
+                    # Build per-port minimal emgfile dicts for the algorithm
+                    ports = decomp._pkl.get("ports", []) if decomp._pkl else []
+                    dt_list = decomp._pkl.get("discharge_times", []) if decomp._pkl else []
+                    emgfile_list = []
+                    for port_idx, dt_port in enumerate(dt_list):
+                        emgfile_list.append({
+                            "NUMBER_OF_MUS": len(dt_port),
+                            "MUPULSES": [
+                                __import__("numpy").asarray(dt, dtype="int64").flatten()
+                                for dt in dt_port
+                            ],
+                            "FSAMP": fsamp,
+                        })
+
+                    if not emgfile_list or all(ef["NUMBER_OF_MUS"] == 0 for ef in emgfile_list):
+                        skipped += 1
+                        continue
+
+                    results = detect_duplicates_in_group(
+                        emgfile_list, maxlag=self.maxlag,
+                        jitter=self.jitter, tol=self.tol, fsamp=fsamp,
+                    )
+
+                    # Map duplicate removals back to (port_idx, mu_idx) keep sets
+                    mus_to_remove = set()
+                    for group in results.get("duplicate_groups", []):
+                        for mu in group["mus"]:
+                            if mu != group["survivor"]:
+                                mus_to_remove.add(mu)
+
+                    keep_indices = {}
+                    for port_idx, dt_port in enumerate(dt_list):
+                        keep = {
+                            mu_idx for mu_idx in range(len(dt_port))
+                            if (port_idx, mu_idx) not in mus_to_remove
+                        }
+                        keep_indices[port_idx] = keep
+
+                    # Build filtered DecompositionFile and save
+                    filtered = DecompositionFile()
+                    filtered._path = decomp._path
+                    filtered._backend = "pkl"
+                    filtered._pkl = decomp._pkl
+                    filtered._pkl_keep_indices = keep_indices
+
+                    stem = Path(pkl_path).stem
+                    out_path = Path(self.output_folder) / f"{stem}_duplicates_removed.pkl"
+                    filtered.save(out_path)
+                    saved += 1
+                    logger.info("Saved duplicate-removed PKL: %s", out_path.name)
+
+                except Exception as exc:
+                    logger.error("PKL duplicate processing failed for %s: %s", filename, exc)
+                    skipped += 1
+
+            self.finished.emit(saved, skipped)
+
+        except Exception as exc:
+            import traceback
+            self.error.emit(f"PKL duplicate detection failed: {exc}\n{traceback.format_exc()}")
+
+
 # ============================================================================
 # MAIN WIDGET
 # ============================================================================
@@ -583,13 +682,15 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             'duplicate_detection_report.json'
         }
 
+        # Include *_covisi_filtered.pkl alongside JSON files when using scd_edition
         self.json_files = [
             os.path.join(source_folder, f)
             for f in os.listdir(source_folder)
-            if f.endswith('.json') and f not in state_files and not f.startswith('algorithm_params')
+            if (f.endswith('.json') and f not in state_files and not f.startswith('algorithm_params'))
+            or (f.endswith('_covisi_filtered.pkl'))
         ]
 
-        self.lbl_files_found.setText(f"Found {len(self.json_files)} JSON files in {Path(source_folder).name}/")
+        self.lbl_files_found.setText(f"Found {len(self.json_files)} file(s) in {Path(source_folder).name}/")
 
         if len(self.json_files) > 0:
             self.btn_configure.setEnabled(True)
@@ -624,7 +725,13 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
     def start_detection(self):
         """Start duplicate detection."""
         if len(self.json_files) == 0:
-            self.error("No JSON files to process")
+            self.error("No files to process")
+            return
+
+        # PKL path: route to dedicated PKL worker
+        pkl_files = [f for f in self.json_files if f.endswith(".pkl")]
+        if pkl_files:
+            self._start_detection_pkl(pkl_files)
             return
 
         # Create groups
@@ -693,6 +800,45 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         except Exception as e:
             logger.exception("Failed to start detection")
             self.error(f"Failed to start detection: {str(e)}")
+
+    def _start_detection_pkl(self, pkl_files):
+        """Run duplicate detection + save for PKL files (scd-edition path)."""
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setMaximum(len(pkl_files))
+        self.btn_detect.setEnabled(False)
+        self.btn_apply.setEnabled(False)
+
+        output_folder = global_state.get_decomposition_removed_duplicates_path()
+        self.pkl_dup_worker = PklDuplicateWorker(
+            pkl_files, output_folder,
+            maxlag=self.maxlag_spin.value(),
+            jitter=self.jitter_spin.value(),
+            tol=self.tol_spin.value(),
+        )
+        self.pkl_dup_worker.progress.connect(
+            lambda cur, tot, msg: (self.progress_bar.setValue(cur), self.status_label.setText(msg))
+        )
+        self.pkl_dup_worker.finished.connect(self._on_pkl_dup_finished)
+        self.pkl_dup_worker.error.connect(self._on_pkl_dup_error)
+        self.pkl_dup_worker.start()
+        logger.info("Starting PKL duplicate detection for %d file(s)…", len(pkl_files))
+
+    def _on_pkl_dup_finished(self, saved, skipped):
+        self.progress_bar.setVisible(False)
+        self.btn_detect.setEnabled(True)
+        msg = f"Duplicate removal complete: {saved} PKL(s) saved"
+        if skipped:
+            msg += f", {skipped} skipped"
+        self.success(msg)
+        self.status_label.setText(msg)
+        self.complete_step()
+
+    def _on_pkl_dup_error(self, error_msg):
+        self.progress_bar.setVisible(False)
+        self.btn_detect.setEnabled(True)
+        self.error(error_msg)
+        self.status_label.setText(f"Error: {error_msg}")
 
     def on_detection_progress(self, current, total, message):
         """Handle detection progress updates."""

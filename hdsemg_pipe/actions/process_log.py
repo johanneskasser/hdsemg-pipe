@@ -110,3 +110,63 @@ def get_step_status(step_key: str, workfolder: str = None) -> str | None:
     """
     log = read_process_log(workfolder)
     return log.get("steps", {}).get(step_key, {}).get("status")
+
+
+def write_manual_cleaning_tool(tool: str) -> None:
+    """Write the chosen manual cleaning tool to the process log root.
+
+    Args:
+        tool: ``"muedit"`` or ``"scd_edition"``.
+    """
+    log_path = _get_log_path()
+    if not log_path:
+        logger.debug("Cannot write manual_cleaning_tool: workfolder not set")
+        return
+
+    log = _read_raw(log_path)
+    log.setdefault("version", "1.0")
+    log.setdefault("workfolder", global_state.workfolder)
+    log.setdefault("created", datetime.now().isoformat())
+    log["last_updated"] = datetime.now().isoformat()
+    log["manual_cleaning_tool"] = tool
+
+    try:
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(log, f, indent=2, ensure_ascii=False)
+        logger.debug("manual_cleaning_tool set to: %s", tool)
+    except Exception as e:
+        logger.warning("Could not write manual_cleaning_tool (%s): %s", log_path, e)
+
+
+def read_manual_cleaning_tool(workfolder: str = None) -> str:
+    """Return the manual cleaning tool for this workfolder.
+
+    Returns the stored ``manual_cleaning_tool`` value if present.  When the
+    field is absent, auto-detection is performed:
+
+    1. ``decomposition_muedit/`` contains ``*_muedit.mat`` files → ``"muedit"``
+    2. ``decomposition_covisi_filtered/`` contains ``*_covisi_filtered.pkl`` → ``"scd_edition"``
+    3. Fallback → ``"muedit"``
+    """
+    import glob as _glob
+
+    log = read_process_log(workfolder)
+    stored = log.get("manual_cleaning_tool")
+    if stored:
+        return stored
+
+    folder = workfolder or global_state.workfolder
+    if not folder:
+        return "muedit"
+
+    muedit_dir = os.path.join(folder, "decomposition_muedit")
+    if os.path.isdir(muedit_dir) and _glob.glob(os.path.join(muedit_dir, "*_muedit.mat")):
+        return "muedit"
+
+    covisi_filtered_dir = os.path.join(folder, "decomposition_covisi_filtered")
+    if os.path.isdir(covisi_filtered_dir) and _glob.glob(
+        os.path.join(covisi_filtered_dir, "*_covisi_filtered.pkl")
+    ):
+        return "scd_edition"
+
+    return "muedit"
