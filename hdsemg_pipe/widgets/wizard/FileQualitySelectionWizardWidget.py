@@ -15,35 +15,57 @@ import numpy as np
 import pandas as pd
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
-    QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
+    QScrollArea, QSizePolicy, QSplitter, QStyleFactory, QToolButton,
+    QVBoxLayout, QWidget,
 )
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.tracking_error_metrics import (
+    DEFAULT_THRESHOLDS, METRIC_NAMES, METRIC_NRMSE,
+    TIER_ORDER, compute_metric,
+)
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Fonts, Spacing, Styles
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
+from hdsemg_pipe.widgets.dialogs.TrackingErrorThresholdsDialog import (
+    TrackingErrorThresholdsDialog,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _score_to_label_color(score: Optional[float]) -> Tuple[str, str]:
-    """Map NRMSE score (0–100 %) to (label, hex_color)."""
+def _score_to_label_color(
+    score: Optional[float],
+    thresholds: Optional[Dict[str, float]] = None,
+) -> Tuple[str, str]:
+    """Map a 0–100 quality score to (label, hex_color).
+
+    Parameters
+    ----------
+    score:
+        Quality score in [0, 100] or None.
+    thresholds:
+        Optional dict mapping tier name → minimum score boundary.  When omitted
+        the NRMSE defaults (90/80/70/60) are used for backwards compatibility.
+    """
     if score is None:
         return "N/A", Colors.GRAY_400
-    if score >= 90:
+    if thresholds is None:
+        thresholds = DEFAULT_THRESHOLDS[METRIC_NRMSE]
+    if score >= thresholds.get("excellent", 90):
         return "Excellent", Colors.GREEN_500
-    if score >= 80:
+    if score >= thresholds.get("good", 80):
         return "Good", Colors.BLUE_500
-    if score >= 70:
+    if score >= thresholds.get("ok", 70):
         return "OK", Colors.YELLOW_500
-    if score >= 60:
+    if score >= thresholds.get("troubled", 60):
         return "Troubled", Colors.ORANGE_500
     return "Bad", Colors.RED_500
 
@@ -62,20 +84,6 @@ def _rms_to_label_color(rms: Optional[float]) -> Tuple[str, str]:
         return "Troubled", Colors.ORANGE_500
     return "Bad", Colors.RED_500
 
-
-def _compute_nrmse_score(required: np.ndarray, performed: np.ndarray) -> Optional[float]:
-    """Compute 0–100 % tracking quality score (100 = perfect match).
-
-    Uses Normalized RMSE: score = max(0, (1 - RMSE / range(required)) * 100).
-    """
-    min_len = min(len(required), len(performed))
-    req = required[:min_len].astype(float)
-    perf = performed[:min_len].astype(float)
-    req_range = req.max() - req.min()
-    if req_range < 1e-10:
-        return None
-    rmse = np.sqrt(np.mean((req - perf) ** 2))
-    return max(0.0, (1.0 - rmse / req_range) * 100.0)
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +291,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._last_grouped_mode: Optional[bool] = None
         self._group_file_map: Dict[str, List[str]] = {}   # group_key → [file_paths]
         self._group_headers: Dict[str, _GroupHeader] = {}  # group_key → header widget
+        # Tracking-error metric (persisted in config)
+        self._active_metric: str = config.get(Settings.TRACKING_ERROR_METRIC, METRIC_NRMSE)
 
         super().__init__(
             step_index=5,
@@ -476,7 +486,85 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         dev_cv = QVBoxLayout(dev_col)
         dev_cv.setContentsMargins(0, 0, 0, 0)
         dev_cv.setSpacing(2)
-        dev_cv.addWidget(QLabel("TRACKING DEVIATION (NRMSE)", styleSheet=_ts))
+
+        # Deviation header row: label + metric combo + gear button
+        dev_hdr_row = QWidget()
+        dev_hdr_row.setStyleSheet("background:transparent;")
+        dev_hdr_layout = QHBoxLayout(dev_hdr_row)
+        dev_hdr_layout.setContentsMargins(0, 0, 0, 0)
+        dev_hdr_layout.setSpacing(Spacing.XS)
+
+        dev_hdr_layout.addWidget(QLabel("TRACKING DEVIATION", styleSheet=_ts))
+
+        self._metric_combo = QComboBox()
+        # Force Fusion style so the popup list respects Qt stylesheets on macOS
+        # (native macOS rendering ignores QAbstractItemView stylesheet rules).
+        fusion = QStyleFactory.create("Fusion")
+        if fusion:
+            self._metric_combo.setStyle(fusion)
+        self._metric_combo.addItems(METRIC_NAMES)
+        self._metric_combo.setCurrentText(self._active_metric)
+        self._metric_combo.setFixedHeight(18)
+        self._metric_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self._metric_combo.view().setMinimumWidth(200)
+        self._metric_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {Colors.BG_PRIMARY};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER_MUTED};
+                border-radius: {BorderRadius.SM};
+                font-size: {Fonts.SIZE_XS};
+                font-weight: {Fonts.WEIGHT_MEDIUM};
+                padding: 1px 4px;
+            }}
+            QComboBox::drop-down {{ border: none; width: 14px; }}
+        """)
+        # Style the popup list view directly — macOS native style ignores
+        # QAbstractItemView rules nested inside the parent QComboBox stylesheet.
+        self._metric_combo.view().setStyleSheet(f"""
+            QAbstractItemView {{
+                background-color: {Colors.BG_PRIMARY};
+                color: {Colors.TEXT_PRIMARY};
+                selection-background-color: {Colors.BLUE_100};
+                selection-color: {Colors.TEXT_PRIMARY};
+                outline: none;
+                font-size: {Fonts.SIZE_SM};
+            }}
+            QAbstractItemView::item {{
+                color: {Colors.TEXT_PRIMARY};
+                background-color: {Colors.BG_PRIMARY};
+                padding: 4px 8px;
+                min-height: 22px;
+            }}
+            QAbstractItemView::item:selected,
+            QAbstractItemView::item:hover {{
+                background-color: {Colors.BLUE_100};
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """)
+        self._metric_combo.currentTextChanged.connect(self._on_metric_changed)
+        dev_hdr_layout.addWidget(self._metric_combo)
+
+        self._thresholds_btn = QToolButton()
+        self._thresholds_btn.setText("⚙")
+        self._thresholds_btn.setFixedSize(18, 18)
+        self._thresholds_btn.setToolTip("Configure quality thresholds…")
+        self._thresholds_btn.setStyleSheet(f"""
+            QToolButton {{
+                background: transparent;
+                color: {Colors.TEXT_MUTED};
+                border: none;
+                font-size: 11px;
+                padding: 0px;
+            }}
+            QToolButton:hover {{ color: {Colors.TEXT_PRIMARY}; }}
+        """)
+        self._thresholds_btn.clicked.connect(self._on_open_thresholds_dialog)
+        dev_hdr_layout.addWidget(self._thresholds_btn)
+        dev_hdr_layout.addStretch()
+
+        dev_cv.addWidget(dev_hdr_row)
+
         self._dev_value_lbl = QLabel("—")
         self._dev_value_lbl.setStyleSheet(_vs)
         self._dev_quality_lbl = QLabel("")
@@ -840,8 +928,10 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         # Deviation score
         score: Optional[float] = None
         if required is not None and performed is not None:
-            score = _compute_nrmse_score(required, performed)
+            score = compute_metric(self._active_metric, required, performed)
         self._score_cache[file_path] = score
+
+        thresholds = self._get_active_thresholds()
 
         # RMS
         rms_result = self._get_rms_for_file(file_path)
@@ -850,7 +940,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
 
         # Update status dot colour in the list (prefer deviation score if available)
         if score is not None:
-            dot_color = _score_to_label_color(score)[1]
+            dot_color = _score_to_label_color(score, thresholds)[1]
         elif rms_mean is not None and not np.isnan(rms_mean):
             dot_color = _rms_to_label_color(rms_mean)[1]
         else:
@@ -860,7 +950,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
 
         # Deviation stat
         if score is not None:
-            slabel, scolor = _score_to_label_color(score)
+            slabel, scolor = _score_to_label_color(score, thresholds)
             self._update_stat(self._dev_value_lbl, self._dev_quality_lbl,
                               f"{score:.1f} %", slabel, scolor)
         else:
@@ -876,6 +966,37 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
                               value_text, rlabel, rcolor)
         else:
             self._reset_stat(self._rms_value_lbl, self._rms_quality_lbl)
+
+    # ------------------------------------------------------------------
+    # Metric / threshold helpers and slots
+    # ------------------------------------------------------------------
+
+    def _get_active_thresholds(self) -> Dict[str, float]:
+        """Return the tier thresholds for the currently active metric."""
+        all_thresholds = config.get(Settings.TRACKING_ERROR_THRESHOLDS, {})
+        if isinstance(all_thresholds, dict) and self._active_metric in all_thresholds:
+            stored = all_thresholds[self._active_metric]
+            defaults = DEFAULT_THRESHOLDS.get(self._active_metric, {})
+            return {tier: stored.get(tier, defaults.get(tier, 60.0)) for tier in TIER_ORDER}
+        return dict(DEFAULT_THRESHOLDS.get(self._active_metric, {}))
+
+    def _on_metric_changed(self, metric_name: str):
+        """Switch active metric, persist to config, invalidate score cache, repaint."""
+        self._active_metric = metric_name
+        config.set(Settings.TRACKING_ERROR_METRIC, metric_name)
+        # Scores depend on the metric — invalidate so they are recomputed on next view
+        self._score_cache.clear()
+        # Repaint all quality dots that are already loaded by re-visiting current file
+        if self._current_file:
+            self._on_file_selected(self._current_file)
+
+    def _on_open_thresholds_dialog(self):
+        """Open the thresholds dialog for the active metric and repaint on close."""
+        dlg = TrackingErrorThresholdsDialog(self._active_metric, parent=self)
+        dlg.exec_()
+        # Regardless of accept/reject, thresholds may have changed (reset on "Reset")
+        if self._current_file:
+            self._on_file_selected(self._current_file)
 
     # ------------------------------------------------------------------
     # Stat label helpers
