@@ -23,6 +23,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.file_grouping import get_group_key, shorten_group_labels
 from hdsemg_pipe.actions.tracking_error_metrics import (
     DEFAULT_THRESHOLDS, METRIC_NAMES, METRIC_NRMSE,
     TIER_ORDER, compute_metric,
@@ -178,39 +179,6 @@ class _FileListItem(QWidget):
         self._checkbox.setChecked(checked)
         self._checkbox.blockSignals(False)
         self.selection_changed.emit(self._file_path, checked)
-
-
-# ---------------------------------------------------------------------------
-# Grouping helpers
-# ---------------------------------------------------------------------------
-
-def _get_group_key(filename: str) -> str:
-    """Strip trailing _N number from the stem to get the group key.
-
-    e.g. ``Block1_Pyramid_3.mat`` → ``Block1_Pyramid``
-    Files without a trailing number form their own singleton group.
-    """
-    stem = Path(filename).stem.rstrip('.')   # handle accidental double dots
-    return re.sub(r'_\d+$', '', stem)
-
-
-def _shorten_group_labels(group_keys: List[str]) -> Dict[str, str]:
-    """Return a human-readable label for each group key by stripping the
-    shared filename prefix (proband/date/time/protocol).
-
-    e.g. ``2_20260216_130218_FT_Block1_Pyramid`` → ``Block1 Pyramid``
-    """
-    if not group_keys:
-        return {}
-    common = os.path.commonprefix(group_keys)
-    # Trim to last underscore so we don't cut mid-word
-    if '_' in common:
-        common = common[:common.rfind('_') + 1]
-    result = {}
-    for key in group_keys:
-        unique = key[len(common):]
-        result[key] = unique.replace('_', ' ').strip() or key
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -732,11 +700,11 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         # Build groups preserving file order
         groups: Dict[str, List[str]] = {}
         for fp in all_files:
-            key = _get_group_key(os.path.basename(fp))
+            key = get_group_key(os.path.basename(fp))
             groups.setdefault(key, []).append(fp)
         self._group_file_map = groups
 
-        labels = _shorten_group_labels(list(groups.keys()))
+        labels = shorten_group_labels(list(groups.keys()))
 
         for key, files in groups.items():
             header = _GroupHeader(labels.get(key, key), self._list_container)
@@ -1080,7 +1048,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
     def _on_selection_changed(self, file_path: str, _is_selected: bool):
         self._update_confirm_button()
         if self._grouped_mode:
-            key = _get_group_key(os.path.basename(file_path))
+            key = get_group_key(os.path.basename(file_path))
             if key in self._group_headers and key in self._group_file_map:
                 files = self._group_file_map[key]
                 total = len(files)
