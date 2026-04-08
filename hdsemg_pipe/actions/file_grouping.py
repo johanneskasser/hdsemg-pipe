@@ -14,7 +14,7 @@ def get_group_key(filename: str) -> str:
     e.g. ``Block1_Pyramid_3.mat`` → ``Block1_Pyramid``
     Files without a trailing number form their own singleton group.
     """
-    stem = Path(filename).stem.rstrip(".")
+    stem = Path(filename).stem.rstrip(".")  # handle accidental double dots
     return re.sub(r"_\d+$", "", stem)
 
 
@@ -28,6 +28,7 @@ def shorten_group_labels(group_keys: List[str]) -> Dict[str, str]:
         return {}
     common = os.path.commonprefix(group_keys)
     if "_" in common:
+        # Trim to last underscore so we don't cut mid-word
         common = common[: common.rfind("_") + 1]
     result = {}
     for key in group_keys:

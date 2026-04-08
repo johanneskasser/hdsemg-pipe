@@ -27,4 +27,4 @@ def test_shorten_group_labels_empty():
 
 def test_shorten_group_labels_single_key():
     labels = shorten_group_labels(["only_key"])
-    assert "only_key" in labels
+    assert labels["only_key"] == "key"
