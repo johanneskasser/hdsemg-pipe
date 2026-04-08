@@ -12,6 +12,8 @@ class Settings(Enum):
     OCTAVE_INSTALLED = "OCTAVE_INSTALLED"  # Octave + oct2py available
     MUEDIT_PATH = "MUEDIT_PATH"  # Path to MUEdit folder (to add to MATLAB path)
     MUEDIT_LAUNCH_METHOD = "MUEDIT_LAUNCH_METHOD"  # Method to launch MUEdit
+    TRACKING_ERROR_METRIC = "TRACKING_ERROR_METRIC"  # Selected metric name, e.g. "NRMSE"
+    TRACKING_ERROR_THRESHOLDS = "TRACKING_ERROR_THRESHOLDS"  # Dict[metric → Dict[tier → float]]
 
 
 class LineNoiseRegion(Enum):
