@@ -18,7 +18,9 @@ user-supplied data.  The pickle module is used only for these internal files.
 from __future__ import annotations
 
 import copy
+import math
 import pickle  # SCD result files are trusted internal outputs
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import List, Optional
 
@@ -243,6 +245,47 @@ def _pkl_to_emgfile_dict(pkl: dict, port_idx: int, port_name: str,
         "ACCURACY": pd.DataFrame(np.zeros((n_mus, 1)) if n_mus > 0 else np.empty((0, 1))),
         "EXTRAS": pd.DataFrame(),
     }
+
+
+# -------------------------------------------------------------------------
+# Reliability thresholds
+# -------------------------------------------------------------------------
+
+@dataclass
+class ReliabilityThresholds:
+    """Thresholds for multi-metric MU reliability filtering.
+
+    A MU is considered reliable if all *enabled* criteria pass (OR logic on
+    failure: filtered if ANY enabled criterion fails).
+    """
+
+    sil_min: float = 0.9
+    pnr_min: float = 30.0
+    covisi_max: float = 30.0
+    sil_enabled: bool = True
+    pnr_enabled: bool = True
+    covisi_enabled: bool = True
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ReliabilityThresholds":
+        valid = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
+        return cls(**{k: v for k, v in d.items() if k in valid})
+
+    def is_reliable(self, sil: float, pnr: float, covisi: float) -> bool:
+        """Return True if the MU passes all enabled thresholds."""
+        if self.sil_enabled:
+            if math.isnan(sil) or sil < self.sil_min:
+                return False
+        if self.pnr_enabled:
+            if math.isnan(pnr) or pnr < self.pnr_min:
+                return False
+        if self.covisi_enabled:
+            if math.isnan(covisi) or covisi > self.covisi_max:
+                return False
+        return True
 
 
 # -------------------------------------------------------------------------
