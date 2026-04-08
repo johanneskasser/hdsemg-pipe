@@ -251,7 +251,7 @@ def _pkl_to_emgfile_dict(pkl: dict, port_idx: int, port_name: str,
 # Reliability thresholds
 # -------------------------------------------------------------------------
 
-@dataclass
+@dataclass(frozen=True)
 class ReliabilityThresholds:
     """Thresholds for multi-metric MU reliability filtering.
 
