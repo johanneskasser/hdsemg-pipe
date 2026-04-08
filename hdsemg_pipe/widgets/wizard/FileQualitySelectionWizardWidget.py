@@ -16,7 +16,8 @@ import pandas as pd
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QSplitter, QToolButton, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QSplitter, QStyleFactory, QToolButton,
+    QVBoxLayout, QWidget,
 )
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -496,13 +497,20 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         dev_hdr_layout.addWidget(QLabel("TRACKING DEVIATION", styleSheet=_ts))
 
         self._metric_combo = QComboBox()
+        # Force Fusion style so the popup list respects Qt stylesheets on macOS
+        # (native macOS rendering ignores QAbstractItemView stylesheet rules).
+        fusion = QStyleFactory.create("Fusion")
+        if fusion:
+            self._metric_combo.setStyle(fusion)
         self._metric_combo.addItems(METRIC_NAMES)
         self._metric_combo.setCurrentText(self._active_metric)
         self._metric_combo.setFixedHeight(18)
+        self._metric_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self._metric_combo.view().setMinimumWidth(200)
         self._metric_combo.setStyleSheet(f"""
             QComboBox {{
-                background-color: {Colors.BG_SECONDARY};
-                color: {Colors.TEXT_SECONDARY};
+                background-color: {Colors.BG_PRIMARY};
+                color: {Colors.TEXT_PRIMARY};
                 border: 1px solid {Colors.BORDER_MUTED};
                 border-radius: {BorderRadius.SM};
                 font-size: {Fonts.SIZE_XS};
@@ -510,10 +518,28 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
                 padding: 1px 4px;
             }}
             QComboBox::drop-down {{ border: none; width: 14px; }}
-            QComboBox QAbstractItemView {{
-                background-color: {Colors.BG_SECONDARY};
+        """)
+        # Style the popup list view directly — macOS native style ignores
+        # QAbstractItemView rules nested inside the parent QComboBox stylesheet.
+        self._metric_combo.view().setStyleSheet(f"""
+            QAbstractItemView {{
+                background-color: {Colors.BG_PRIMARY};
                 color: {Colors.TEXT_PRIMARY};
                 selection-background-color: {Colors.BLUE_100};
+                selection-color: {Colors.TEXT_PRIMARY};
+                outline: none;
+                font-size: {Fonts.SIZE_SM};
+            }}
+            QAbstractItemView::item {{
+                color: {Colors.TEXT_PRIMARY};
+                background-color: {Colors.BG_PRIMARY};
+                padding: 4px 8px;
+                min-height: 22px;
+            }}
+            QAbstractItemView::item:selected,
+            QAbstractItemView::item:hover {{
+                background-color: {Colors.BLUE_100};
+                color: {Colors.TEXT_PRIMARY};
             }}
         """)
         self._metric_combo.currentTextChanged.connect(self._on_metric_changed)
