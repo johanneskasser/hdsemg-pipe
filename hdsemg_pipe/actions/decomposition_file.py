@@ -682,7 +682,11 @@ class DecompositionFile:
                 mus_to_remove.append(mu)
 
         if not mus_to_remove:
-            return self
+            inst = DecompositionFile()
+            inst._path = self._path
+            inst._backend = "json"
+            inst._emgfile = self._emgfile
+            return inst
 
         new_ef = copy.deepcopy(self._emgfile)
         new_ef = emg.delete_mus(new_ef, mus_to_remove)
