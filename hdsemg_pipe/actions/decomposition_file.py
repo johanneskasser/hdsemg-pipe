@@ -638,14 +638,21 @@ class DecompositionFile:
             # SIL and PNR via openhdemg
             try:
                 ipts_mu = ipts.iloc[:, mu] if hasattr(ipts, "iloc") else ipts[mu]
+            except Exception:
+                ipts_mu = None
+
+            try:
                 sil_val = float(emg.compute_sil(ipts_mu, np.array(pulses)))
             except Exception:
                 sil_val = float("nan")
 
             try:
-                pnr_val = float(
-                    emg.compute_pnr(ipts_mu, np.array(pulses), fsamp)
-                )
+                if ipts_mu is not None:
+                    pnr_val = float(
+                        emg.compute_pnr(ipts_mu, np.array(pulses), fsamp)
+                    )
+                else:
+                    pnr_val = float("nan")
             except Exception:
                 pnr_val = float("nan")
 
@@ -771,10 +778,8 @@ class DecompositionFile:
 
         for port_idx, dt_port in enumerate(dt_list):
             ipts_port = ipts_list[port_idx] if port_idx < len(ipts_list) else None
-            if ipts_port is not None and hasattr(ipts_port, "__len__") and len(ipts_port) > 0:
-                duration_s = len(ipts_port) / fsamp
-            else:
-                duration_s = float("nan")
+            emg_length = _infer_emg_length_from_pkl(pkl, port_idx)
+            duration_s = emg_length / fsamp if emg_length > 0 else float("nan")
 
             for mu, pulses in enumerate(dt_port):
                 n_spikes = len(pulses) if pulses is not None else 0
