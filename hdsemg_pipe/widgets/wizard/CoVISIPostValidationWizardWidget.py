@@ -12,6 +12,7 @@ Provides quality assurance checkpoint with options to:
 
 import csv
 import json
+import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -292,6 +293,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.validation_results = {}
         self.overall_report = None
         self.validation_worker = None
+        self._post_reliability_cache: dict = {}  # {filename: {mu_idx: {"sil": float, "pnr": float}}}
 
         # Create custom UI
         self.create_validation_ui()
@@ -455,11 +457,13 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         # Results table
         self.results_table = QTableWidget()
         self.results_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.results_table.setColumnCount(6)
+        self.results_table.setColumnCount(8)
         self.results_table.setHorizontalHeaderLabels(
             [
                 "File",
                 "MU Index",
+                "SIL (post)",
+                "PNR post (dB)",
                 "Pre-CoVISI (%)",
                 "Post-CoVISI (%)",
                 "Improvement",
@@ -469,7 +473,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.results_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.Stretch
         )
-        for col in range(1, 6):
+        for col in range(1, 8):
             self.results_table.horizontalHeader().setSectionResizeMode(
                 col, QHeaderView.ResizeToContents
             )
@@ -779,6 +783,29 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
         logger.info("Starting PKL post-validation for %d file(s)...", len(self.edited_pkl_files))
 
+    def _load_post_reliability(self, file_path: str, filename: str) -> dict:
+        """Compute SIL/PNR for a post-cleaning file (cached)."""
+        if filename in self._post_reliability_cache:
+            return self._post_reliability_cache[filename]
+        result = {}
+        try:
+            from hdsemg_pipe.actions.decomposition_file import (
+                DecompositionFile,
+                ReliabilityThresholds,
+            )
+            dec = DecompositionFile.load(Path(file_path))
+            thresholds = ReliabilityThresholds()  # defaults for display only
+            df = dec.compute_reliability(thresholds)
+            for _, row in df.iterrows():
+                result[int(row["mu_index"])] = {
+                    "sil": float(row["sil"]),
+                    "pnr": float(row["pnr"]),
+                }
+        except Exception as exc:
+            logger.warning("Post-reliability computation failed for %s: %s", filename, exc)
+        self._post_reliability_cache[filename] = result
+        return result
+
     def on_validation_progress(self, current, total, message):
         """Handle validation progress."""
         self.progress_bar.setValue(current)
@@ -809,6 +836,31 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             mu_item.setTextAlignment(Qt.AlignCenter)
             self.results_table.setItem(table_row, 1, mu_item)
 
+            # SIL and PNR (post-cleaning)
+            edited_path = comparison.get("edited_path", "")
+            post_rel = self._load_post_reliability(edited_path, filename)
+            mu_rel = post_rel.get(int(detail["mu_index"]), {})
+            sil_val = mu_rel.get("sil", float("nan"))
+            pnr_val = mu_rel.get("pnr", float("nan"))
+
+            sil_item = QTableWidgetItem()
+            if not math.isnan(sil_val):
+                sil_item.setData(Qt.EditRole, float(sil_val))
+                sil_item.setData(Qt.DisplayRole, f"{sil_val:.3f}")
+            else:
+                sil_item.setText("N/A")
+            sil_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.results_table.setItem(table_row, 2, sil_item)
+
+            pnr_item = QTableWidgetItem()
+            if not math.isnan(pnr_val):
+                pnr_item.setData(Qt.EditRole, float(pnr_val))
+                pnr_item.setData(Qt.DisplayRole, f"{pnr_val:.1f}")
+            else:
+                pnr_item.setText("N/A")
+            pnr_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.results_table.setItem(table_row, 3, pnr_item)
+
             # Pre-CoVISI - use setData for proper numeric sorting
             pre_val = detail["covisi_pre"]
             pre_item = QTableWidgetItem()
@@ -819,7 +871,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             else:
                 pre_item.setText("N/A")
             pre_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.results_table.setItem(table_row, 2, pre_item)
+            self.results_table.setItem(table_row, 4, pre_item)
 
             # Post-CoVISI - use setData for proper numeric sorting
             post_val = detail["covisi_post"]
@@ -844,7 +896,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                     post_item.setBackground(Qt.darkRed)
                     post_item.setForeground(Qt.white)
 
-            self.results_table.setItem(table_row, 3, post_item)
+            self.results_table.setItem(table_row, 5, post_item)
 
             # Improvement - use setData for proper numeric sorting
             improvement = detail["improvement_percent"]
@@ -860,7 +912,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             else:
                 improvement_item.setText("N/A")
             improvement_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.results_table.setItem(table_row, 4, improvement_item)
+            self.results_table.setItem(table_row, 6, improvement_item)
 
             # Status
             if detail["exceeds_threshold"]:
@@ -870,7 +922,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                 status_item = QTableWidgetItem("Pass")
                 status_item.setForeground(Qt.darkGreen)
             status_item.setTextAlignment(Qt.AlignCenter)
-            self.results_table.setItem(table_row, 5, status_item)
+            self.results_table.setItem(table_row, 7, status_item)
 
         # Re-enable sorting
         self.results_table.setSortingEnabled(True)
@@ -1040,6 +1092,8 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                 writer.writerow([
                     "File",
                     "MU Index",
+                    "SIL (post)",
+                    "PNR post (dB)",
                     "Pre-CoVISI (%)",
                     "Post-CoVISI (%)",
                     "Improvement (%)",
@@ -1052,21 +1106,29 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                     file_name = self.results_table.item(row_idx, 0).text()
                     mu_index = self.results_table.item(row_idx, 1).data(Qt.DisplayRole)
 
+                    sil_item = self.results_table.item(row_idx, 2)
+                    sil_val = sil_item.data(Qt.DisplayRole) if sil_item.data(Qt.DisplayRole) is not None else sil_item.text()
+
+                    pnr_item = self.results_table.item(row_idx, 3)
+                    pnr_val = pnr_item.data(Qt.DisplayRole) if pnr_item.data(Qt.DisplayRole) is not None else pnr_item.text()
+
                     # Handle potential N/A values
-                    pre_item = self.results_table.item(row_idx, 2)
+                    pre_item = self.results_table.item(row_idx, 4)
                     pre_val = pre_item.data(Qt.DisplayRole) if pre_item.data(Qt.DisplayRole) is not None else pre_item.text()
 
-                    post_item = self.results_table.item(row_idx, 3)
+                    post_item = self.results_table.item(row_idx, 5)
                     post_val = post_item.data(Qt.DisplayRole) if post_item.data(Qt.DisplayRole) is not None else post_item.text()
 
-                    improvement_item = self.results_table.item(row_idx, 4)
+                    improvement_item = self.results_table.item(row_idx, 6)
                     improvement_val = improvement_item.data(Qt.DisplayRole) if improvement_item.data(Qt.DisplayRole) is not None else improvement_item.text()
 
-                    status = self.results_table.item(row_idx, 5).text()
+                    status = self.results_table.item(row_idx, 7).text()
 
                     writer.writerow([
                         file_name,
                         mu_index,
+                        sil_val,
+                        pnr_val,
                         pre_val,
                         post_val,
                         improvement_val,
@@ -1119,6 +1181,8 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             [
                 "File",
                 "MU Index",
+                "SIL (post)",
+                "PNR post (dB)",
                 "Pre-CoVISI (%)",
                 "Post-CoVISI (%)",
                 "Improvement",
@@ -1126,7 +1190,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             ]
         )
         expanded_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for col in range(1, 6):
+        for col in range(1, 8):
             expanded_table.horizontalHeader().setSectionResizeMode(
                 col, QHeaderView.ResizeToContents
             )
