@@ -52,6 +52,7 @@ from hdsemg_pipe.actions.decomposition_file import DecompositionFile, Reliabilit
 from hdsemg_pipe.actions.file_grouping import get_group_key, shorten_group_labels
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Spacing, Styles
+from hdsemg_pipe.ui_elements.toast import toast_manager
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 
 
@@ -113,7 +114,7 @@ class _STAWorker(QThread):
 
 class _ProceedWorker(QThread):
     progress = pyqtSignal(int, int)
-    finished = pyqtSignal()
+    finished = pyqtSignal(int)   # emits n_written
     error = pyqtSignal(str)
 
     def __init__(
@@ -137,29 +138,69 @@ class _ProceedWorker(QThread):
         try:
             self._dest_dir.mkdir(parents=True, exist_ok=True)
             total = len(self._kept_files)
+            n_written = 0
 
             for i, filename in enumerate(self._kept_files):
                 self.progress.emit(i + 1, total)
-                src_path = self._source_dir / filename
-                if not src_path.exists():
-                    logger.warning("Source file not found: %s", src_path)
+                src_json = self._source_dir / filename
+                if not src_json.exists():
+                    logger.warning("Source file not found: %s", src_json)
                     continue
 
-                dec = DecompositionFile.load(src_path)
+                # --- Determine which MU indices to keep from JSON analysis ---
+                dec_json = DecompositionFile.load(src_json)
                 file_overrides_raw = self._overrides.get(filename, {})
-                # JSON files are single-port; use port_idx=0
                 file_overrides = {
                     (0, int(k)): v for k, v in file_overrides_raw.items()
                 }
-                filtered = dec.filter_mus_by_reliability(self._thresholds, file_overrides)
 
-                stem = src_path.stem
-                if not stem.endswith("_covisi_filtered"):
-                    out_stem = stem + "_covisi_filtered"
-                else:
-                    out_stem = stem
-                out_path = self._dest_dir / (out_stem + src_path.suffix)
-                filtered.save(out_path)
+                # Compute reliability to find which MUs survive
+                rel_df = dec_json.compute_reliability(self._thresholds)
+                keep_mu_indices: set = set()
+                for _, row in rel_df.iterrows():
+                    mu = int(row["mu_index"])
+                    key = (0, mu)
+                    decision = file_overrides.get(key, "Auto")
+                    if decision == "Keep":
+                        keep_mu_indices.add(mu)
+                    elif decision == "Filter":
+                        pass  # explicitly filtered
+                    elif bool(row["is_reliable"]):
+                        keep_mu_indices.add(mu)
+
+                stem = src_json.stem
+                out_stem = stem if stem.endswith("_covisi_filtered") else stem + "_covisi_filtered"
+
+                # --- 1. Filter and save JSON ---
+                filtered_json = dec_json.filter_mus_by_reliability(self._thresholds, file_overrides)
+                out_json = self._dest_dir / (out_stem + ".json")
+                filtered_json.save(out_json)
+                n_written += 1
+
+                # --- 2. Filter sibling PKL (same stem, .pkl extension) ---
+                src_pkl = self._source_dir / (stem + ".pkl")
+                if src_pkl.exists():
+                    try:
+                        dec_pkl = DecompositionFile.load(src_pkl)
+                        filtered_pkl = dec_pkl.filter_mus_by_reliability(
+                            self._thresholds, file_overrides
+                        )
+                        out_pkl = self._dest_dir / (out_stem + ".pkl")
+                        filtered_pkl.save(out_pkl)
+                        n_written += 1
+                    except Exception as exc:
+                        logger.warning("PKL filter failed for %s: %s", src_pkl.name, exc)
+
+                # --- 3. Filter sibling MAT (same stem + _muedit.mat) ---
+                src_mat = self._source_dir / (stem + "_muedit.mat")
+                if src_mat.exists():
+                    try:
+                        dec_mat = DecompositionFile.load(src_mat)
+                        out_mat = self._dest_dir / (out_stem + "_muedit.mat")
+                        dec_mat._filter_mat_pulsetrain_by_indices(keep_mu_indices, out_mat)
+                        n_written += 1
+                    except Exception as exc:
+                        logger.warning("MAT filter failed for %s: %s", src_mat.name, exc)
 
             # Write manifest
             manifest = {
@@ -172,7 +213,7 @@ class _ProceedWorker(QThread):
             with open(self._manifest_path, "w", encoding="utf-8") as fh:
                 json.dump(manifest, fh, indent=2)
 
-            self.finished.emit()
+            self.finished.emit(n_written)
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -466,14 +507,18 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
     # -- WizardStepWidget hook -------------------------------------------------
 
     def check(self):
-        """Populate file list from decomposition_results folder."""
+        """Populate file list from decomposition_auto folder."""
         if not global_state.is_widget_completed("step8"):
             return
-        source_dir = Path(global_state.get_decomposition_results_path())
+        source_dir = Path(global_state.get_decomposition_path())
         if not source_dir.exists():
             return
+        _EXCLUDED_PREFIXES = ("algorithm_params", "decomposition_mapping",
+                              "multigrid_groupings", "status_test")
         files = sorted(
-            str(p) for p in source_dir.iterdir() if p.suffix.lower() == ".json"
+            str(p) for p in source_dir.iterdir()
+            if p.suffix.lower() == ".json"
+            and not any(p.name.startswith(ex) for ex in _EXCLUDED_PREFIXES)
         )
         if files:
             self._populate_file_list(files)
@@ -922,7 +967,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             for fp, checked in self._checked.items()
             if checked
         ]
-        source_dir = Path(global_state.get_decomposition_results_path())
+        source_dir = Path(global_state.get_decomposition_path())
         dest_dir = Path(global_state.get_decomposition_covisi_filtered_path())
         manifest_path = Path(global_state.get_analysis_path()) / "mu_quality_selection.json"
 
@@ -937,13 +982,19 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         )
         worker.finished.connect(self._on_proceed_done)
         worker.error.connect(self._on_proceed_error)
+        worker.progress.connect(
+            lambda cur, tot: self._proceed_btn.setText(f"Processing {cur}/{tot}…")
+        )
         self._worker = worker
         worker.start()
 
-    def _on_proceed_done(self):
-        global_state.complete_widget("step9")
+    def _on_proceed_done(self, n_written: int):
         self._proceed_btn.setEnabled(True)
+        self._proceed_btn.setText("Proceed")
+        toast_manager.show_toast(f"Done — {n_written} file(s) written to covisi_filtered/", "success")
+        self.complete_step()  # marks complete, emits stepCompleted → triggers auto-navigation
 
     def _on_proceed_error(self, error: str):
-        QMessageBox.critical(self, "Proceed failed", error)
         self._proceed_btn.setEnabled(True)
+        self._proceed_btn.setText("Proceed")
+        toast_manager.show_toast(f"Proceed failed: {error}", "error", duration=8000)
