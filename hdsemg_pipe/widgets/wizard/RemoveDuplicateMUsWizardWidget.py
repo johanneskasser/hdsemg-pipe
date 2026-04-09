@@ -19,6 +19,7 @@ from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDoubleSpinBox,
     QFrame,
@@ -75,11 +76,12 @@ class DuplicateDetectionWorker(QThread):
     finished = pyqtSignal(dict)  # detection_results
     error = pyqtSignal(str)
 
-    def __init__(self, groups, threshold, timewindow, show_gui=False, parent=None):
+    def __init__(self, groups, threshold, timewindow, orientation=180, show_gui=False, parent=None):
         super().__init__(parent)
         self.groups = groups  # Output from create_emgfile_groups
         self.threshold = threshold
         self.timewindow = timewindow
+        self.orientation = orientation
         self.show_gui = show_gui
 
     def run(self):
@@ -137,6 +139,7 @@ class DuplicateDetectionWorker(QThread):
                     reliability_per_file=reliability_per_file,
                     threshold=self.threshold,
                     timewindow=self.timewindow,
+                    orientation=self.orientation,
                     show_gui=self.show_gui,
                 )
 
@@ -630,6 +633,19 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         self.lbl_fsamp.setMinimumWidth(80)
         row.addWidget(self.lbl_fsamp)
 
+        # Grid orientation
+        row.addWidget(QLabel("Orientation:"))
+        self.orientation_combo = QComboBox()
+        self.orientation_combo.addItem("180°", 180)
+        self.orientation_combo.addItem("0°", 0)
+        self.orientation_combo.setFixedWidth(60)
+        self.orientation_combo.setToolTip(
+            "Grid orientation in degrees (same as in OTBiolab+).\n"
+            "180° = connector toward the user (OT Biolab default).\n"
+            "0° = connector away from the user."
+        )
+        row.addWidget(self.orientation_combo)
+
         # openhdemg GUI toggle
         self.chk_show_gui = QCheckBox("Show openhdemg GUI")
         self.chk_show_gui.setChecked(False)
@@ -836,6 +852,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                 groups,
                 threshold=self.threshold_spin.value(),
                 timewindow=self.timewindow_spin.value(),
+                orientation=self.orientation_combo.currentData(),
                 show_gui=self.chk_show_gui.isChecked(),
             )
 
@@ -1174,6 +1191,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             'parameters': {
                 'xcc_threshold': self.threshold_spin.value(),
                 'timewindow_ms': self.timewindow_spin.value(),
+                'orientation_deg': self.orientation_combo.currentData(),
                 'grouping_strategy': 'file_and_muscle'
             },
             'summary': {

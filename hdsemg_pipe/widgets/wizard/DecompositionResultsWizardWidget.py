@@ -253,7 +253,7 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
 
     def save_mapping_to_json(self):
         """Save the decomposition mapping to a JSON file for state persistence."""
-        decomp_auto_folder = os.path.join(global_state.workfolder, "decomposition_auto")
+        decomp_auto_folder = global_state.get_decomposition_auto_path()
 
         # Ensure folder exists
         if not os.path.exists(decomp_auto_folder):
@@ -272,7 +272,7 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
 
     def load_mapping_from_json(self):
         """Load the decomposition mapping from JSON file for state reconstruction."""
-        decomp_auto_folder = os.path.join(global_state.workfolder, "decomposition_auto")
+        decomp_auto_folder = global_state.get_decomposition_auto_path()
         mapping_file = os.path.join(decomp_auto_folder, "decomposition_mapping.json")
 
         if os.path.exists(mapping_file):

@@ -11,13 +11,21 @@ duplicates and keeps the more reliable copy (per ``DecompositionFile.compute_rel
 """
 
 import itertools
+import os
+import pickle  # nosec B403 — used only for local IPC between hdsemg-pipe processes
 import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 from typing import Optional
 from unittest.mock import patch
 
 import pandas as pd
 
 from hdsemg_pipe._log.log_config import logger
+
+_LAUNCHER_SCRIPT = Path(__file__).parent / "_tracking_gui_launcher.py"
 
 try:
     from openhdemg.library.muap import tracking as _openhdemg_tracking
@@ -34,6 +42,92 @@ except ImportError:
 
 # Matrixcodes natively supported by openhdemg's channel-sorting logic.
 _OPENHDEMG_KNOWN_CODES = frozenset({"GR04MM1305", "GR08MM1305", "GR10MM0808"})
+
+
+def _show_tracking_gui_subprocess(
+    emgfile1: dict,
+    emgfile2: dict,
+    *,
+    threshold: float,
+    timewindow: int,
+    firings,
+    derivation: str,
+    matrixcode: str,
+    orientation: int,
+    n_rows: Optional[int],
+    n_cols: Optional[int],
+) -> pd.DataFrame:
+    """Open the openhdemg Tracking_gui in a subprocess and return confirmed pairs.
+
+    Blocks the calling thread (not the main Qt thread) until the user closes
+    the openhdemg window.  Returns only the pairs the user marked "Included".
+    On any error falls back to an empty DataFrame (no pairs confirmed).
+    """
+    with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as fh:
+        input_path = fh.name
+    output_path = input_path + "_result.pkl"
+
+    payload = {
+        "emgfile1": emgfile1,
+        "emgfile2": emgfile2,
+        "kwargs": {
+            "threshold": threshold,
+            "timewindow": timewindow,
+            "firings": firings,
+            "derivation": derivation,
+            "matrixcode": matrixcode,
+            "orientation": orientation,
+            "n_rows": n_rows,
+            "n_cols": n_cols,
+            "exclude_belowthreshold": True,
+            "filter": True,
+            "multiprocessing": True,
+        },
+    }
+
+    try:
+        with open(input_path, "wb") as fh:
+            pickle.dump(payload, fh)  # nosec B301
+
+        logger.info("Launching openhdemg Tracking_gui subprocess…")
+        subprocess.run(
+            [sys.executable, str(_LAUNCHER_SCRIPT), input_path, output_path],
+            check=True,
+        )
+
+        if not os.path.exists(output_path):
+            logger.warning("Tracking_gui subprocess produced no output — no pairs confirmed")
+            return pd.DataFrame(columns=["MU_file1", "MU_file2", "XCC"])
+
+        with open(output_path, "rb") as fh:
+            updated: pd.DataFrame = pickle.load(fh)  # nosec B301
+
+        if "Inclusion" in updated.columns:
+            confirmed = (
+                updated[updated["Inclusion"] == "Included"]
+                .drop(columns=["Inclusion"])
+                .reset_index(drop=True)
+            )
+            logger.info(
+                "Tracking_gui: %d/%d pair(s) confirmed as duplicates",
+                len(confirmed), len(updated),
+            )
+            return confirmed
+
+        return updated
+
+    except subprocess.CalledProcessError as exc:
+        logger.error("Tracking_gui subprocess exited with error: %s", exc)
+        return pd.DataFrame(columns=["MU_file1", "MU_file2", "XCC"])
+    except Exception as exc:
+        logger.error("Tracking_gui subprocess failed: %s", exc)
+        return pd.DataFrame(columns=["MU_file1", "MU_file2", "XCC"])
+    finally:
+        for path in (input_path, output_path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 def _extract_grid_params_from_emgfile(emgfile: dict) -> tuple:
@@ -157,10 +251,27 @@ def detect_duplicates_between_files(
                 filter=True,
                 multiprocessing=True,
                 show=False,
-                gui=show_gui,
+                gui=False,  # GUI is handled via subprocess below
             )
-        if result is None:
+        if result is None or (hasattr(result, "empty") and result.empty):
             return pd.DataFrame(columns=["MU_file1", "MU_file2", "XCC"])
+
+        # If the user requested the openhdemg GUI, open it in a dedicated
+        # subprocess (Tkinter cannot run inside the PyQt5 event loop).
+        # The worker thread blocks here — the Qt UI stays responsive.
+        if show_gui:
+            result = _show_tracking_gui_subprocess(
+                emgfile1, emgfile2,
+                threshold=threshold,
+                timewindow=timewindow,
+                firings=firings,
+                derivation=derivation,
+                matrixcode=matrixcode,
+                orientation=orientation,
+                n_rows=n_rows,
+                n_cols=n_cols,
+            )
+
         return result
     except Exception as exc:
         logger.error("openhdemg tracking() failed: %s", exc)
