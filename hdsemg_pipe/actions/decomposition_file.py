@@ -512,10 +512,23 @@ class DecompositionFile:
             return None
         try:
             from openhdemg.library import tools
-            return tools.sort_mus(copy.deepcopy(self._emgfile))
+            ef = tools.sort_mus(copy.deepcopy(self._emgfile))
         except Exception as exc:
             logger.warning("get_emgfile_for_plotting: sort_mus failed: %s", exc)
-            return copy.deepcopy(self._emgfile)
+            ef = copy.deepcopy(self._emgfile)
+        # Normalize REF_SIGNAL to 0-100 % MVC range.
+        # Openhdemg expects REF_SIGNAL in percent (0-100).  Some acquisition
+        # systems store it in raw ADC units (e.g., millivolts × 1000), producing
+        # values like 40000 instead of 40.  Divide by 1000 until max ≤ 100.
+        ref = ef.get("REF_SIGNAL")
+        if ref is not None and hasattr(ref, "values"):
+            ref_max = float(ref.values.max())
+            if ref_max > 100:
+                divisor = 1.0
+                while ref_max / divisor > 100:
+                    divisor *= 10.0
+                ef["REF_SIGNAL"] = ref / divisor
+        return ef
 
     def save(self, path: Path) -> None:
         """Write to disk.

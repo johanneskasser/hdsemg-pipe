@@ -573,12 +573,12 @@ def _multigrid_config():
 def _mu_quality_review():
     """Reconstruct Step 9: MU Quality Review state."""
     from pathlib import Path
-    filtered_dir = Path(global_state.get_folder(FolderNames.DECOMPOSITION_COVISI_FILTERED))
+    filtered_dir = Path(global_state.get_decomposition_covisi_filtered_path())
     if not filtered_dir.exists() or not any(filtered_dir.iterdir()):
         return  # step 9 not yet completed
 
     # Look for manifest
-    analysis_dir = Path(global_state.get_workfolder()) / "analysis"
+    analysis_dir = Path(global_state.get_analysis_path())
     manifest_path = analysis_dir / "mu_quality_selection.json"
 
     widget = global_state.get_widget("step9")

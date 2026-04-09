@@ -43,7 +43,6 @@ except ImportError:
 
 try:
     import openhdemg.library as emg
-    from openhdemg.library import plot, tools
     _OPENHDEMG_AVAILABLE = True
 except ImportError:
     _OPENHDEMG_AVAILABLE = False
@@ -52,7 +51,7 @@ from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.decomposition_file import DecompositionFile, ReliabilityThresholds
 from hdsemg_pipe.actions.file_grouping import get_group_key, shorten_group_labels
 from hdsemg_pipe.state.global_state import global_state
-from hdsemg_pipe.ui_elements.theme import Colors, Spacing, Styles
+from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Spacing, Styles
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 
 
@@ -93,20 +92,19 @@ class _STAWorker(QThread):
             return
         try:
             ef = self._emgfile
-            sorted_ef = None
+            sorted_rawemg = None
             for code in self._GRID_CODES:
                 try:
-                    sorted_ef = tools.sort_rawemg(
-                        ef, code=code, orientation=0, dividebycolumns=True
+                    sorted_rawemg = emg.sort_rawemg(
+                        ef, code=code, orientation=0, dividebycolumn=True
                     )
                     break
                 except Exception:
                     continue
-            if sorted_ef is None:
-                sorted_ef = ef
-            sta_result = emg.sta(
-                sorted_ef, sorted_ef["MUPULSES"], sorted_ef["FSAMP"]
-            )
+            if sorted_rawemg is None:
+                self.finished.emit(None)
+                return
+            sta_result = emg.sta(ef, sorted_rawemg)
             self.finished.emit(sta_result)
         except Exception as exc:
             logger.warning("_STAWorker: STA failed: %s", exc)
@@ -267,6 +265,24 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             parent=parent,
         )
 
+        # Tighten the WizardStepWidget chrome for this full-screen step
+        self.main_layout.setContentsMargins(
+            Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM
+        )
+        self.main_layout.setSpacing(Spacing.XS)
+        self.content_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.LG};
+            }}
+        """)
+        self.content_layout.setContentsMargins(
+            Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM
+        )
+        self.content_layout.setSpacing(Spacing.XS)
+        self.button_container.setVisible(False)
+
         self._thresholds = ReliabilityThresholds()
         self._reliability_cache: Dict[str, object] = {}
         self._emgfile_cache: Dict[str, Optional[dict]] = {}
@@ -280,6 +296,12 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._worker: Optional[QThread] = None
 
         self._build_ui()
+
+    # -- WizardStepWidget interface --------------------------------------------
+
+    def create_buttons(self):
+        # Buttons are managed inside _build_ui; nothing to add to the base footer.
+        pass
 
     # -- UI construction -------------------------------------------------------
 
@@ -403,6 +425,8 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._mu_table.horizontalHeader().setStretchLastSection(True)
         self._mu_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._mu_table.setSelectionMode(QTableWidget.NoSelection)
+        self._mu_table.setToolTip("Click Decision cell to toggle Keep / Filter override")
+        self._mu_table.cellClicked.connect(self._on_table_cell_clicked)
         table_layout.addWidget(self._mu_table)
         content_splitter.addWidget(table_panel)
 
@@ -600,99 +624,162 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         file_overrides = self._overrides.get(filepath, {})
         thresholds = self._build_thresholds()
 
+        green = QColor(Colors.GREEN_100)
+        red = QColor(Colors.RED_100)
+        neutral = QColor(Colors.BG_PRIMARY)
+
+        def _metric_item(val, fmt, passes):
+            """Cell coloured green/red based on whether this metric passes."""
+            if isinstance(val, float) and math.isnan(val):
+                item = QTableWidgetItem("N/A")
+                item.setBackground(red)
+            else:
+                item = QTableWidgetItem(fmt.format(val))
+                item.setBackground(green if passes else red)
+            return item
+
+        def _neutral_item(val, fmt):
+            if isinstance(val, float) and math.isnan(val):
+                item = QTableWidgetItem("N/A")
+            else:
+                item = QTableWidgetItem(fmt.format(val))
+            item.setBackground(neutral)
+            return item
+
         self._mu_table.setRowCount(len(df))
         for row_idx, (_, row) in enumerate(df.iterrows()):
             mu = int(row["mu_index"])
             sil = float(row["sil"])
             pnr = float(row["pnr"])
             covisi = float(row["covisi"])
-            decision = file_overrides.get(str(mu), "Auto")
+            override = file_overrides.get(str(mu), "Auto")  # "Auto"|"Keep"|"Filter"
 
-            is_reliable = thresholds.is_reliable(sil, pnr, covisi)
-            keep = is_reliable or decision == "Keep"
-            if decision == "Filter":
-                keep = False
+            # Per-metric pass/fail
+            sil_ok = (not math.isnan(sil)) and sil >= thresholds.sil_min if thresholds.sil_enabled else True
+            pnr_ok = (not math.isnan(pnr)) and pnr >= thresholds.pnr_min if thresholds.pnr_enabled else True
+            cov_ok = (not math.isnan(covisi)) and covisi <= thresholds.covisi_max if thresholds.covisi_enabled else True
 
-            bg_color = QColor(Colors.GREEN_100) if keep else QColor(Colors.RED_100)
+            # Overall decision
+            auto_keep = sil_ok and pnr_ok and cov_ok
+            if override == "Keep":
+                final_keep = True
+            elif override == "Filter":
+                final_keep = False
+            else:
+                final_keep = auto_keep
 
-            def _make_item(val, fmt):
-                if isinstance(val, float) and math.isnan(val):
-                    text = "N/A"
-                else:
-                    text = fmt.format(val)
-                item = QTableWidgetItem(text)
-                item.setBackground(bg_color)
-                return item
+            # MU # cell — coloured by final decision
+            mu_item = QTableWidgetItem(str(mu))
+            mu_item.setBackground(green if final_keep else red)
+            self._mu_table.setItem(row_idx, 0, mu_item)
 
-            self._mu_table.setItem(row_idx, 0, _make_item(mu, "{}"))
-            self._mu_table.setItem(row_idx, 1, _make_item(sil, "{:.3f}"))
-            self._mu_table.setItem(row_idx, 2, _make_item(pnr, "{:.1f}"))
-            self._mu_table.setItem(row_idx, 3, _make_item(covisi, "{:.1f}"))
-            self._mu_table.setItem(row_idx, 4, _make_item(float(row["dr_mean"]), "{:.1f}"))
-            self._mu_table.setItem(row_idx, 5, _make_item(float(row["n_spikes"]), "{:.0f}"))
+            self._mu_table.setItem(row_idx, 1, _metric_item(sil, "{:.3f}", sil_ok))
+            self._mu_table.setItem(row_idx, 2, _metric_item(pnr, "{:.1f}", pnr_ok))
+            self._mu_table.setItem(row_idx, 3, _metric_item(covisi, "{:.1f}", cov_ok))
+            self._mu_table.setItem(row_idx, 4, _neutral_item(float(row["dr_mean"]), "{:.1f}"))
+            self._mu_table.setItem(row_idx, 5, _neutral_item(float(row["n_spikes"]), "{:.0f}"))
 
-            combo = QComboBox()
-            combo.addItems(["Auto", "Keep", "Filter"])
-            combo.setCurrentText(decision)
-            combo.currentTextChanged.connect(
-                lambda text, mu_=mu, fp=filepath: self._on_decision_changed(fp, mu_, text)
-            )
-            self._mu_table.setCellWidget(row_idx, 6, combo)
+            # Decision cell: show effective decision + * if user has overridden
+            is_overridden = override != "Auto"
+            label = ("Keep" if final_keep else "Filter") + (" *" if is_overridden else "")
+            decision_item = QTableWidgetItem(label)
+            decision_item.setBackground(green if final_keep else red)
+            self._mu_table.setItem(row_idx, 6, decision_item)
 
-    def _on_decision_changed(self, filepath: str, mu_idx: int, decision: str):
-        self._overrides.setdefault(filepath, {})[str(mu_idx)] = decision
-        if filepath == self._current_file:
-            self._refresh_mu_table(filepath)
+    def _on_table_cell_clicked(self, row: int, col: int):
+        """Click on the Decision column cycles override: Auto → Keep → Filter → Auto.
+        Clicking any row updates the MUAPs plot to show that MU."""
+        if self._current_file is None:
+            return
+        # Refresh MUAPs plot for newly selected row
+        if self._plot_dropdown.currentText() == "MUAPs":
+            sta = self._sta_cache.get(self._current_file)
+            if sta is not None:
+                self._draw_muaps(sta)
+        if col != 6:
+            return
+        df = self._reliability_cache.get(self._current_file)
+        if df is None or row >= len(df):
+            return
+        mu = int(df.iloc[row]["mu_index"])
+        current = self._overrides.get(self._current_file, {}).get(str(mu), "Auto")
+        next_override = {"Auto": "Keep", "Keep": "Filter", "Filter": "Auto"}[current]
+        if next_override == "Auto":
+            # Remove override (back to auto)
+            overrides = self._overrides.get(self._current_file, {})
+            overrides.pop(str(mu), None)
+        else:
+            self._overrides.setdefault(self._current_file, {})[str(mu)] = next_override
+        self._refresh_mu_table(self._current_file)
         self._update_footer()
 
     def _refresh_plot(self, filepath: str):
         if not _MATPLOTLIB_AVAILABLE or not _OPENHDEMG_AVAILABLE:
             return
         emgfile = self._emgfile_cache.get(filepath)
-        if emgfile is None:
-            return
         plot_type = self._plot_dropdown.currentText()
         if plot_type == "MUAPs":
+            if emgfile is None:
+                # emgfile not ready yet; clear stale canvas
+                self._figure.clear()
+                ax = self._figure.add_subplot(111)
+                ax.text(0.5, 0.5, "Loading…", ha="center", va="center",
+                        transform=ax.transAxes, fontsize=10, color="gray")
+                ax.axis("off")
+                self._canvas.draw()
+                return
             self._load_muaps_plot(filepath, emgfile)
             return
-        self._figure.clear()
+        if emgfile is None:
+            return
+        # openhdemg's get_unique_fig_name() iterates plt.get_fignums() and calls
+        # canvas.manager.get_window_title() on each.  After we embed a figure via
+        # FigureCanvasQTAgg the Qt canvas has manager=None, which causes a crash on
+        # the next openhdemg plot call.  Purge all pyplot-registered figures first.
+        plt.close('all')
         try:
             if plot_type == "Discharge Rate (IDR)":
-                fig = plot.plot_idr(emgfile, munumber="all", showimmediately=False)
+                fig = emg.plot_idr(emgfile, munumber="all", showimmediately=False)
             else:
-                fig = plot.plot_mupulses(emgfile, linewidths=0.8, showimmediately=False)
+                fig = emg.plot_mupulses(emgfile, linewidths=0.8, showimmediately=False)
             self._replace_canvas_figure(fig)
         except Exception as exc:
+            self._figure.clear()
             ax = self._figure.add_subplot(111)
             ax.text(
                 0.5, 0.5, f"Plot error:\n{exc}",
                 ha="center", va="center", transform=ax.transAxes,
                 fontsize=9, color="red",
             )
-        self._canvas.draw()
+            self._canvas.draw()
 
     def _replace_canvas_figure(self, fig):
-        """Copy axes content from openhdemg figure into self._figure."""
-        self._figure.clear()
+        """Swap out the embedded canvas for openhdemg's returned figure."""
         if fig is None:
             return
-        for src_ax in fig.get_axes():
-            dst_ax = self._figure.add_subplot(111)
-            for line in src_ax.get_lines():
-                dst_ax.plot(
-                    line.get_xdata(), line.get_ydata(),
-                    color=line.get_color(),
-                    linewidth=line.get_linewidth(),
-                )
-            dst_ax.set_xlabel(src_ax.get_xlabel())
-            dst_ax.set_ylabel(src_ax.get_ylabel())
-            dst_ax.set_title(src_ax.get_title())
-        plt.close(fig)
+        # Remove the old canvas from the layout
+        while self._canvas_layout.count():
+            item = self._canvas_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        # Embed openhdemg's figure directly — preserves scatter/collection artists
+        self._figure = fig
+        self._canvas = FigureCanvasQTAgg(fig)
+        self._canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._canvas_layout.addWidget(self._canvas)
+        self._canvas.draw()
 
     def _load_muaps_plot(self, filepath: str, emgfile: dict):
         if filepath in self._sta_cache:
             self._draw_muaps(self._sta_cache[filepath])
             return
+        # Clear stale canvas and show computing indicator while STA runs
+        self._figure.clear()
+        ax = self._figure.add_subplot(111)
+        ax.text(0.5, 0.5, "Computing MUAPs…", ha="center", va="center",
+                transform=ax.transAxes, fontsize=10, color="gray")
+        ax.axis("off")
+        self._canvas.draw()
         worker = _STAWorker(emgfile)
         worker.finished.connect(
             lambda sta, fp=filepath: self._on_sta_done(fp, sta)
@@ -709,8 +796,8 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             self._draw_muaps(sta_result)
 
     def _draw_muaps(self, sta_result):
-        self._figure.clear()
         if sta_result is None or not _OPENHDEMG_AVAILABLE:
+            self._figure.clear()
             ax = self._figure.add_subplot(111)
             ax.text(
                 0.5, 0.5, "MUAPs unavailable",
@@ -718,17 +805,39 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             )
             self._canvas.draw()
             return
+        # sta_result is {mu_index: DataFrame, ...}; plot_muaps needs a single MU entry
+        selected_row = self._mu_table.currentRow()
+        mu_index = 0
+        if self._current_file is not None:
+            df = self._reliability_cache.get(self._current_file)
+            if df is not None and selected_row >= 0 and selected_row < len(df):
+                mu_index = int(df.iloc[selected_row]["mu_index"])
+        # Fall back to first available key if mu_index not present
+        if mu_index not in sta_result:
+            mu_index = next(iter(sta_result), None)
+        if mu_index is None:
+            self._figure.clear()
+            ax = self._figure.add_subplot(111)
+            ax.text(0.5, 0.5, "MUAPs unavailable", ha="center", va="center", transform=ax.transAxes)
+            self._canvas.draw()
+            return
+        plt.close('all')
         try:
-            fig = plot.plot_muaps(sta_result, showimmediately=False)
+            fig = emg.plot_muaps(
+                sta_result[mu_index],
+                title=f"MUAPs — MU {mu_index}",
+                showimmediately=False,
+            )
             self._replace_canvas_figure(fig)
         except Exception as exc:
+            self._figure.clear()
             ax = self._figure.add_subplot(111)
             ax.text(
                 0.5, 0.5, f"MUAPs error:\n{exc}",
                 ha="center", va="center", transform=ax.transAxes,
                 fontsize=9, color="red",
             )
-        self._canvas.draw()
+            self._canvas.draw()
 
     def _on_plot_type_changed(self):
         if self._current_file:
