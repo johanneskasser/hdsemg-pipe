@@ -31,7 +31,7 @@ from hdsemg_pipe.widgets.wizard.ChannelSelectionWizardWidget import ChannelSelec
 from hdsemg_pipe.widgets.wizard.DecompositionResultsWizardWidget import DecompositionResultsWizardWidget
 from hdsemg_pipe.widgets.wizard.MultiGridConfigWizardWidget import MultiGridConfigWizardWidget
 from hdsemg_pipe.widgets.wizard.RemoveDuplicateMUsWizardWidget import RemoveDuplicateMUsWizardWidget
-from hdsemg_pipe.widgets.wizard.CoVISIPreFilterWizardWidget import CoVISIPreFilterWizardWidget
+from hdsemg_pipe.widgets.wizard.MUQualityReviewWizardWidget import MUQualityReviewWizardWidget
 from hdsemg_pipe.widgets.wizard.MUEditCleaningWizardWidget import MUEditCleaningWizardWidget
 from hdsemg_pipe.widgets.wizard.CoVISIPostValidationWizardWidget import CoVISIPostValidationWizardWidget
 from hdsemg_pipe.widgets.wizard.FinalResultsWizardWidget import FinalResultsWizardWidget
@@ -183,7 +183,7 @@ class WizardMainWindow(QMainWindow):
         step8.check()
 
         # Step 9: CoVISI Pre-Filtering (optional)
-        step9 = CoVISIPreFilterWizardWidget()
+        step9 = MUQualityReviewWizardWidget()
         global_state.register_widget(step9, name="step9")
         self.steps.append(step9)
         self.step_stack.addWidget(step9)

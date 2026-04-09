@@ -45,7 +45,7 @@ setup(
         "pandas>=1.3.5",
         "torch>=1.10.0",
         "requests>=2.26.0",
-        "hdsemg-shared>=0.11.1",
+        "hdsemg-shared>=0.12.1",
         "hdsemg-select>=0.2.2",
         "scd-edition @ git+https://github.com/AgneGris/scd-edition.git",
         "pefile>=2023.2.7; sys_platform != 'win32'",

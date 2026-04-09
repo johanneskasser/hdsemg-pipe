@@ -25,13 +25,17 @@ def open_file_or_folder(mode='file'):
     """
     workfolder_path = config.get(Settings.WORKFOLDER_PATH)
 
+    supported_exts = EMGFile.supported_extensions()
+
     if mode == 'file':
+        ext_glob = " ".join(f"*{e}" for e in supported_exts)
+        qt_filter = f"EMG Files ({ext_glob});;All Files (*)"
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getOpenFileName(
             None,
             "Select a File",
-            os.getcwd(),  # Set a valid initial directory
-            "MAT/OTB Files (*.mat *.otb *.otb4 *.otb+)",  # Corrected filter string
+            os.getcwd(),
+            qt_filter,
             options=options
         )
         logger.debug(f"File selected: {file_path}")
@@ -51,8 +55,11 @@ def open_file_or_folder(mode='file'):
         )
         logger.debug(f"Folder selected: {folder_path}")
         if folder_path:
-            files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if
-                     f.endswith(('.mat', '.otb', '.otb+', '.otb4'))]
+            files = [
+                os.path.join(folder_path, f)
+                for f in os.listdir(folder_path)
+                if any(f.endswith(ext) for ext in supported_exts)
+            ]
             create_work_folder(workfolder_path)
             pre_process_files(files)
         return folder_path if folder_path else None
@@ -65,7 +72,8 @@ def count_mat_files(folder_path):
     """Returns the number of wanted files in a folder"""
     if not folder_path or not os.path.isdir(folder_path):
         return 0
-    return len([f for f in os.listdir(folder_path) if f.endswith(('.mat', '.otb', '.otb+', '.otb4'))])
+    supported_exts = EMGFile.supported_extensions()
+    return len([f for f in os.listdir(folder_path) if any(f.endswith(ext) for ext in supported_exts)])
 
 def create_work_folder(workfolder_path, file_path=None):
     """Creates a new folder in the workfolder based on the file name."""

@@ -18,7 +18,9 @@ user-supplied data.  The pickle module is used only for these internal files.
 from __future__ import annotations
 
 import copy
+import math
 import pickle  # SCD result files are trusted internal outputs
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import List, Optional
 
@@ -246,6 +248,47 @@ def _pkl_to_emgfile_dict(pkl: dict, port_idx: int, port_name: str,
 
 
 # -------------------------------------------------------------------------
+# Reliability thresholds
+# -------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ReliabilityThresholds:
+    """Thresholds for multi-metric MU reliability filtering.
+
+    A MU is considered reliable if all *enabled* criteria pass (OR logic on
+    failure: filtered if ANY enabled criterion fails).
+    """
+
+    sil_min: float = 0.9
+    pnr_min: float = 30.0
+    covisi_max: float = 30.0
+    sil_enabled: bool = True
+    pnr_enabled: bool = True
+    covisi_enabled: bool = True
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ReliabilityThresholds":
+        valid = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
+        return cls(**{k: v for k, v in d.items() if k in valid})
+
+    def is_reliable(self, sil: float, pnr: float, covisi: float) -> bool:
+        """Return True if the MU passes all enabled thresholds."""
+        if self.sil_enabled:
+            if math.isnan(sil) or sil < self.sil_min:
+                return False
+        if self.pnr_enabled:
+            if math.isnan(pnr) or pnr < self.pnr_min:
+                return False
+        if self.covisi_enabled:
+            if math.isnan(covisi) or covisi > self.covisi_max:
+                return False
+        return True
+
+
+# -------------------------------------------------------------------------
 # Main class
 # -------------------------------------------------------------------------
 
@@ -412,6 +455,81 @@ class DecompositionFile:
             "filter_mus_by_covisi is not supported for the MAT backend"
         )
 
+    def compute_reliability(
+        self, thresholds: "ReliabilityThresholds"
+    ) -> pd.DataFrame:
+        """Compute per-MU SIL, PNR, CoVISI and is_reliable flag.
+
+        Returns a DataFrame with columns:
+          mu_index, port_index, sil, pnr, covisi, dr_mean, n_spikes, is_reliable
+        """
+        if self._backend == "json":
+            return self._compute_reliability_json(thresholds)
+        if self._backend == "pkl":
+            return self._compute_reliability_pkl(thresholds)
+        # MAT backend: return empty frame (post-MUedit, computed separately)
+        return pd.DataFrame(
+            columns=["mu_index", "port_index", "sil", "pnr", "covisi",
+                     "dr_mean", "n_spikes", "is_reliable"]
+        )
+
+    def filter_mus_by_reliability(
+        self,
+        thresholds: "ReliabilityThresholds",
+        overrides: Optional[dict] = None,
+    ) -> "DecompositionFile":
+        """Return a new DecompositionFile with unreliable MUs removed.
+
+        Args:
+            thresholds: Reliability thresholds to apply.
+            overrides: dict mapping (port_index, mu_index) -> "Keep" | "Filter"
+
+        Returns:
+            A new DecompositionFile instance with filtered content.
+        """
+        overrides = overrides or {}
+        if self._backend == "json":
+            return self._filter_json_by_reliability(thresholds, overrides)
+        if self._backend == "pkl":
+            return self._filter_pkl_by_reliability(thresholds, overrides)
+        raise NotImplementedError(
+            "filter_mus_by_reliability is not supported for the MAT backend"
+        )
+
+    def get_emgfile_for_plotting(self) -> Optional[dict]:
+        """Return the openhdemg emgfile dict suitable for plotting.
+
+        JSON backend: returns sorted copy via tools.sort_mus().
+        PKL backend: not yet supported — returns None.
+        MAT backend: returns None.
+
+        Returns:
+            openhdemg emgfile dict, or None if unavailable.
+        """
+        if self._backend != "json" or not _OPENHDEMG_AVAILABLE:
+            return None
+        if self._emgfile is None:
+            return None
+        try:
+            from openhdemg.library import tools
+            ef = tools.sort_mus(copy.deepcopy(self._emgfile))
+        except Exception as exc:
+            logger.warning("get_emgfile_for_plotting: sort_mus failed: %s", exc)
+            ef = copy.deepcopy(self._emgfile)
+        # Normalize REF_SIGNAL to 0-100 % MVC range.
+        # Openhdemg expects REF_SIGNAL in percent (0-100).  Some acquisition
+        # systems store it in raw ADC units (e.g., millivolts × 1000), producing
+        # values like 40000 instead of 40.  Divide by 1000 until max ≤ 100.
+        ref = ef.get("REF_SIGNAL")
+        if ref is not None and hasattr(ref, "values"):
+            ref_max = float(ref.values.max())
+            if ref_max > 100:
+                divisor = 1.0
+                while ref_max / divisor > 100:
+                    divisor *= 10.0
+                ef["REF_SIGNAL"] = ref / divisor
+        return ef
+
     def save(self, path: Path) -> None:
         """Write to disk.
 
@@ -496,6 +614,109 @@ class DecompositionFile:
         inst._emgfile = filtered_emgfile
         return inst
 
+    def _compute_reliability_json(
+        self, thresholds: "ReliabilityThresholds"
+    ) -> pd.DataFrame:
+        if not _OPENHDEMG_AVAILABLE or self._emgfile is None:
+            return pd.DataFrame(
+                columns=["mu_index", "port_index", "sil", "pnr", "covisi",
+                         "dr_mean", "n_spikes", "is_reliable"]
+            )
+        ef = self._emgfile
+        fsamp = float(ef.get("FSAMP", 2048.0))
+        n_mus = int(ef.get("NUMBER_OF_MUS", 0))
+        ipts = ef.get("IPTS")
+        mupulses = ef.get("MUPULSES", [])
+
+        # Estimate contraction duration from signal length
+        ref_signal = ef.get("REF_SIGNAL")
+        if ref_signal is not None and hasattr(ref_signal, "__len__"):
+            duration_s = len(ref_signal) / fsamp
+        else:
+            duration_s = float("nan")
+
+        # Build CoVISI map from existing helper
+        covisi_df = self._compute_covisi_json("auto")
+        covisi_map = {
+            int(r["mu_index"]): float(r["covisi_all"])
+            for _, r in covisi_df.iterrows()
+        }
+
+        rows = []
+        for mu in range(n_mus):
+            pulses = mupulses[mu] if mu < len(mupulses) else []
+            n_spikes = len(pulses)
+            dr_mean = n_spikes / duration_s if duration_s > 0 else float("nan")
+
+            # SIL and PNR via openhdemg
+            try:
+                ipts_mu = ipts.iloc[:, mu] if hasattr(ipts, "iloc") else ipts[mu]
+            except Exception:
+                ipts_mu = None
+
+            try:
+                sil_val = float(emg.compute_sil(ipts_mu, np.array(pulses)))
+            except Exception:
+                sil_val = float("nan")
+
+            try:
+                if ipts_mu is not None:
+                    pnr_val = float(
+                        emg.compute_pnr(ipts_mu, np.array(pulses), fsamp)
+                    )
+                else:
+                    pnr_val = float("nan")
+            except Exception:
+                pnr_val = float("nan")
+
+            covisi_val = covisi_map.get(mu, float("nan"))
+            reliable = thresholds.is_reliable(sil_val, pnr_val, covisi_val)
+
+            rows.append({
+                "mu_index": mu,
+                "port_index": 0,
+                "sil": sil_val,
+                "pnr": pnr_val,
+                "covisi": covisi_val,
+                "dr_mean": dr_mean,
+                "n_spikes": n_spikes,
+                "is_reliable": reliable,
+            })
+
+        return pd.DataFrame(rows)
+
+    def _filter_json_by_reliability(
+        self,
+        thresholds: "ReliabilityThresholds",
+        overrides: dict,
+    ) -> "DecompositionFile":
+        rel_df = self._compute_reliability_json(thresholds)
+        mus_to_remove = []
+        for _, row in rel_df.iterrows():
+            mu = int(row["mu_index"])
+            key = (0, mu)
+            decision = overrides.get(key, "Auto")
+            if decision == "Keep":
+                continue
+            if decision == "Filter" or not row["is_reliable"]:
+                mus_to_remove.append(mu)
+
+        if not mus_to_remove:
+            inst = DecompositionFile()
+            inst._path = self._path
+            inst._backend = "json"
+            inst._emgfile = self._emgfile
+            return inst
+
+        new_ef = copy.deepcopy(self._emgfile)
+        new_ef = emg.delete_mus(new_ef, mus_to_remove)
+
+        inst = DecompositionFile()
+        inst._path = self._path
+        inst._backend = "json"
+        inst._emgfile = new_ef
+        return inst
+
     # -- PKL backend -----------------------------------------------------------
 
     def _compute_covisi_pkl(self) -> pd.DataFrame:
@@ -545,6 +766,88 @@ class DecompositionFile:
                 if np.isnan(cov_val) or cov_val <= threshold:
                     keep.add(mu_idx)
             keep_indices[port_idx] = keep
+
+        inst = DecompositionFile()
+        inst._path = self._path
+        inst._backend = "pkl"
+        inst._pkl = self._pkl
+        inst._pkl_keep_indices = keep_indices
+        return inst
+
+    def _compute_reliability_pkl(
+        self, thresholds: "ReliabilityThresholds"
+    ) -> pd.DataFrame:
+        rows = []
+        covisi_df = self._compute_covisi_pkl()
+        covisi_map = {
+            (int(r["port_index"]), int(r["mu_index"])): float(r["covisi_all"])
+            for _, r in covisi_df.iterrows()
+        }
+
+        pkl = self._pkl
+        fsamp = float(pkl.get("sampling_rate", 2048.0))
+        dt_list = pkl.get("discharge_times", [])
+        ipts_list = pkl.get("ipts", [])
+
+        for port_idx, dt_port in enumerate(dt_list):
+            ipts_port = ipts_list[port_idx] if port_idx < len(ipts_list) else None
+            emg_length = _infer_emg_length_from_pkl(pkl, port_idx)
+            duration_s = emg_length / fsamp if emg_length > 0 else float("nan")
+
+            for mu, pulses in enumerate(dt_port):
+                n_spikes = len(pulses) if pulses is not None else 0
+                dr_mean = n_spikes / duration_s if duration_s > 0 else float("nan")
+
+                try:
+                    if ipts_port is not None:
+                        ipts_col = (
+                            ipts_port.iloc[:, mu]
+                            if hasattr(ipts_port, "iloc")
+                            else np.array(ipts_port)[:, mu]
+                        )
+                        sil_val = float(emg.compute_sil(ipts_col, np.array(pulses)))
+                        pnr_val = float(emg.compute_pnr(ipts_col, np.array(pulses), fsamp))
+                    else:
+                        sil_val = pnr_val = float("nan")
+                except Exception:
+                    sil_val = pnr_val = float("nan")
+
+                covisi_val = covisi_map.get((port_idx, mu), float("nan"))
+                reliable = thresholds.is_reliable(sil_val, pnr_val, covisi_val)
+
+                rows.append({
+                    "mu_index": mu,
+                    "port_index": port_idx,
+                    "sil": sil_val,
+                    "pnr": pnr_val,
+                    "covisi": covisi_val,
+                    "dr_mean": dr_mean,
+                    "n_spikes": n_spikes,
+                    "is_reliable": reliable,
+                })
+
+        return pd.DataFrame(rows)
+
+    def _filter_pkl_by_reliability(
+        self,
+        thresholds: "ReliabilityThresholds",
+        overrides: dict,
+    ) -> "DecompositionFile":
+        rel_df = self._compute_reliability_pkl(thresholds)
+        keep_indices: dict = {}
+
+        for port_idx in rel_df["port_index"].unique():
+            port_rows = rel_df[rel_df["port_index"] == port_idx]
+            kept = []
+            for _, row in port_rows.iterrows():
+                mu = int(row["mu_index"])
+                key = (port_idx, mu)
+                decision = overrides.get(key, "Auto")
+                if decision == "Keep" or (
+                    decision != "Filter" and row["is_reliable"]
+                ):
+                    kept.append(mu)
+            keep_indices[int(port_idx)] = set(kept)
 
         inst = DecompositionFile()
         inst._path = self._path
