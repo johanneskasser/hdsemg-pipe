@@ -102,11 +102,11 @@ def reconstruct_folder_state(folderpath):
         logger.info(f"Skipping decomposition results reconstruction: {e}")
         global_state.skip_widget("step8")
 
-    # Try to reconstruct CoVISI pre-filter (Step 9)
+    # Try to reconstruct MU Quality Review (Step 9)
     try:
-        _covisi_pre_filter()
+        _mu_quality_review()
     except Exception as e:
-        logger.info(f"Skipping CoVISI pre-filter reconstruction: {e}")
+        logger.info(f"Skipping MU Quality Review reconstruction: {e}")
         global_state.skip_widget("step9")
 
     # Try to reconstruct multi-grid configuration (Step 10)
@@ -570,34 +570,30 @@ def _multigrid_config():
         logger.warning("Multi-grid configuration widget not found in global state.")
         raise ValueError("Multi-grid configuration widget not found in global state.")
 
-def _covisi_pre_filter():
-    """Reconstruct Step 9: CoVISI Pre-Filtering state."""
-    covisi_pre_filter_widget = global_state.get_widget("step9")
-    if covisi_pre_filter_widget:
-        covisi_pre_filter_widget.init_file_checking()
+def _mu_quality_review():
+    """Reconstruct Step 9: MU Quality Review state."""
+    from pathlib import Path
+    filtered_dir = Path(global_state.get_folder(FolderNames.DECOMPOSITION_COVISI_FILTERED))
+    if not filtered_dir.exists() or not any(filtered_dir.iterdir()):
+        return  # step 9 not yet completed
 
-        if covisi_pre_filter_widget.is_completed():
-            report_path = os.path.join(covisi_pre_filter_widget.expected_folder, "covisi_pre_filter_report.json")
-            filtering_skipped = False
-            if os.path.exists(report_path):
-                try:
-                    import json
-                    with open(report_path, 'r') as f:
-                        report = json.load(f)
-                        filtering_skipped = report.get("filtering_skipped", False)
-                except Exception as e:
-                    logger.warning(f"Could not read filtering_skipped status from report: {e}")
+    # Look for manifest
+    analysis_dir = Path(global_state.get_workfolder()) / "analysis"
+    manifest_path = analysis_dir / "mu_quality_selection.json"
 
-            if filtering_skipped:
-                logger.info("Step 9 state reconstructed: CoVISI pre-filter was skipped")
-                global_state.skip_widget("step9")
-            else:
-                logger.info("Step 9 state reconstructed: CoVISI pre-filter was applied")
-                global_state.complete_widget("step9")
+    widget = global_state.get_widget("step9")
 
-    else:
-        logger.warning("CoVISI pre-filter widget not found in global state.")
-        raise ValueError("CoVISI pre-filter widget not found in global state.")
+    if manifest_path.exists():
+        import json
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            if widget is not None:
+                widget.restore_from_manifest(manifest)
+        except Exception as exc:
+            logger.warning("Could not restore mu_quality_selection.json: %s", exc)
+    # Mark step complete regardless (backward compat with old workfolders)
+    global_state.complete_widget("step9")
 
 def _muedit_cleaning():
     """Reconstruct Step 11: MUEdit Cleaning state."""
