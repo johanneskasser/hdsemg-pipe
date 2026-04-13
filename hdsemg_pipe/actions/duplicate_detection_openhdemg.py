@@ -29,9 +29,17 @@ _LAUNCHER_SCRIPT = Path(__file__).parent / "_tracking_gui_launcher.py"
 
 try:
     from openhdemg.library.muap import tracking as _openhdemg_tracking
+    from openhdemg.library.muap import sta as _openhdemg_sta
+    from openhdemg.library.electrodes import sort_rawemg as _openhdemg_sort_rawemg
+    from openhdemg.library.muap import diff as _openhdemg_diff
+    from openhdemg.library.muap import double_diff as _openhdemg_double_diff
     _OPENHDEMG_AVAILABLE = True
 except ImportError:
     _openhdemg_tracking = None  # type: ignore[assignment]
+    _openhdemg_sta = None  # type: ignore[assignment]
+    _openhdemg_sort_rawemg = None  # type: ignore[assignment]
+    _openhdemg_diff = None  # type: ignore[assignment]
+    _openhdemg_double_diff = None  # type: ignore[assignment]
     _OPENHDEMG_AVAILABLE = False
     logger.warning("openhdemg not available — MUAP-based duplicate detection will not work")
 
@@ -44,6 +52,42 @@ except ImportError:
 _OPENHDEMG_KNOWN_CODES = frozenset({"GR04MM1305", "GR08MM1305", "GR10MM0808"})
 
 
+def _sort_and_compute_sta(
+    emgfile: dict,
+    matrixcode: str,
+    orientation: int,
+    n_rows: Optional[int],
+    n_cols: Optional[int],
+    firings,
+    timewindow: int,
+    derivation: str,
+) -> dict:
+    """Sort one emgfile's channels and compute its STA.
+
+    Used to pre-process each file independently before calling
+    ``tracking(custom_muaps=...)``, which bypasses openhdemg's single-orientation
+    restriction and allows per-file matrixcode / orientation.
+
+    Note: ``timewindow`` (not ``timewindow * 2``) is used here because no
+    ``align_by_xcorr`` step follows — the STAs are passed directly to the
+    2-D cross-correlation.
+    """
+    sorted_rawemg = _openhdemg_sort_rawemg(
+        emgfile,
+        code=matrixcode,
+        orientation=orientation,
+        n_rows=n_rows,
+        n_cols=n_cols,
+    )
+    if derivation == "sd":
+        sorted_rawemg = _openhdemg_diff(sorted_rawemg=sorted_rawemg)
+    elif derivation == "dd":
+        sorted_rawemg = _openhdemg_double_diff(sorted_rawemg=sorted_rawemg)
+    # "mono" — no derivation needed
+
+    return _openhdemg_sta(emgfile, sorted_rawemg, firings=firings, timewindow=timewindow)
+
+
 def _show_tracking_gui_subprocess(
     emgfile1: dict,
     emgfile2: dict,
@@ -52,10 +96,14 @@ def _show_tracking_gui_subprocess(
     timewindow: int,
     firings,
     derivation: str,
-    matrixcode: str,
-    orientation: int,
-    n_rows: Optional[int],
-    n_cols: Optional[int],
+    matrixcode1: str,
+    orientation1: int,
+    n_rows1: Optional[int],
+    n_cols1: Optional[int],
+    matrixcode2: str,
+    orientation2: int,
+    n_rows2: Optional[int],
+    n_cols2: Optional[int],
 ) -> pd.DataFrame:
     """Open the openhdemg Tracking_gui in a subprocess and return confirmed pairs.
 
@@ -67,6 +115,22 @@ def _show_tracking_gui_subprocess(
         input_path = fh.name
     output_path = input_path + "_result.pkl"
 
+    # Pre-compute per-file STAs so the subprocess can use custom_muaps,
+    # which bypasses openhdemg's single-orientation restriction.
+    try:
+        sta1 = _sort_and_compute_sta(
+            emgfile1, matrixcode1, orientation1, n_rows1, n_cols1,
+            firings, timewindow, derivation,
+        )
+        sta2 = _sort_and_compute_sta(
+            emgfile2, matrixcode2, orientation2, n_rows2, n_cols2,
+            firings, timewindow, derivation,
+        )
+        custom_muaps = [sta1, sta2]
+    except Exception as exc:
+        logger.warning("Could not pre-compute STAs for GUI subprocess; falling back to single orientation: %s", exc)
+        custom_muaps = None
+
     payload = {
         "emgfile1": emgfile1,
         "emgfile2": emgfile2,
@@ -75,10 +139,11 @@ def _show_tracking_gui_subprocess(
             "timewindow": timewindow,
             "firings": firings,
             "derivation": derivation,
-            "matrixcode": matrixcode,
-            "orientation": orientation,
-            "n_rows": n_rows,
-            "n_cols": n_cols,
+            "matrixcode": matrixcode1,  # used only when custom_muaps is None
+            "orientation": orientation1,
+            "n_rows": n_rows1,
+            "n_cols": n_cols1,
+            "custom_muaps": custom_muaps,
             "exclude_belowthreshold": True,
             "filter": True,
             "multiprocessing": True,
@@ -186,28 +251,35 @@ def detect_duplicates_between_files(
     timewindow: int = 50,
     firings: str = "all",
     derivation: str = "sd",
-    matrixcode: Optional[str] = None,
-    orientation: int = 180,
-    n_rows: Optional[int] = None,
-    n_cols: Optional[int] = None,
+    orientation1: int = 180,
+    orientation2: int = 180,
     show_gui: bool = False,
 ) -> pd.DataFrame:
     """Run openhdemg MU tracking between two emgfiles.
 
+    Each file's grid parameters (matrixcode, n_rows, n_cols) are auto-detected
+    from its EXTRAS field independently, so files from different grids are
+    handled correctly.
+
+    Channel sorting is performed per-file using the individual orientations, and
+    the resulting STAs are passed to ``tracking()`` via ``custom_muaps`` to
+    bypass its single-orientation limitation.
+
+    Note: using ``custom_muaps`` skips openhdemg's ``align_by_xcorr`` step.
+    Since both grids record the same muscle simultaneously, STA timing is
+    naturally aligned and this omission has negligible practical impact.
+
     Args:
-        emgfile1: First openhdemg emgfile dict (loaded via ``emg.emg_from_json``).
+        emgfile1: First openhdemg emgfile dict.
         emgfile2: Second openhdemg emgfile dict.
         threshold: Minimum XCC to consider two MUs duplicates (default 0.9).
         timewindow: STA window in milliseconds (default 50).
         firings: Which firings to use for STA; ``"all"`` or ``[start, stop]``.
         derivation: Signal derivation — ``"mono"``, ``"sd"``, or ``"dd"``.
-        matrixcode: OT Biolab grid code for channel sorting. When ``None``
-            (default), auto-detected from *emgfile1*'s EXTRAS field.
-            Pass ``"None"`` (string) to disable channel sorting entirely; then
-            *n_rows* and *n_cols* are required.
-        orientation: Grid orientation in degrees (default 180).
-        n_rows: Grid rows override (required when *matrixcode* is ``"None"``).
-        n_cols: Grid columns override (required when *matrixcode* is ``"None"``).
+        orientation1: Physical mounting orientation of the first grid in degrees
+            (0 or 180, same convention as OTBiolab+). Default 180.
+        orientation2: Physical mounting orientation of the second grid in degrees.
+            Default 180. Can differ from orientation1.
 
     Returns:
         DataFrame with columns ``MU_file1``, ``MU_file2``, ``XCC``.
@@ -222,15 +294,30 @@ def detect_duplicates_between_files(
             "Install it with: pip install openhdemg"
         )
 
-    # Auto-detect grid parameters from emgfile1's EXTRAS when not provided.
-    if matrixcode is None:
-        matrixcode, n_rows, n_cols = _extract_grid_params_from_emgfile(emgfile1)
-        logger.debug(
-            "Auto-detected grid params: matrixcode=%s, n_rows=%s, n_cols=%s",
-            matrixcode, n_rows, n_cols,
-        )
+    # Auto-detect grid parameters independently for each file.
+    matrixcode1, n_rows1, n_cols1 = _extract_grid_params_from_emgfile(emgfile1)
+    matrixcode2, n_rows2, n_cols2 = _extract_grid_params_from_emgfile(emgfile2)
+    logger.debug(
+        "Grid params — file1: code=%s rows=%s cols=%s orient=%d | "
+        "file2: code=%s rows=%s cols=%s orient=%d",
+        matrixcode1, n_rows1, n_cols1, orientation1,
+        matrixcode2, n_rows2, n_cols2, orientation2,
+    )
 
     try:
+        # Pre-sort each file with its own matrixcode + orientation and compute
+        # their STAs.  Passing these as custom_muaps to tracking() bypasses
+        # openhdemg's internal sort_rawemg call (which only accepts one set of
+        # params for both files).
+        sta1 = _sort_and_compute_sta(
+            emgfile1, matrixcode1, orientation1, n_rows1, n_cols1,
+            firings, timewindow, derivation,
+        )
+        sta2 = _sort_and_compute_sta(
+            emgfile2, matrixcode2, orientation2, n_rows2, n_cols2,
+            firings, timewindow, derivation,
+        )
+
         # openhdemg's tracking() unconditionally calls plt.show() at line ~1196
         # even when show=False — a bug that crashes macOS from a non-main thread.
         # Patch it to a no-op for this call.
@@ -239,14 +326,8 @@ def detect_duplicates_between_files(
             result = _openhdemg_tracking(
                 emgfile1=emgfile1,
                 emgfile2=emgfile2,
-                firings=firings,
-                derivation=derivation,
-                timewindow=timewindow,
                 threshold=threshold,
-                matrixcode=matrixcode,
-                orientation=orientation,
-                n_rows=n_rows,
-                n_cols=n_cols,
+                custom_muaps=[sta1, sta2],
                 exclude_belowthreshold=True,
                 filter=True,
                 multiprocessing=True,
@@ -266,10 +347,14 @@ def detect_duplicates_between_files(
                 timewindow=timewindow,
                 firings=firings,
                 derivation=derivation,
-                matrixcode=matrixcode,
-                orientation=orientation,
-                n_rows=n_rows,
-                n_cols=n_cols,
+                matrixcode1=matrixcode1,
+                orientation1=orientation1,
+                n_rows1=n_rows1,
+                n_cols1=n_cols1,
+                matrixcode2=matrixcode2,
+                orientation2=orientation2,
+                n_rows2=n_rows2,
+                n_cols2=n_cols2,
             )
 
         return result
@@ -286,7 +371,7 @@ def detect_duplicates_in_group(
     timewindow: int = 50,
     firings: str = "all",
     derivation: str = "sd",
-    orientation: int = 180,
+    orientations: Optional[list] = None,
     show_gui: bool = False,
 ) -> dict:
     """Detect duplicate MUs in a group of emgfiles using openhdemg tracking.
@@ -304,8 +389,11 @@ def detect_duplicates_in_group(
         timewindow: STA window in ms.
         firings: Firings to use for STA.
         derivation: Signal derivation.
-        orientation: Grid orientation in degrees (default 180). Grid code and
-            dimensions are auto-detected per file from their EXTRAS field.
+        orientations: Per-file grid orientation in degrees (0 or 180).
+            Must have the same length as *emgfiles*; defaults to ``[180] * N``.
+            Each value is the physical mounting orientation of the corresponding
+            grid (same convention as OTBiolab+). Matrixcode and dimensions are
+            auto-detected per file from their EXTRAS field.
 
     Returns:
         Dict with the same structure as the legacy ``detect_duplicates_in_group``:
@@ -327,6 +415,14 @@ def detect_duplicates_in_group(
                 "unique_mus": [(file_idx, mu_idx), ...],
             }
     """
+    # Resolve per-file orientations (default 180° for all).
+    n_files = len(emgfiles)
+    if orientations is None:
+        orientations = [180] * n_files
+    elif len(orientations) < n_files:
+        # Pad with the last provided value.
+        orientations = list(orientations) + [orientations[-1]] * (n_files - len(orientations))
+
     # Build flat MU list: (file_idx, mu_idx)
     all_mus: list = []
     for file_idx, ef in enumerate(emgfiles):
@@ -342,15 +438,15 @@ def detect_duplicates_in_group(
         return {"duplicate_groups": [], "all_mus": [], "unique_mus": []}
 
     logger.info(
-        "openhdemg tracking: %d MUs across %d file(s), XCC threshold=%.2f",
-        n_total, len(emgfiles), threshold,
+        "openhdemg tracking: %d MUs across %d file(s), XCC threshold=%.2f, orientations=%s",
+        n_total, n_files, threshold, orientations,
     )
 
     # Pairwise tracking across all file pairs
     duplicate_pairs: list = []          # (global_idx_i, global_idx_j)
     xcc_map: dict = {}                  # (fi1, mi1, fi2, mi2) -> xcc
 
-    for i, j in itertools.combinations(range(len(emgfiles)), 2):
+    for i, j in itertools.combinations(range(n_files), 2):
         ef1 = emgfiles[i]
         ef2 = emgfiles[j]
         if ef1.get("NUMBER_OF_MUS", 0) == 0 or ef2.get("NUMBER_OF_MUS", 0) == 0:
@@ -364,7 +460,8 @@ def detect_duplicates_in_group(
                 timewindow=timewindow,
                 firings=firings,
                 derivation=derivation,
-                orientation=orientation,
+                orientation1=orientations[i],
+                orientation2=orientations[j],
                 show_gui=show_gui,
             )
         except Exception as exc:

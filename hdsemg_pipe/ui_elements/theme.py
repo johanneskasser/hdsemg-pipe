@@ -261,7 +261,7 @@ class Styles:
                 background-color: {Colors.BG_PRIMARY};
                 border: 1px solid {Colors.BORDER_DEFAULT};
                 border-radius: {BorderRadius.MD};
-                padding: {Spacing.SM}px;
+                padding: 2px 6px;
                 color: {Colors.TEXT_PRIMARY};
                 font-size: {Fonts.SIZE_BASE};
             }}
@@ -461,9 +461,9 @@ def get_app_stylesheet() -> str:
             background-color: {Colors.BG_PRIMARY};
         }}
         QToolTip {{
-            background-color: {Colors.BG_PRIMARY};
-            color: {Colors.TEXT_PRIMARY};
-            border: 1px solid {Colors.BORDER_DEFAULT};
+            background-color: #1c1c1e;
+            color: #ffffff;
+            border: none;
             padding: {Spacing.XS}px;
         }}
 
@@ -529,7 +529,7 @@ def get_app_stylesheet() -> str:
             background-color: {Colors.BG_PRIMARY};
             border: 1px solid {Colors.BORDER_DEFAULT};
             border-radius: {BorderRadius.MD};
-            padding: {Spacing.SM}px;
+            padding: 2px 6px;
             color: {Colors.TEXT_PRIMARY};
             font-size: {Fonts.SIZE_BASE};
         }}

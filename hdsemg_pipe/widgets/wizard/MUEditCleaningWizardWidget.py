@@ -1189,19 +1189,34 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
     # ------------------------------------------------------------------
 
     def _scan_pkl_files(self):
-        """Scan for PKL files using the scd-edition priority chain."""
+        """Scan for merged PKL files using the scd-edition priority chain.
+
+        Only merged multi-port PKLs (no grid-key pattern in stem) are usable
+        by scd-edition directly.  Individual per-grid PKLs (e.g.
+        ``*_8mm_5x13_2*.pkl``) are skipped in all folders — they must be
+        merged first via ``_run_pkl_merge_then_edit()``.
+        """
         removed_dups = global_state.get_decomposition_removed_duplicates_path()
         covisi_filtered = global_state.get_decomposition_covisi_filtered_path()
         auto_folder = global_state.get_decomposition_path()
 
+        def _has_merged_pkl(folder: str) -> bool:
+            """Return True if *folder* contains at least one merged (non-grid-key) PKL."""
+            if not folder or not os.path.isdir(folder):
+                return False
+            return any(
+                f.endswith(".pkl") and not f.endswith(".pkl.bak")
+                and not f[:-4].endswith("_edited")
+                and not _GRID_KEY_RE.search(f[:-4])
+                for f in os.listdir(folder)
+            )
+
         source_dir = None
-        if (removed_dups and os.path.isdir(removed_dups) and
-                any(f.endswith("_duplicates_removed.pkl") for f in os.listdir(removed_dups))):
+        if _has_merged_pkl(removed_dups):
             source_dir = removed_dups
-        elif (covisi_filtered and os.path.isdir(covisi_filtered) and
-              any(f.endswith("_covisi_filtered.pkl") for f in os.listdir(covisi_filtered))):
+        elif _has_merged_pkl(covisi_filtered):
             source_dir = covisi_filtered
-        elif auto_folder and os.path.isdir(auto_folder):
+        elif _has_merged_pkl(auto_folder):
             source_dir = auto_folder
 
         if not source_dir:
@@ -1220,8 +1235,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             stem = fname[:-4]
             if stem.endswith("_edited"):
                 continue  # output file, not a source
-            if source_dir == auto_folder and _GRID_KEY_RE.search(stem):
-                continue  # single-grid PKL in auto folder — skip
+            if _GRID_KEY_RE.search(stem):
+                continue  # single-grid PKL — skip, needs merge first
             pkl_files.append(os.path.join(source_dir, fname))
 
         edited_pkl_files = []

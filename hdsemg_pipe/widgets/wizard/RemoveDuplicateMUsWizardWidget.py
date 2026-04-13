@@ -15,7 +15,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtCore import QSize, QThread, pyqtSignal, Qt
+from PyQt5.QtGui import QColor, QPalette
+from PyQt5.QtWidgets import QStyleFactory
 from PyQt5.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -76,12 +78,13 @@ class DuplicateDetectionWorker(QThread):
     finished = pyqtSignal(dict)  # detection_results
     error = pyqtSignal(str)
 
-    def __init__(self, groups, threshold, timewindow, orientation=180, show_gui=False, parent=None):
+    def __init__(self, groups, threshold, timewindow, orientation1=180, orientation2=180, show_gui=False, parent=None):
         super().__init__(parent)
         self.groups = groups  # Output from create_emgfile_groups
         self.threshold = threshold
         self.timewindow = timewindow
-        self.orientation = orientation
+        self.orientation1 = orientation1  # first file in each group
+        self.orientation2 = orientation2  # second and further files
         self.show_gui = show_gui
 
     def run(self):
@@ -133,13 +136,16 @@ class DuplicateDetectionWorker(QThread):
                     logger.warning(f"Group '{group_name}': No files loaded, skipping")
                     continue
 
+                # Build per-file orientations: first file → orientation1, rest → orientation2.
+                orientations = [self.orientation1] + [self.orientation2] * (len(emgfile_list) - 1)
+
                 # Run MUAP-shape-based detection
                 detection_result = _detect_duplicates_openhdemg(
                     emgfile_list,
                     reliability_per_file=reliability_per_file,
                     threshold=self.threshold,
                     timewindow=self.timewindow,
-                    orientation=self.orientation,
+                    orientations=orientations,
                     show_gui=self.show_gui,
                 )
 
@@ -633,18 +639,87 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         self.lbl_fsamp.setMinimumWidth(80)
         row.addWidget(self.lbl_fsamp)
 
-        # Grid orientation
-        row.addWidget(QLabel("Orientation:"))
-        self.orientation_combo = QComboBox()
-        self.orientation_combo.addItem("180°", 180)
-        self.orientation_combo.addItem("0°", 0)
-        self.orientation_combo.setFixedWidth(60)
-        self.orientation_combo.setToolTip(
-            "Grid orientation in degrees (same as in OTBiolab+).\n"
+        # Per-file grid orientations — Grid 1 / Grid 2+
+        base_tooltip = (
+            "Physical mounting orientation (same as in OTBiolab+).\n"
             "180° = connector toward the user (OT Biolab default).\n"
-            "0° = connector away from the user."
+            "0° = connector away from the user.\n"
+            "Ignored when matrixcode is not a known openhdemg code."
         )
-        row.addWidget(self.orientation_combo)
+        popup_view_style = f"""
+            QAbstractItemView {{
+                background-color: {Colors.BG_PRIMARY};
+                color: {Colors.TEXT_PRIMARY};
+                selection-background-color: {Colors.BLUE_100};
+                selection-color: {Colors.TEXT_PRIMARY};
+                outline: none;
+            }}
+            QAbstractItemView::item {{
+                color: {Colors.TEXT_PRIMARY};
+                background-color: {Colors.BG_PRIMARY};
+                padding: 4px 8px;
+                min-height: 22px;
+            }}
+            QAbstractItemView::item:selected,
+            QAbstractItemView::item:hover {{
+                background-color: {Colors.BLUE_100};
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """
+        fusion = QStyleFactory.create("Fusion")
+        # Widget-level stylesheet on the combo itself is required to force Qt into
+        # QStyleSheetStyle mode. Without it, macOS native rendering controls the popup
+        # even when Fusion style is set, making view().setStyleSheet() ineffective.
+        combo_style = f"""
+            QComboBox {{
+                background-color: {Colors.BG_PRIMARY};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.MD};
+                padding: 2px 6px;
+                font-size: {Fonts.SIZE_BASE};
+            }}
+            QComboBox::drop-down {{ border: none; width: 14px; }}
+        """
+
+        # Palette to force Fusion's item delegate to render dark text on white background
+        # regardless of the macOS dark-mode palette.
+        popup_palette = QPalette()
+        popup_palette.setColor(QPalette.All, QPalette.Base, QColor(Colors.BG_PRIMARY))
+        popup_palette.setColor(QPalette.All, QPalette.Text, QColor(Colors.TEXT_PRIMARY))
+        popup_palette.setColor(QPalette.All, QPalette.Window, QColor(Colors.BG_PRIMARY))
+        popup_palette.setColor(QPalette.All, QPalette.WindowText, QColor(Colors.TEXT_PRIMARY))
+        popup_palette.setColor(QPalette.All, QPalette.Highlight, QColor(Colors.BLUE_100))
+        popup_palette.setColor(QPalette.All, QPalette.HighlightedText, QColor(Colors.TEXT_PRIMARY))
+
+        row.addWidget(QLabel("Orientation:"))
+        self.orientation1_combo = QComboBox()
+        if fusion:
+            self.orientation1_combo.setStyle(fusion)
+        self.orientation1_combo.setStyleSheet(combo_style)
+        self.orientation1_combo.addItem("180°", 180)
+        self.orientation1_combo.setItemData(0, QSize(80, 24), Qt.SizeHintRole)
+        self.orientation1_combo.addItem("0°", 0)
+        self.orientation1_combo.setItemData(1, QSize(80, 24), Qt.SizeHintRole)
+        self.orientation1_combo.setMinimumWidth(70)
+        self.orientation1_combo.setToolTip("Grid 1 (first file in each group).\n" + base_tooltip)
+        self.orientation1_combo.view().setStyleSheet(popup_view_style)
+        self.orientation1_combo.view().setPalette(popup_palette)
+        row.addWidget(self.orientation1_combo)
+        row.addWidget(QLabel("/"))
+        self.orientation2_combo = QComboBox()
+        if fusion:
+            self.orientation2_combo.setStyle(fusion)
+        self.orientation2_combo.setStyleSheet(combo_style)
+        self.orientation2_combo.addItem("180°", 180)
+        self.orientation2_combo.setItemData(0, QSize(80, 24), Qt.SizeHintRole)
+        self.orientation2_combo.addItem("0°", 0)
+        self.orientation2_combo.setItemData(1, QSize(80, 24), Qt.SizeHintRole)
+        self.orientation2_combo.setMinimumWidth(70)
+        self.orientation2_combo.setToolTip("Grid 2+ (second and further files in each group).\n" + base_tooltip)
+        self.orientation2_combo.view().setStyleSheet(popup_view_style)
+        self.orientation2_combo.view().setPalette(popup_palette)
+        row.addWidget(self.orientation2_combo)
 
         # openhdemg GUI toggle
         self.chk_show_gui = QCheckBox("Show openhdemg GUI")
@@ -852,7 +927,8 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                 groups,
                 threshold=self.threshold_spin.value(),
                 timewindow=self.timewindow_spin.value(),
-                orientation=self.orientation_combo.currentData(),
+                orientation1=self.orientation1_combo.currentData(),
+                orientation2=self.orientation2_combo.currentData(),
                 show_gui=self.chk_show_gui.isChecked(),
             )
 
@@ -1191,7 +1267,8 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             'parameters': {
                 'xcc_threshold': self.threshold_spin.value(),
                 'timewindow_ms': self.timewindow_spin.value(),
-                'orientation_deg': self.orientation_combo.currentData(),
+                'orientation_grid1_deg': self.orientation1_combo.currentData(),
+                'orientation_grid2plus_deg': self.orientation2_combo.currentData(),
                 'grouping_strategy': 'file_and_muscle'
             },
             'summary': {
