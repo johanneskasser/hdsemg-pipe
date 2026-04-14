@@ -1003,7 +1003,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             self.success(f"Found {results['total_duplicate_groups']} duplicate groups")
         else:
             # No duplicates found - automatically copy files and complete step
-            self.info("No duplicates found - all MUs are unique. Auto-completing step...")
+            self.info("No duplicates found — step completed. Adjust parameters and re-run if needed.")
             self.auto_complete_no_duplicates(results)
 
     def auto_complete_no_duplicates(self, results):
@@ -1037,6 +1037,9 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             self.save_detection_report(output_folder)
 
             logger.info(f"Copied {len(self.saved_json_paths)} files (no duplicates + ungrouped)")
+
+            # Suppress auto-navigation so the user stays on this step and can re-run
+            self._suppress_auto_navigate = True
 
             # Export to MAT format for MUEdit
             self.start_export_to_muedit()
@@ -1245,6 +1248,10 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             + (f" · {skipped_count} skipped (0 MUs)" if skipped_count > 0 else "")
         )
         self.complete_step()
+
+        # Re-enable detection controls so user can adjust parameters and re-run
+        self.btn_detect.setEnabled(True)
+        self.btn_configure.setEnabled(True)
 
     def on_export_error(self, error_msg):
         """Handle export errors."""

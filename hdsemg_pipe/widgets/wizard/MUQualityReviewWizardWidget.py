@@ -888,6 +888,8 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             except Exception as exc:
                 logger.warning("Preload: could not load %s: %s", fp, exc)
                 continue
+            if fp not in self._emgfile_cache:
+                self._emgfile_cache[fp] = dec.get_emgfile_for_plotting()
             worker = _ReliabilityWorker(dec, self._thresholds)
             worker.finished.connect(
                 lambda df, p=fp: self._on_reliability_loaded(p, df)
