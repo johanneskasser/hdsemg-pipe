@@ -522,6 +522,7 @@ class _FileListItem(QWidget):
         self.setFixedHeight(_LIST_ROW_HEIGHT)
         self.filepath = filepath
         self._is_selected = False
+        self._force_checked = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(Spacing.MD, 0, Spacing.SM, 0)
@@ -550,8 +551,10 @@ class _FileListItem(QWidget):
         self.setStyleSheet(f"background-color: {bg}; border-radius: 4px;")
 
     def set_force_checked(self, force: bool):
-        """Disable checkbox when this is the last checked file in the group."""
-        self.checkbox.setEnabled(not force)
+        """Mark as last checked file in group — block uncheck without disabling."""
+        self._force_checked = force
+        tip = "At least one file per group must remain selected" if force else ""
+        self.checkbox.setToolTip(tip)
 
 
 # ---------------------------------------------------------------------------
@@ -974,6 +977,14 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             worker.start()
 
     def _on_file_toggled(self, filepath: str, checked: bool):
+        if not checked:
+            item = self._items.get(filepath)
+            if item and item._force_checked:
+                # Silently restore — cannot uncheck the last file in a group
+                item.checkbox.blockSignals(True)
+                item.checkbox.setChecked(True)
+                item.checkbox.blockSignals(False)
+                return
         self._checked[filepath] = checked
         self._update_group_headers()
         self._enforce_last_in_group()
@@ -1263,11 +1274,18 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
     def _on_threshold_changed(self):
         self._thresholds = self._build_thresholds()
-        self._reliability_cache.clear()
-        self._update_group_headers()  # resets to file counts while cache is empty
+        # The reliability cache stores raw SIL/PNR/CoVISI values that are
+        # threshold-independent.  All display helpers (_refresh_mu_table,
+        # _update_group_headers, _update_footer) already apply self._thresholds
+        # live to those raw values, so we only need to repaint — no cache
+        # invalidation, no worker launch, no disk I/O.
+        self._update_group_headers()
         if self._current_file:
-            self._load_file_data(self._current_file)
-        self._preload_all_reliability()
+            if self._current_file in self._reliability_cache:
+                self._refresh_mu_table(self._current_file)
+            else:
+                # File not yet loaded — trigger initial load (first visit only)
+                self._load_file_data(self._current_file)
         self._update_footer()
         # Debounced check: warn about active manual overrides once the user
         # stops adjusting sliders (600 ms of silence).
