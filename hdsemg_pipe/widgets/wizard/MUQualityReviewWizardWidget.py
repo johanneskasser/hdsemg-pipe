@@ -456,14 +456,23 @@ class _ElidedLabel(QLabel):
 
 
 class _GroupHeader(QWidget):
-    """Group label only — pills live in the synchronized _GroupHeaderPills column."""
+    """Group label + select-all checkbox. Pills live in the synchronized _GroupHeaderPills column."""
 
-    def __init__(self, label: str, parent=None):
+    group_toggled = pyqtSignal(str, bool)  # group_key, check_all
+
+    def __init__(self, label: str, group_key: str, parent=None):
         super().__init__(parent)
         self.setFixedHeight(_LIST_ROW_HEIGHT)
+        self._group_key = group_key
         layout = QHBoxLayout(self)
         layout.setContentsMargins(Spacing.SM, 0, Spacing.SM, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(4)
+
+        self.checkbox = QCheckBox()
+        self.checkbox.setTristate(True)
+        self.checkbox.setCheckState(Qt.Checked)
+        self.checkbox.clicked.connect(self._on_clicked)
+        layout.addWidget(self.checkbox)
 
         lbl = _ElidedLabel(label)
         lbl.setStyleSheet(
@@ -472,6 +481,25 @@ class _GroupHeader(QWidget):
         lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         lbl.setMinimumWidth(0)
         layout.addWidget(lbl)
+
+    def _on_clicked(self):
+        # Tristate cycles Unchecked→PartiallyChecked on first click from unchecked;
+        # normalize partial → checked so the user only gets all-or-nothing toggling.
+        if self.checkbox.checkState() == Qt.PartiallyChecked:
+            self.checkbox.blockSignals(True)
+            self.checkbox.setCheckState(Qt.Checked)
+            self.checkbox.blockSignals(False)
+        self.group_toggled.emit(self._group_key, self.checkbox.isChecked())
+
+    def update_check_state(self, n_checked: int, n_total: int):
+        self.checkbox.blockSignals(True)
+        if n_checked == 0:
+            self.checkbox.setCheckState(Qt.Unchecked)
+        elif n_checked == n_total:
+            self.checkbox.setCheckState(Qt.Checked)
+        else:
+            self.checkbox.setCheckState(Qt.PartiallyChecked)
+        self.checkbox.blockSignals(False)
 
 
 class _GroupHeaderPills(QWidget):
@@ -522,7 +550,6 @@ class _FileListItem(QWidget):
         self.setFixedHeight(_LIST_ROW_HEIGHT)
         self.filepath = filepath
         self._is_selected = False
-        self._force_checked = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(Spacing.MD, 0, Spacing.SM, 0)
@@ -550,11 +577,6 @@ class _FileListItem(QWidget):
         bg = Colors.BLUE_100 if selected else "transparent"
         self.setStyleSheet(f"background-color: {bg}; border-radius: 4px;")
 
-    def set_force_checked(self, force: bool):
-        """Mark as last checked file in group — block uncheck without disabling."""
-        self._force_checked = force
-        tip = "At least one file per group must remain selected" if force else ""
-        self.checkbox.setToolTip(tip)
 
 
 # ---------------------------------------------------------------------------
@@ -602,6 +624,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._groups: Dict[str, List[str]] = {}
         self._items: Dict[str, _FileListItem] = {}
         self._group_headers: Dict[str, _GroupHeaderPills] = {}
+        self._group_header_widgets: Dict[str, _GroupHeader] = {}
         self._current_file: Optional[str] = None
         self._sta_cache: Dict[str, object] = {}
         self._worker: Optional[QThread] = None
@@ -905,6 +928,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
         self._items.clear()
         self._group_headers.clear()
+        self._group_header_widgets.clear()
         self._groups.clear()
         self._checked.clear()
 
@@ -916,9 +940,11 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
         insert_pos = 0
         for key, fps in self._groups.items():
-            # File-names column: group label (text only, can scroll horizontally)
-            header_text = _GroupHeader(labels.get(key, key))
-            self._file_list_layout.insertWidget(insert_pos, header_text)
+            # File-names column: group label + select-all checkbox
+            header_widget = _GroupHeader(labels.get(key, key), group_key=key)
+            header_widget.group_toggled.connect(self._on_group_toggled)
+            self._group_header_widgets[key] = header_widget
+            self._file_list_layout.insertWidget(insert_pos, header_widget)
 
             # Pills column: always-visible pills for this group
             pills = _GroupHeaderPills()
@@ -942,7 +968,6 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
                 insert_pos += 1
 
         self._update_group_headers()
-        self._enforce_last_in_group()
         self._update_proceed_button()
 
         if filepaths:
@@ -977,29 +1002,23 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             worker.start()
 
     def _on_file_toggled(self, filepath: str, checked: bool):
-        if not checked:
-            item = self._items.get(filepath)
-            if item and item._force_checked:
-                # Silently restore — cannot uncheck the last file in a group
-                item.checkbox.blockSignals(True)
-                item.checkbox.setChecked(True)
-                item.checkbox.blockSignals(False)
-                return
         self._checked[filepath] = checked
         self._update_group_headers()
-        self._enforce_last_in_group()
         self._update_proceed_button()
         self._update_footer()
 
-    def _enforce_last_in_group(self):
-        for fps in self._groups.values():
-            checked_fps = [fp for fp in fps if self._checked.get(fp, True)]
-            for fp in fps:
-                item = self._items.get(fp)
-                if item:
-                    item.set_force_checked(
-                        len(checked_fps) == 1 and fp in checked_fps
-                    )
+    def _on_group_toggled(self, group_key: str, check_all: bool):
+        fps = self._groups.get(group_key, [])
+        for fp in fps:
+            self._checked[fp] = check_all
+            item = self._items.get(fp)
+            if item:
+                item.checkbox.blockSignals(True)
+                item.checkbox.setChecked(check_all)
+                item.checkbox.blockSignals(False)
+        self._update_group_headers()
+        self._update_proceed_button()
+        self._update_footer()
 
     def _on_file_selected(self, filepath: str):
         if self._current_file:
@@ -1346,6 +1365,11 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             # File pill — always up to date
             header.set_file_counter(len(checked_fps), len(fps))
 
+            # Group header checkbox — reflects current selection state
+            hw = self._group_header_widgets.get(key)
+            if hw:
+                hw.update_check_state(len(checked_fps), len(fps))
+
             # MU pill — use whatever files have data; show partial count as data loads
             total_reliable = 0
             total_mus = 0
@@ -1367,11 +1391,12 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             header.set_mu_counter(total_reliable, total_mus)
 
     def _update_proceed_button(self):
-        all_ok = all(
-            any(self._checked.get(fp, True) for fp in fps)
+        any_checked = any(
+            self._checked.get(fp, True)
             for fps in self._groups.values()
+            for fp in fps
         )
-        self._proceed_btn.setEnabled(all_ok and bool(self._groups))
+        self._proceed_btn.setEnabled(any_checked and bool(self._groups))
 
     def _update_footer(self):
         import math
