@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QFontMetrics, QPainter
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -440,27 +440,55 @@ class _CustomGroupingDialog(QDialog):
 # File list items
 # ---------------------------------------------------------------------------
 
+_LIST_ROW_HEIGHT = 26  # Shared fixed height for group headers and file items
+
+
+class _ElidedLabel(QLabel):
+    """QLabel that shows '…' when text is wider than the widget."""
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        metrics = QFontMetrics(self.font())
+        elided = metrics.elidedText(self.text(), Qt.ElideRight, self.width())
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.setFont(self.font())
+        painter.drawText(self.contentsRect(), Qt.AlignLeft | Qt.AlignVCenter, elided)
+
+
 class _GroupHeader(QWidget):
+    """Group label only — pills live in the synchronized _GroupHeaderPills column."""
+
     def __init__(self, label: str, parent=None):
         super().__init__(parent)
+        self.setFixedHeight(_LIST_ROW_HEIGHT)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(Spacing.SM, Spacing.XS, Spacing.SM, Spacing.XS)
-        layout.setSpacing(4)
+        layout.setContentsMargins(Spacing.SM, 0, Spacing.SM, 0)
+        layout.setSpacing(0)
 
-        lbl = QLabel(label)
+        lbl = _ElidedLabel(label)
         lbl.setStyleSheet(
             f"font-weight: bold; color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
         )
+        lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        lbl.setMinimumWidth(0)
         layout.addWidget(lbl)
-        layout.addStretch()
 
-        # Pill: reliable MU count (populated after reliability data loads)
+
+class _GroupHeaderPills(QWidget):
+    """The MU-count and file-count pills, always visible in the pinned pills column."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(_LIST_ROW_HEIGHT)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 0, Spacing.SM, 0)
+        layout.setSpacing(4)
+
         self._mu_pill = QLabel("…")
         self._mu_pill.setStyleSheet(self._pill_style(Colors.GRAY_400))
         layout.addWidget(self._mu_pill)
 
-        # Pill: selected files out of total
-        self._file_pill = QLabel()
+        self._file_pill = QLabel("…")
         self._file_pill.setStyleSheet(self._pill_style(Colors.GRAY_400))
         layout.addWidget(self._file_pill)
 
@@ -481,7 +509,6 @@ class _GroupHeader(QWidget):
         self._mu_pill.setStyleSheet(self._pill_style(color))
         self._mu_pill.setText(f"{reliable} MU" if total > 0 else "–")
 
-    # backward-compat alias used by restore_from_manifest path
     def set_counter(self, selected: int, total: int):
         self.set_file_counter(selected, total)
 
@@ -492,11 +519,12 @@ class _FileListItem(QWidget):
 
     def __init__(self, filepath: str, label: str, parent=None):
         super().__init__(parent)
+        self.setFixedHeight(_LIST_ROW_HEIGHT)
         self.filepath = filepath
         self._is_selected = False
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(Spacing.MD, Spacing.XS, Spacing.SM, Spacing.XS)
+        layout.setContentsMargins(Spacing.MD, 0, Spacing.SM, 0)
 
         self.checkbox = QCheckBox()
         self.checkbox.setChecked(True)
@@ -570,7 +598,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._checked: Dict[str, bool] = {}
         self._groups: Dict[str, List[str]] = {}
         self._items: Dict[str, _FileListItem] = {}
-        self._group_headers: Dict[str, _GroupHeader] = {}
+        self._group_headers: Dict[str, _GroupHeaderPills] = {}
         self._current_file: Optional[str] = None
         self._sta_cache: Dict[str, object] = {}
         self._worker: Optional[QThread] = None
@@ -603,16 +631,18 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         outer_splitter = QSplitter(Qt.Horizontal)
         root.addWidget(outer_splitter)
 
-        # ---- Left panel: file list ----
+        # ---- Left panel: file list + always-visible pills column ----
         left = QWidget()
-        left.setFixedWidth(240)
+        left.setMinimumWidth(160)
         left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM)
+        left_layout.setContentsMargins(Spacing.SM, Spacing.SM, 0, Spacing.SM)
         left_layout.setSpacing(0)
 
+        # File-names scroll area: horizontal scroll enabled for long names
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         self._file_list_widget = QWidget()
         self._file_list_layout = QVBoxLayout(self._file_list_widget)
@@ -620,7 +650,37 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._file_list_layout.setSpacing(2)
         self._file_list_layout.addStretch()
         scroll.setWidget(self._file_list_widget)
-        left_layout.addWidget(scroll)
+
+        # Pills column: fixed width, V-scroll synced with file list, no H-scroll
+        self._pills_col_widget = QWidget()
+        self._pills_col_layout = QVBoxLayout(self._pills_col_widget)
+        self._pills_col_layout.setContentsMargins(0, 0, 0, 0)
+        self._pills_col_layout.setSpacing(2)
+        self._pills_col_layout.addStretch()
+
+        self._pills_col_scroll = QScrollArea()
+        self._pills_col_scroll.setWidget(self._pills_col_widget)
+        self._pills_col_scroll.setWidgetResizable(True)
+        self._pills_col_scroll.setFrameShape(QFrame.NoFrame)
+        self._pills_col_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._pills_col_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._pills_col_scroll.setFixedWidth(90)
+
+        # Bidirectional V-scroll sync (Qt skips signal if value unchanged → no loop)
+        scroll.verticalScrollBar().valueChanged.connect(
+            self._pills_col_scroll.verticalScrollBar().setValue
+        )
+        self._pills_col_scroll.verticalScrollBar().valueChanged.connect(
+            scroll.verticalScrollBar().setValue
+        )
+
+        list_area = QWidget()
+        list_area_layout = QHBoxLayout(list_area)
+        list_area_layout.setContentsMargins(0, 0, 0, 0)
+        list_area_layout.setSpacing(0)
+        list_area_layout.addWidget(scroll)
+        list_area_layout.addWidget(self._pills_col_scroll)
+        left_layout.addWidget(list_area)
 
         self._grouping_btn = QPushButton("⚙ Custom Grouping")
         self._grouping_btn.setStyleSheet(f"""
@@ -833,11 +893,12 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
     def _populate_file_list(self, filepaths: List[str]):
         self._all_filepaths = filepaths
-        # Clear existing widgets (keep stretch at end)
-        while self._file_list_layout.count() > 1:
-            item = self._file_list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        # Clear both layouts (keep the stretch item at the end of each)
+        for layout in (self._file_list_layout, self._pills_col_layout):
+            while layout.count() > 1:
+                item = layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
 
         self._items.clear()
         self._group_headers.clear()
@@ -852,9 +913,15 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
         insert_pos = 0
         for key, fps in self._groups.items():
-            header = _GroupHeader(labels.get(key, key))
-            self._group_headers[key] = header
-            self._file_list_layout.insertWidget(insert_pos, header)
+            # File-names column: group label (text only, can scroll horizontally)
+            header_text = _GroupHeader(labels.get(key, key))
+            self._file_list_layout.insertWidget(insert_pos, header_text)
+
+            # Pills column: always-visible pills for this group
+            pills = _GroupHeaderPills()
+            self._group_headers[key] = pills
+            self._pills_col_layout.insertWidget(insert_pos, pills)
+
             insert_pos += 1
             for fp in fps:
                 item = _FileListItem(fp, Path(fp).name)
@@ -863,6 +930,12 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
                 self._items[fp] = item
                 self._checked[fp] = True
                 self._file_list_layout.insertWidget(insert_pos, item)
+
+                # Spacer in pills column matching each file item row
+                spacer = QWidget()
+                spacer.setFixedHeight(_LIST_ROW_HEIGHT)
+                self._pills_col_layout.insertWidget(insert_pos, spacer)
+
                 insert_pos += 1
 
         self._update_group_headers()
