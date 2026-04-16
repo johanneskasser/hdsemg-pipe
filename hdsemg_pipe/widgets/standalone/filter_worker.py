@@ -67,17 +67,16 @@ class StandaloneFilterWorker(QThread):
 
             for i, filename in enumerate(self._kept_files):
                 self.progress.emit(i + 1, total)
-                src_json = load_dir / filename
-                if not src_json.exists():
-                    logger.warning("StandaloneFilterWorker: source not found: %s", src_json)
+                src = load_dir / filename
+                if not src.exists():
+                    logger.warning("StandaloneFilterWorker: source not found: %s", src)
                     continue
 
-                # Derive keep_mu_indices from JSON reliability
-                dec_json = DecompositionFile.load(src_json)
+                dec = DecompositionFile.load(src)
                 file_overrides_raw = self._overrides.get(filename, {})
                 file_overrides = {(0, int(k)): v for k, v in file_overrides_raw.items()}
 
-                rel_df = dec_json.compute_reliability(self._thresholds)
+                rel_df = dec.compute_reliability(self._thresholds)
                 keep_mu_indices: set = set()
                 for _, row in rel_df.iterrows():
                     mu = int(row["mu_index"])
@@ -90,42 +89,39 @@ class StandaloneFilterWorker(QThread):
                     elif bool(row["is_reliable"]):
                         keep_mu_indices.add(mu)
 
-                stem = src_json.stem
-                # In standalone mode we keep the original stem (no _covisi_filtered suffix)
-                out_stem = stem
-
-                # --- 1. Filter and save JSON ---
-                filtered_json = dec_json.filter_mus_by_reliability(
-                    self._thresholds, file_overrides
-                )
-                out_json = write_dir / (out_stem + ".json")
-                filtered_json.save(out_json)
+                stem = src.stem
+                # Preserve original extension (JSON or MAT)
+                out_path = write_dir / filename
+                filtered = dec.filter_mus_by_reliability(self._thresholds, file_overrides)
+                filtered.save(out_path)
                 n_written += 1
 
-                # --- 2. Filter sibling PKL (if selected) ---
-                if "pkl" in cfg.process_siblings:
-                    src_pkl = load_dir / (stem + ".pkl")
-                    if src_pkl.exists():
-                        try:
-                            dec_pkl = DecompositionFile.load(src_pkl)
-                            dec_pkl._pkl_keep_indices = {0: keep_mu_indices}
-                            out_pkl = write_dir / (out_stem + ".pkl")
-                            dec_pkl.save(out_pkl)
-                            n_written += 1
-                        except Exception as exc:
-                            logger.warning("PKL filter failed for %s: %s", src_pkl.name, exc)
+                # --- Sibling files (only for JSON primary files) ---
+                if src.suffix.lower() == ".json":
+                    # Filter sibling PKL (if selected)
+                    if "pkl" in cfg.process_siblings:
+                        src_pkl = load_dir / (stem + ".pkl")
+                        if src_pkl.exists():
+                            try:
+                                dec_pkl = DecompositionFile.load(src_pkl)
+                                dec_pkl._pkl_keep_indices = {0: keep_mu_indices}
+                                dec_pkl.save(write_dir / (stem + ".pkl"))
+                                n_written += 1
+                            except Exception as exc:
+                                logger.warning("PKL filter failed for %s: %s", src_pkl.name, exc)
 
-                # --- 3. Filter sibling MAT (if selected) ---
-                if "mat" in cfg.process_siblings:
-                    src_mat = load_dir / (stem + "_muedit.mat")
-                    if src_mat.exists():
-                        try:
-                            dec_mat = DecompositionFile.load(src_mat)
-                            out_mat = write_dir / (out_stem + "_muedit.mat")
-                            dec_mat._filter_mat_pulsetrain_by_indices(keep_mu_indices, out_mat)
-                            n_written += 1
-                        except Exception as exc:
-                            logger.warning("MAT filter failed for %s: %s", src_mat.name, exc)
+                    # Filter sibling MAT (if selected)
+                    if "mat" in cfg.process_siblings:
+                        src_mat = load_dir / (stem + "_muedit.mat")
+                        if src_mat.exists():
+                            try:
+                                dec_mat = DecompositionFile.load(src_mat)
+                                dec_mat._filter_mat_pulsetrain_by_indices(
+                                    keep_mu_indices, write_dir / (stem + "_muedit.mat")
+                                )
+                                n_written += 1
+                            except Exception as exc:
+                                logger.warning("MAT filter failed for %s: %s", src_mat.name, exc)
 
             # --- In-place: swap temp files into source dir ---
             if cfg.mode == "in_place":
@@ -204,12 +200,17 @@ class StandaloneFilterWorker(QThread):
             pass
 
     @staticmethod
-    def _sibling_paths(base_dir: Path, json_filename: str, process_siblings: frozenset) -> list:
-        """Return paths for JSON + selected sibling types."""
-        stem = Path(json_filename).stem
-        paths = [base_dir / json_filename]
-        if "pkl" in process_siblings:
-            paths.append(base_dir / (stem + ".pkl"))
-        if "mat" in process_siblings:
-            paths.append(base_dir / (stem + "_muedit.mat"))
+    def _sibling_paths(base_dir: Path, filename: str, process_siblings: frozenset) -> list:
+        """Return paths for the primary file + selected sibling types.
+
+        Siblings (PKL/MAT) are only attached to JSON primary files.
+        """
+        p = Path(filename)
+        paths = [base_dir / filename]
+        if p.suffix.lower() == ".json":
+            stem = p.stem
+            if "pkl" in process_siblings:
+                paths.append(base_dir / (stem + ".pkl"))
+            if "mat" in process_siblings:
+                paths.append(base_dir / (stem + "_muedit.mat"))
         return paths

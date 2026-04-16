@@ -289,6 +289,359 @@ class ReliabilityThresholds:
 
 
 # -------------------------------------------------------------------------
+# MAT in-memory conversion helpers
+# -------------------------------------------------------------------------
+
+def _cell_row_read_h5py(f, ds) -> list:
+    """Read a 1×N (or N×1) MATLAB cell array (HDF5 format) into list of arrays.
+
+    Elements are expected to be h5py object references.  Non-valid references
+    produce a ``None`` entry in the returned list.
+    """
+    obj = ds[()]
+    if obj.ndim == 2:
+        if obj.shape[0] == 1:
+            refs = [obj[0, j] for j in range(obj.shape[1])]
+        elif obj.shape[1] == 1:
+            refs = [obj[i, 0] for i in range(obj.shape[0])]
+        else:
+            refs = [obj[0, j] for j in range(obj.shape[1])]
+    elif obj.ndim == 1:
+        refs = list(obj)
+    else:
+        return []
+
+    out = []
+    for r in refs:
+        if _H5PY_AVAILABLE and isinstance(r, (h5py.Reference, h5py.h5r.Reference)) and bool(r):
+            out.append(np.array(f[r]))
+        else:
+            out.append(None)
+    return out
+
+
+def _read_mat_signal_scipy(path: Path) -> Optional[dict]:
+    """Read ``signal.*`` from a MUedit pulsetrain MAT (legacy scipy format).
+
+    Returns an openhdemg-compatible dict or ``None`` if the file cannot be
+    parsed (e.g. it is HDF5/v7.3 format, which raises ``NotImplementedError``).
+    """
+    if not _H5PY_AVAILABLE:
+        return None
+    try:
+        mat = sio.loadmat(str(path), squeeze_me=False, struct_as_record=False)
+    except NotImplementedError:
+        return None  # v7.3 HDF5 — caller should try _read_mat_signal_h5py
+    except Exception:
+        return None
+
+    sig = mat.get("signal")
+    if sig is None:
+        return None
+
+    # --- FSAMP ---
+    fsamp = 2048.0
+    fsamp_attr = getattr(sig, "fsamp", None)
+    if fsamp_attr is not None:
+        try:
+            fsamp = float(np.asarray(fsamp_attr).flat[0])
+        except Exception:
+            pass
+
+    # --- REF_SIGNAL from target or path ---
+    ref_signal = None
+    for attr_name in ("target", "path"):
+        arr = getattr(sig, attr_name, None)
+        if arr is not None:
+            a = np.asarray(arr, dtype=np.float64).flatten()
+            if a.size > 0:
+                ref_signal = pd.DataFrame(a.reshape(-1, 1))
+                break
+
+    # --- Pulsetrain: (1 × ngrid) dtype=object, each cell (nMU × n_samples) ---
+    pt_attr = getattr(sig, "Pulsetrain", None)
+    if pt_attr is None:
+        return None
+
+    pt_arr = np.asarray(pt_attr, dtype=object)
+    pt_flat = pt_arr.flatten()
+    pt_parts = []
+    for cell in pt_flat:
+        if cell is None:
+            continue
+        g = np.asarray(cell, dtype=np.float64)
+        if g.ndim == 1:
+            g = g.reshape(1, -1)
+        if g.size > 0:
+            pt_parts.append(g)
+
+    if not pt_parts:
+        return None
+
+    pt_combined = np.vstack(pt_parts)  # (nMU_total, n_samples)
+    n_mus = pt_combined.shape[0]
+    emg_length = pt_combined.shape[1]
+    ipts_df = pd.DataFrame(pt_combined.T)  # (n_samples, nMU)
+
+    # --- Dischargetimes: (ngrid × maxMU) dtype=object, 1-based indices ---
+    dt_attr = getattr(sig, "Dischargetimes", None)
+    mupulses = []
+    if dt_attr is not None:
+        dt_arr = np.asarray(dt_attr, dtype=object)
+        if dt_arr.ndim < 2:
+            dt_arr = dt_arr.reshape(1, -1)
+        mu_global = 0
+        for grid_idx, pt_grid in enumerate(pt_parts):
+            grid_n_mus = pt_grid.shape[0]
+            for mu_local in range(grid_n_mus):
+                if grid_idx < dt_arr.shape[0] and mu_local < dt_arr.shape[1]:
+                    cell = dt_arr[grid_idx, mu_local]
+                    if cell is not None and np.asarray(cell).size > 0:
+                        ts = np.asarray(cell, dtype=np.int64).flatten() - 1  # 1-based → 0-based
+                        mupulses.append(ts)
+                    else:
+                        mupulses.append(np.array([], dtype=np.int64))
+                else:
+                    mupulses.append(np.array([], dtype=np.int64))
+                mu_global += 1
+    else:
+        mupulses = [np.array([], dtype=np.int64)] * n_mus
+
+    if ref_signal is None:
+        ref_signal = pd.DataFrame(np.zeros((max(emg_length, 1), 1)))
+
+    return {
+        "SOURCE": "OTB",
+        "FILENAME": str(path),
+        "FSAMP": fsamp,
+        "IED": 8.0,
+        "NUMBER_OF_MUS": n_mus,
+        "EMG_LENGTH": emg_length,
+        "MUPULSES": mupulses,
+        "IPTS": ipts_df,
+        "BINARY_MUS_FIRING": _build_binary_mus_firing(mupulses, emg_length),
+        "RAW_SIGNAL": pd.DataFrame(),
+        "REF_SIGNAL": ref_signal,
+        "ACCURACY": pd.DataFrame(np.zeros((n_mus, 1)) if n_mus > 0 else np.empty((0, 1))),
+        "EXTRAS": pd.DataFrame(),
+    }
+
+
+def _read_mat_signal_h5py(path: Path) -> Optional[dict]:
+    """Read ``signal.*`` from a MUedit pulsetrain MAT (HDF5/v7.3 format).
+
+    Returns an openhdemg-compatible dict or ``None`` on failure.
+    """
+    if not _H5PY_AVAILABLE:
+        return None
+    try:
+        with h5py.File(str(path), "r") as f:
+            if "signal" not in f:
+                return None
+            sig = f["signal"]
+
+            # FSAMP
+            fsamp = 2048.0
+            if "fsamp" in sig:
+                try:
+                    fsamp = float(np.asarray(sig["fsamp"][()]).flat[0])
+                except Exception:
+                    pass
+
+            # REF_SIGNAL
+            ref_signal = None
+            for key in ("target", "path"):
+                if key in sig:
+                    a = np.asarray(sig[key][()], dtype=np.float64).flatten()
+                    if a.size > 0:
+                        ref_signal = pd.DataFrame(a.reshape(-1, 1))
+                        break
+
+            # Pulsetrain: (1 × ngrid) of refs, each (nMU × n_samples)
+            if "Pulsetrain" not in sig:
+                return None
+            pt_obj = sig["Pulsetrain"][()]  # (1, ngrid)
+            pt_parts = []
+            ngrid = pt_obj.shape[1] if pt_obj.ndim >= 2 else len(pt_obj)
+            for g_idx in range(ngrid):
+                ref = pt_obj[0, g_idx] if pt_obj.ndim >= 2 else pt_obj[g_idx]
+                if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)) and bool(ref):
+                    arr = np.array(f[ref], dtype=np.float64)
+                    if arr.ndim == 1:
+                        arr = arr.reshape(1, -1)
+                    if arr.size > 0:
+                        pt_parts.append(arr)
+
+            if not pt_parts:
+                return None
+
+            pt_combined = np.vstack(pt_parts)  # (nMU_total, n_samples)
+            n_mus = pt_combined.shape[0]
+            emg_length = pt_combined.shape[1]
+            ipts_df = pd.DataFrame(pt_combined.T)
+
+            # Dischargetimes: (ngrid × maxMU) of refs
+            mupulses = []
+            if "Dischargetimes" in sig:
+                dt_obj = sig["Dischargetimes"][()]
+                if dt_obj.ndim < 2:
+                    dt_obj = dt_obj.reshape(1, -1)
+                for g_idx, pt_grid in enumerate(pt_parts):
+                    for mu_local in range(pt_grid.shape[0]):
+                        if g_idx < dt_obj.shape[0] and mu_local < dt_obj.shape[1]:
+                            ref = dt_obj[g_idx, mu_local]
+                            if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)) and bool(ref):
+                                ts = np.array(f[ref], dtype=np.int64).flatten() - 1
+                                mupulses.append(ts)
+                            else:
+                                mupulses.append(np.array([], dtype=np.int64))
+                        else:
+                            mupulses.append(np.array([], dtype=np.int64))
+            else:
+                mupulses = [np.array([], dtype=np.int64)] * n_mus
+
+            if ref_signal is None:
+                ref_signal = pd.DataFrame(np.zeros((max(emg_length, 1), 1)))
+
+            return {
+                "SOURCE": "OTB",
+                "FILENAME": str(path),
+                "FSAMP": fsamp,
+                "IED": 8.0,
+                "NUMBER_OF_MUS": n_mus,
+                "EMG_LENGTH": emg_length,
+                "MUPULSES": mupulses,
+                "IPTS": ipts_df,
+                "BINARY_MUS_FIRING": _build_binary_mus_firing(mupulses, emg_length),
+                "RAW_SIGNAL": pd.DataFrame(),
+                "REF_SIGNAL": ref_signal,
+                "ACCURACY": pd.DataFrame(np.zeros((n_mus, 1)) if n_mus > 0 else np.empty((0, 1))),
+                "EXTRAS": pd.DataFrame(),
+            }
+    except Exception as exc:
+        logger.warning("_read_mat_signal_h5py: failed for %s: %s", path.name, exc)
+        return None
+
+
+def _read_mat_edited_h5py(path: Path) -> Optional[dict]:
+    """Read ``edition.*`` from a MUedit-edited MAT (HDF5/v7.3 format).
+
+    Reconstructs an openhdemg-compatible dict in memory — no disk write needed.
+    Tries to read FSAMP from the companion unedited MAT (same folder, stem
+    without ``_edited.mat`` suffix).
+
+    Returns ``None`` on failure.
+    """
+    if not _H5PY_AVAILABLE:
+        return None
+    try:
+        with h5py.File(str(path), "r") as f:
+            if "edition" not in f:
+                return None
+            edit = f["edition"]
+
+            if "Pulsetrainclean" not in edit:
+                return None
+            pt_cells = _cell_row_read_h5py(f, edit["Pulsetrainclean"])
+            pt_parts = []
+            for cell in pt_cells:
+                if cell is None:
+                    continue
+                g = np.asarray(cell, dtype=np.float64)
+                if g.ndim == 1:
+                    g = g.reshape(1, -1)
+                if g.size > 0:
+                    pt_parts.append(g)
+
+            if not pt_parts:
+                return None
+
+            pt_combined = np.vstack(pt_parts)  # (nMU_total, n_samples)
+            n_mus = pt_combined.shape[0]
+            emg_length = pt_combined.shape[1]
+            ipts_df = pd.DataFrame(pt_combined.T)
+
+            # Distimeclean: 1×1 cell → inner 1×nMU cell of refs
+            mupulses = []
+            if "Distimeclean" in edit:
+                top = edit["Distimeclean"][()]
+                inner_ref = top.flat[0]
+                inner_ds = f[inner_ref]
+                disc_nested = _cell_row_read_h5py(f, inner_ds)
+                for mu_timing in disc_nested:
+                    if mu_timing is not None and np.asarray(mu_timing).size > 0:
+                        ts = np.asarray(mu_timing, dtype=np.int64).flatten() - 1
+                        mupulses.append(ts)
+                    else:
+                        mupulses.append(np.array([], dtype=np.int64))
+            else:
+                mupulses = [np.array([], dtype=np.int64)] * n_mus
+
+            # SIL values as ACCURACY
+            accuracy_arr = np.zeros((n_mus, 1))
+            if "silval" in edit:
+                sil_cells = _cell_row_read_h5py(f, edit["silval"])
+                sil_flat: list = []
+                for cell in sil_cells:
+                    if cell is not None:
+                        sil_flat.extend(np.asarray(cell, dtype=np.float64).flatten().tolist())
+                if len(sil_flat) >= n_mus:
+                    accuracy_arr = np.array(sil_flat[:n_mus], dtype=np.float64).reshape(-1, 1)
+
+    except Exception as exc:
+        logger.warning("_read_mat_edited_h5py: failed for %s: %s", path.name, exc)
+        return None
+
+    # FSAMP from companion unedited MAT (stem without "_edited.mat")
+    fsamp = 2048.0
+    companion = Path(str(path).replace(".mat_edited.mat", ".mat"))
+    if companion.exists() and companion != path:
+        try:
+            mat = sio.loadmat(str(companion), squeeze_me=False, struct_as_record=False)
+            sig = mat.get("signal")
+            if sig is not None:
+                f_attr = getattr(sig, "fsamp", None)
+                if f_attr is not None:
+                    fsamp = float(np.asarray(f_attr).flat[0])
+        except NotImplementedError:
+            try:
+                with h5py.File(str(companion), "r") as fc:
+                    if "signal" in fc and "fsamp" in fc["signal"]:
+                        fsamp = float(np.asarray(fc["signal"]["fsamp"][()]).flat[0])
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    ref_signal = pd.DataFrame(np.zeros((max(emg_length, 1), 1)))
+
+    return {
+        "SOURCE": "OTB",
+        "FILENAME": str(path),
+        "FSAMP": fsamp,
+        "IED": 8.0,
+        "NUMBER_OF_MUS": n_mus,
+        "EMG_LENGTH": emg_length,
+        "MUPULSES": mupulses,
+        "IPTS": ipts_df,
+        "BINARY_MUS_FIRING": _build_binary_mus_firing(mupulses, emg_length),
+        "RAW_SIGNAL": pd.DataFrame(),
+        "REF_SIGNAL": ref_signal,
+        "ACCURACY": pd.DataFrame(accuracy_arr),
+        "EXTRAS": pd.DataFrame(),
+    }
+
+
+def _mat_to_emgfile_dict(path: Path, mat_subtype: str) -> Optional[dict]:
+    """Dispatch to the appropriate MAT reader and return an openhdemg-compatible dict."""
+    if mat_subtype == _MAT_PULSETRAIN:
+        return _read_mat_signal_scipy(path) or _read_mat_signal_h5py(path)
+    if mat_subtype == _MAT_EDITED:
+        return _read_mat_edited_h5py(path)
+    return None
+
+
+# -------------------------------------------------------------------------
 # Main class
 # -------------------------------------------------------------------------
 
@@ -310,6 +663,10 @@ class DecompositionFile:
         self._pkl: Optional[dict] = None
         # {port_idx: set of mu_indices to keep} -- None means keep all
         self._pkl_keep_indices: Optional[dict] = None
+
+        # MAT backend -- set of 0-based MU indices to retain after filtering
+        # None means keep all (unfiltered)
+        self._mat_keep_indices: Optional[set] = None
 
     # -- Factory ---------------------------------------------------------------
 
@@ -467,7 +824,8 @@ class DecompositionFile:
             return self._compute_reliability_json(thresholds)
         if self._backend == "pkl":
             return self._compute_reliability_pkl(thresholds)
-        # MAT backend: return empty frame (post-MUedit, computed separately)
+        if self._backend == "mat":
+            return self._compute_reliability_mat(thresholds)
         return pd.DataFrame(
             columns=["mu_index", "port_index", "sil", "pnr", "covisi",
                      "dr_mean", "n_spikes", "is_reliable"]
@@ -492,8 +850,10 @@ class DecompositionFile:
             return self._filter_json_by_reliability(thresholds, overrides)
         if self._backend == "pkl":
             return self._filter_pkl_by_reliability(thresholds, overrides)
+        if self._backend == "mat":
+            return self._filter_mat_by_reliability(thresholds, overrides)
         raise NotImplementedError(
-            "filter_mus_by_reliability is not supported for the MAT backend"
+            f"filter_mus_by_reliability is not supported for backend: {self._backend}"
         )
 
     def get_emgfile_for_plotting(self) -> Optional[dict]:
@@ -501,21 +861,33 @@ class DecompositionFile:
 
         JSON backend: returns sorted copy via tools.sort_mus().
         PKL backend: not yet supported — returns None.
-        MAT backend: returns None.
+        MAT backend: reconstructs an openhdemg-compatible dict in memory from
+                     the MAT file (no disk I/O beyond the initial load).
 
         Returns:
             openhdemg emgfile dict, or None if unavailable.
         """
-        if self._backend != "json" or not _OPENHDEMG_AVAILABLE:
+        if not _OPENHDEMG_AVAILABLE:
             return None
-        if self._emgfile is None:
+
+        if self._backend == "json":
+            if self._emgfile is None:
+                return None
+            try:
+                from openhdemg.library import tools
+                ef = tools.sort_mus(copy.deepcopy(self._emgfile))
+            except Exception as exc:
+                logger.warning("get_emgfile_for_plotting: sort_mus failed: %s", exc)
+                ef = copy.deepcopy(self._emgfile)
+
+        elif self._backend == "mat":
+            ef = _mat_to_emgfile_dict(self._path, self._mat_subtype)
+            if ef is None:
+                return None
+
+        else:
             return None
-        try:
-            from openhdemg.library import tools
-            ef = tools.sort_mus(copy.deepcopy(self._emgfile))
-        except Exception as exc:
-            logger.warning("get_emgfile_for_plotting: sort_mus failed: %s", exc)
-            ef = copy.deepcopy(self._emgfile)
+
         # Normalize REF_SIGNAL to 0-100 % MVC range.
         # Openhdemg expects REF_SIGNAL in percent (0-100).  Some acquisition
         # systems store it in raw ADC units (e.g., millivolts × 1000), producing
@@ -554,7 +926,13 @@ class DecompositionFile:
             return
 
         if self._backend == "mat":
-            logger.debug("DecompositionFile.save() is a no-op for MAT files")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if self._mat_keep_indices is not None and self._mat_subtype == _MAT_PULSETRAIN:
+                self._filter_mat_pulsetrain_by_indices(self._mat_keep_indices, path)
+            elif path != self._path:
+                import shutil as _shutil
+                _shutil.copy2(str(self._path), str(path))
+            return
 
     def to_json(self, output_dir: Path, stem: str) -> List[Path]:
         """Export to openhdemg JSON format.
@@ -854,6 +1232,86 @@ class DecompositionFile:
         inst._backend = "pkl"
         inst._pkl = self._pkl
         inst._pkl_keep_indices = keep_indices
+        return inst
+
+    # -- MAT reliability / filtering ---------------------------------------
+
+    def _compute_reliability_mat(
+        self, thresholds: "ReliabilityThresholds"
+    ) -> pd.DataFrame:
+        """Compute per-MU reliability from a MAT file via the in-memory dict."""
+        empty = pd.DataFrame(
+            columns=["mu_index", "port_index", "sil", "pnr", "covisi",
+                     "dr_mean", "n_spikes", "is_reliable"]
+        )
+        if not _OPENHDEMG_AVAILABLE:
+            return empty
+
+        ef = _mat_to_emgfile_dict(self._path, self._mat_subtype)
+        if ef is None:
+            return empty
+
+        n_mus = ef["NUMBER_OF_MUS"]
+        fsamp = ef["FSAMP"]
+        ipts = ef.get("IPTS")
+        mupulses = ef.get("MUPULSES", [])
+        emg_length = ef.get("EMG_LENGTH", 0)
+        duration_s = emg_length / fsamp if emg_length > 0 and fsamp > 0 else float("nan")
+
+        rows = []
+        for mu in range(n_mus):
+            pulses = mupulses[mu] if mu < len(mupulses) else []
+            n_spikes = len(pulses)
+            dr_mean = n_spikes / duration_s if duration_s > 0 else float("nan")
+            covisi_val = _cov_isi(pulses)
+
+            try:
+                ipts_mu = ipts.iloc[:, mu] if hasattr(ipts, "iloc") else None
+            except Exception:
+                ipts_mu = None
+
+            try:
+                sil_val = float(emg.compute_sil(ipts_mu, np.array(pulses))) if ipts_mu is not None else float("nan")
+            except Exception:
+                sil_val = float("nan")
+
+            try:
+                pnr_val = float(emg.compute_pnr(ipts_mu, np.array(pulses), fsamp)) if ipts_mu is not None else float("nan")
+            except Exception:
+                pnr_val = float("nan")
+
+            rows.append({
+                "mu_index": mu,
+                "port_index": 0,
+                "sil": sil_val,
+                "pnr": pnr_val,
+                "covisi": covisi_val,
+                "dr_mean": dr_mean,
+                "n_spikes": n_spikes,
+                "is_reliable": thresholds.is_reliable(sil_val, pnr_val, covisi_val),
+            })
+
+        return pd.DataFrame(rows)
+
+    def _filter_mat_by_reliability(
+        self,
+        thresholds: "ReliabilityThresholds",
+        overrides: dict,
+    ) -> "DecompositionFile":
+        rel_df = self._compute_reliability_mat(thresholds)
+        keep_set: set = set()
+        for _, row in rel_df.iterrows():
+            mu = int(row["mu_index"])
+            key = (0, mu)
+            decision = overrides.get(key, "Auto")
+            if decision == "Keep" or (decision != "Filter" and row["is_reliable"]):
+                keep_set.add(mu)
+
+        inst = DecompositionFile()
+        inst._path = self._path
+        inst._backend = "mat"
+        inst._mat_subtype = self._mat_subtype
+        inst._mat_keep_indices = keep_set
         return inst
 
     def _build_filtered_pkl(self) -> dict:
