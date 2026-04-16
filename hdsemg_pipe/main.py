@@ -241,8 +241,12 @@ class WizardMainWindow(QMainWindow):
         # This prevents navigation during state reconstruction
         current_viewed_step = self.current_step_index + 1  # Convert 0-based to 1-based
         if step_index == current_viewed_step:
+            # Check if the widget requested to suppress auto-navigation (e.g. no-duplicates case)
+            widget = self.steps[step_index - 1]
+            if getattr(widget, '_suppress_auto_navigate', False):
+                widget._suppress_auto_navigate = False
             # Auto-navigate to next step if not on last step
-            if step_index < 13:
+            elif step_index < 13:
                 logger.info(f"Auto-navigating from step {step_index} to step {step_index + 1}")
                 self.navigateNext()
             else:

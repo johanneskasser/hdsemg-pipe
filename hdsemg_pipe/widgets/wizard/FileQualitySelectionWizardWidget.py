@@ -15,8 +15,9 @@ import numpy as np
 import pandas as pd
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QSplitter, QStyleFactory, QToolButton,
+    QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter,
+    QStyleFactory, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget,
 )
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -85,6 +86,215 @@ def _rms_to_label_color(rms: Optional[float]) -> Tuple[str, str]:
         return "Troubled", Colors.ORANGE_500
     return "Bad", Colors.RED_500
 
+
+
+# ---------------------------------------------------------------------------
+# Custom grouping dialog
+# ---------------------------------------------------------------------------
+
+class _CustomGroupingDialog(QDialog):
+    """Dialog for applying a custom regex-based file grouping pattern."""
+
+    _PRESETS = [
+        ("Default (strip grid dims)", ""),
+        ("Subject + Block (e.g. 2_Pyr_1)", r"^(\d+(?:_[A-Za-z]+)+_\d+)"),
+        ("First 2 underscore parts", r"^((?:[^_]+_){1}[^_]+)"),
+        ("First 3 underscore parts", r"^((?:[^_]+_){2}[^_]+)"),
+    ]
+
+    def __init__(self, filepaths: List[str], current_regex: Optional[str] = None, parent=None):
+        super().__init__(parent)
+        self._filepaths = filepaths
+        self._regex = current_regex or ""
+        self.setWindowTitle("Custom File Grouping")
+        self.resize(720, 520)
+        self._build_ui()
+        self._update_preview()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        header = QLabel(
+            "<b>Custom Grouping by Regex</b><br>"
+            "<span style='color:#666; font-size:12px;'>"
+            "Enter a Python regex to extract the group key from each filename stem "
+            "(without extension). Use a <b>capture group</b> <code>(...)</code> to "
+            "define exactly which part becomes the key; without one the whole match is used."
+            "</span>"
+        )
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        preset_label = QLabel("Presets:")
+        preset_label.setStyleSheet("color: #555; font-size: 11px; font-weight: bold;")
+        layout.addWidget(preset_label)
+
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(6)
+        for name, pattern in self._PRESETS:
+            btn = QPushButton(name)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.BG_SECONDARY};
+                    color: {Colors.TEXT_PRIMARY};
+                    border: 1px solid {Colors.BORDER_DEFAULT};
+                    border-radius: {BorderRadius.SM};
+                    padding: 4px 10px;
+                    font-size: 11px;
+                }}
+                QPushButton:hover {{
+                    background-color: {Colors.BLUE_50};
+                    border-color: {Colors.BLUE_500};
+                }}
+            """)
+            btn.clicked.connect(lambda _, p=pattern: self._apply_preset(p))
+            preset_row.addWidget(btn)
+        preset_row.addStretch()
+        layout.addLayout(preset_row)
+
+        input_frame = QFrame()
+        input_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Colors.BG_SECONDARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: 8px;
+            }}
+        """)
+        input_layout = QHBoxLayout(input_frame)
+        input_layout.setContentsMargins(8, 4, 8, 4)
+
+        regex_label = QLabel("Regex:")
+        regex_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-weight: bold; min-width: 48px;")
+        input_layout.addWidget(regex_label)
+
+        self._regex_input = QLineEdit(self._regex)
+        self._regex_input.setPlaceholderText(
+            r"e.g.  ^(\d+_Pyr_\d+)   or leave empty to use the default logic"
+        )
+        self._regex_input.setStyleSheet(f"""
+            QLineEdit {{
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: 4px 8px;
+                font-family: monospace;
+                font-size: 12px;
+                background-color: white;
+            }}
+            QLineEdit:focus {{
+                border-color: {Colors.BLUE_500};
+            }}
+        """)
+        self._regex_input.textChanged.connect(self._on_regex_changed)
+        input_layout.addWidget(self._regex_input, 1)
+        layout.addWidget(input_frame)
+
+        self._error_label = QLabel()
+        self._error_label.setStyleSheet("color: #dc2626; font-size: 11px;")
+        self._error_label.setVisible(False)
+        layout.addWidget(self._error_label)
+
+        preview_label = QLabel("Preview — how files are grouped with current pattern:")
+        preview_label.setStyleSheet("color: #555; font-size: 11px; font-weight: bold;")
+        layout.addWidget(preview_label)
+
+        self._preview_table = QTableWidget()
+        self._preview_table.setColumnCount(2)
+        self._preview_table.setHorizontalHeaderLabels(["Filename stem", "Group key"])
+        self._preview_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self._preview_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self._preview_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._preview_table.setSelectionMode(QTableWidget.NoSelection)
+        self._preview_table.setAlternatingRowColors(True)
+        self._preview_table.setStyleSheet(f"""
+            QTableWidget {{
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                font-size: 11px;
+            }}
+            QHeaderView::section {{
+                background-color: {Colors.BG_SECONDARY};
+                padding: 4px 8px;
+                border: none;
+                border-bottom: 1px solid {Colors.BORDER_DEFAULT};
+                font-weight: bold;
+                color: {Colors.TEXT_SECONDARY};
+            }}
+        """)
+        layout.addWidget(self._preview_table, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(Styles.button_secondary())
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        self._apply_btn = QPushButton("Apply Grouping")
+        self._apply_btn.setStyleSheet(Styles.button_primary())
+        self._apply_btn.clicked.connect(self._on_accept)
+        btn_row.addWidget(self._apply_btn)
+        layout.addLayout(btn_row)
+
+    def _apply_preset(self, pattern: str):
+        self._regex_input.setText(pattern)
+
+    def _on_regex_changed(self, text: str):
+        self._regex = text
+        self._update_preview()
+
+    def _update_preview(self):
+        from pathlib import Path as _Path
+        regex = self._regex.strip()
+        if regex:
+            try:
+                re.compile(regex)
+                self._error_label.setVisible(False)
+                self._apply_btn.setEnabled(True)
+            except re.error as exc:
+                self._error_label.setText(f"Invalid regex: {exc}")
+                self._error_label.setVisible(True)
+                self._apply_btn.setEnabled(False)
+                self._preview_table.setRowCount(0)
+                return
+
+        from PyQt5.QtGui import QColor
+        rows = []
+        for fp in self._filepaths[:60]:
+            name = os.path.basename(fp)
+            key = get_group_key(name, regex if regex else None)
+            rows.append((_Path(fp).stem, key))
+
+        self._preview_table.setRowCount(len(rows))
+        group_colors: Dict[str, str] = {}
+        palette = ["#eff6ff", "#f0fdf4", "#fff7ed", "#fdf4ff", "#fefce8"]
+        for i, (stem, key) in enumerate(rows):
+            if key not in group_colors:
+                group_colors[key] = palette[len(group_colors) % len(palette)]
+            bg = QColor(group_colors[key])
+            for col, text in enumerate([stem, key]):
+                cell = QTableWidgetItem(text)
+                cell.setBackground(bg)
+                self._preview_table.setItem(i, col, cell)
+
+    def _on_accept(self):
+        regex = self._regex.strip()
+        if regex:
+            try:
+                re.compile(regex)
+            except re.error as exc:
+                self._error_label.setText(f"Invalid regex: {exc}")
+                self._error_label.setVisible(True)
+                return
+        self._regex = regex
+        self.accept()
+
+    def get_regex(self) -> str:
+        """Return the accepted regex (empty string → use default logic)."""
+        return self._regex
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +469,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._last_grouped_mode: Optional[bool] = None
         self._group_file_map: Dict[str, List[str]] = {}   # group_key → [file_paths]
         self._group_headers: Dict[str, _GroupHeader] = {}  # group_key → header widget
+        self._custom_group_regex: Optional[str] = None
+        self._all_mat_files: List[str] = []
         # Tracking-error metric (persisted in config)
         self._active_metric: str = config.get(Settings.TRACKING_ERROR_METRIC, METRIC_NRMSE)
 
@@ -341,6 +553,27 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         hdr_layout.addWidget(self._toggle_group_btn)
 
         layout.addWidget(hdr_row)
+
+        self._custom_grouping_btn = QPushButton("⚙ Custom Grouping")
+        self._custom_grouping_btn.setFixedHeight(22)
+        self._custom_grouping_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Colors.BG_SECONDARY};
+                color: {Colors.TEXT_SECONDARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: 2px {Spacing.SM}px;
+                font-size: 11px;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.BLUE_50};
+                color: {Colors.BLUE_700};
+                border-color: {Colors.BLUE_100};
+            }}
+        """)
+        self._custom_grouping_btn.clicked.connect(self._open_custom_grouping_dialog)
+        layout.addWidget(self._custom_grouping_btn)
 
         # Scrollable file list
         scroll = QScrollArea()
@@ -660,6 +893,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             )
             return
 
+        self._all_mat_files = all_files
+
         # Rebuild if files changed OR grouping mode changed
         mode_changed = self._grouped_mode != self._last_grouped_mode
         if set(self._file_items.keys()) == set(all_files) and not mode_changed:
@@ -700,7 +935,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         # Build groups preserving file order
         groups: Dict[str, List[str]] = {}
         for fp in all_files:
-            key = get_group_key(os.path.basename(fp))
+            key = get_group_key(os.path.basename(fp), self._custom_group_regex)
             groups.setdefault(key, []).append(fp)
         self._group_file_map = groups
 
@@ -749,6 +984,36 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             self._on_file_selected(self._current_file)
         elif self._file_items:
             self._on_file_selected(next(iter(self._file_items)))
+
+    def _open_custom_grouping_dialog(self):
+        dialog = _CustomGroupingDialog(
+            self._all_mat_files,
+            current_regex=self._custom_group_regex,
+            parent=self,
+        )
+        if dialog.exec_() == QDialog.Accepted:
+            regex = dialog.get_regex()
+            self._custom_group_regex = regex if regex else None
+            if self._custom_group_regex:
+                label = (f"⚙ Custom: {self._custom_group_regex[:24]}…"
+                         if len(self._custom_group_regex) > 24
+                         else f"⚙ Custom: {self._custom_group_regex}")
+                self._custom_grouping_btn.setText(label)
+                self._custom_grouping_btn.setStyleSheet(
+                    self._custom_grouping_btn.styleSheet()
+                    .replace(Colors.BG_SECONDARY, Colors.BLUE_50)
+                    .replace(Colors.TEXT_SECONDARY, Colors.BLUE_700)
+                )
+            else:
+                self._custom_grouping_btn.setText("⚙ Custom Grouping")
+            if self._all_mat_files:
+                # Force full rebuild by resetting last_grouped_mode
+                self._last_grouped_mode = None
+                self._populate_file_list()
+                if self._current_file and self._current_file in self._file_items:
+                    self._on_file_selected(self._current_file)
+                elif self._file_items:
+                    self._on_file_selected(next(iter(self._file_items)))
 
     # ------------------------------------------------------------------
     # RMS data
@@ -1048,7 +1313,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
     def _on_selection_changed(self, file_path: str, _is_selected: bool):
         self._update_confirm_button()
         if self._grouped_mode:
-            key = get_group_key(os.path.basename(file_path))
+            key = get_group_key(os.path.basename(file_path), self._custom_group_regex)
             if key in self._group_headers and key in self._group_file_map:
                 files = self._group_file_map[key]
                 total = len(files)

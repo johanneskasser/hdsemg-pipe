@@ -906,6 +906,89 @@ class DecompositionFile:
 
     # -- MAT backend -----------------------------------------------------------
 
+    def _filter_mat_pulsetrain_by_indices(
+        self, keep_mu_indices: set, dest_path: Path
+    ) -> None:
+        """Write a filtered copy of a pulsetrain MAT file keeping only ``keep_mu_indices``.
+
+        Modifies ``signal.Dischargetimes`` and ``signal.Pulsetrains`` in-place on
+        the loaded struct and saves to ``dest_path``.  Works for both legacy scipy
+        (HDF5-free) and HDF5 v7.3 MAT files.
+
+        Args:
+            keep_mu_indices: 0-based MU indices to retain.
+            dest_path: Output path for the filtered MAT file.
+        """
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # ---- Legacy scipy (non-HDF5) ----------------------------------------
+            mat_data = sio.loadmat(str(self._path), squeeze_me=True,
+                                   struct_as_record=False)
+            signal = mat_data.get("signal")
+            if signal is not None:
+                dt = getattr(signal, "Dischargetimes", None)
+                if dt is not None:
+                    orig = list(dt) if hasattr(dt, "__iter__") else []
+                    signal.Dischargetimes = np.array(
+                        [orig[i] for i in sorted(keep_mu_indices) if i < len(orig)],
+                        dtype=object,
+                    )
+                pt = getattr(signal, "Pulsetrains", None)
+                if pt is not None:
+                    orig_pt = list(pt) if hasattr(pt, "__iter__") else []
+                    signal.Pulsetrains = np.array(
+                        [orig_pt[i] for i in sorted(keep_mu_indices) if i < len(orig_pt)],
+                        dtype=object,
+                    )
+                mat_data["signal"] = signal
+                sio.savemat(str(dest_path), mat_data)
+                logger.info("MAT filter (scipy): wrote %s (%d MUs)",
+                            dest_path.name, len(keep_mu_indices))
+                return
+        except NotImplementedError:
+            pass  # HDF5 v7.3 — fall through to h5py path
+        except Exception as exc:
+            logger.warning("MAT scipy filter failed, trying h5py: %s", exc)
+
+        # ---- HDF5 v7.3 (h5py) ---------------------------------------------------
+        import shutil
+        # Copy original then surgically replace datasets
+        shutil.copy2(str(self._path), str(dest_path))
+
+        try:
+            with h5py.File(str(dest_path), "r+") as f:
+                if "signal" not in f:
+                    return
+                sig = f["signal"]
+                for field in ("Dischargetimes", "Pulsetrains"):
+                    ds = sig.get(field)
+                    if ds is None:
+                        continue
+                    arr = ds[()]  # shape (1, n_mu) or (n_mu,)
+                    if arr.ndim == 2 and arr.shape[0] == 1:
+                        orig_refs = [arr[0, i] for i in range(arr.shape[1])]
+                    elif arr.ndim == 1:
+                        orig_refs = list(arr)
+                    else:
+                        continue
+
+                    kept_refs = [orig_refs[i] for i in sorted(keep_mu_indices)
+                                 if i < len(orig_refs)]
+                    new_arr = np.array([kept_refs], dtype=arr.dtype)
+
+                    del sig[field]
+                    sig.create_dataset(field, data=new_arr)
+
+            logger.info("MAT filter (h5py): wrote %s (%d MUs)",
+                        dest_path.name, len(keep_mu_indices))
+        except Exception as exc:
+            logger.error("MAT h5py filter failed for %s: %s", dest_path.name, exc)
+            # dest_path is a copy of the original — leave it as-is rather than
+            # leaving a corrupted file
+            dest_path.unlink(missing_ok=True)
+            raise
+
     def _compute_covisi_mat(self) -> pd.DataFrame:
         from hdsemg_pipe.actions.covisi_analysis import compute_covisi_from_muedit_mat
 

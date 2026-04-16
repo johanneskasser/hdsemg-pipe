@@ -45,8 +45,7 @@ class ChannelSelectionWorker(QThread):
 
     def get_output_filepath(self):
         filename = os.path.basename(self.file_path)
-        workfolder = global_state.workfolder
-        output_filepath = os.path.join(workfolder, "channelselection", filename)
+        output_filepath = os.path.join(global_state.get_channel_selection_path(), filename)
         output_filepath = os.path.normpath(output_filepath)
         return output_filepath
 

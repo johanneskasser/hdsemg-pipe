@@ -15,10 +15,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtCore import QSize, QThread, pyqtSignal, Qt
+from PyQt5.QtGui import QColor, QPalette
+from PyQt5.QtWidgets import QStyleFactory
 from PyQt5.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDoubleSpinBox,
     QFrame,
@@ -45,11 +48,14 @@ from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.GridGroupingDialog import GridGroupingDialog
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, BorderRadius, Fonts
 from hdsemg_pipe.actions.duplicate_detection import (
-    detect_duplicates_in_group,
     remove_duplicates_from_emgfiles,
     save_cleaned_jsons,
     get_discharge_times,
 )
+from hdsemg_pipe.actions.duplicate_detection_openhdemg import (
+    detect_duplicates_in_group as _detect_duplicates_openhdemg,
+)
+from hdsemg_pipe.actions.decomposition_file import ReliabilityThresholds
 from hdsemg_pipe.actions.decomposition_export import create_emgfile_groups
 
 try:
@@ -72,13 +78,14 @@ class DuplicateDetectionWorker(QThread):
     finished = pyqtSignal(dict)  # detection_results
     error = pyqtSignal(str)
 
-    def __init__(self, groups, maxlag, jitter, tol, fsamp=None, parent=None):
+    def __init__(self, groups, threshold, timewindow, orientation1=180, orientation2=180, show_gui=False, parent=None):
         super().__init__(parent)
         self.groups = groups  # Output from create_emgfile_groups
-        self.maxlag = maxlag
-        self.jitter = jitter
-        self.tol = tol
-        self.fsamp = fsamp
+        self.threshold = threshold
+        self.timewindow = timewindow
+        self.orientation1 = orientation1  # first file in each group
+        self.orientation2 = orientation2  # second and further files
+        self.show_gui = show_gui
 
     def run(self):
         """Run duplicate detection on all groups."""
@@ -94,6 +101,8 @@ class DuplicateDetectionWorker(QThread):
                 'total_files': 0
             }
 
+            default_thresholds = ReliabilityThresholds()
+
             for idx, group_info in enumerate(self.groups):
                 group_name = group_info['name']
                 json_paths = group_info['files']
@@ -103,8 +112,9 @@ class DuplicateDetectionWorker(QThread):
                     f"Detecting duplicates in {group_name}..."
                 )
 
-                # Load JSON files
+                # Load JSON files and compute per-file reliability
                 emgfile_list = []
+                reliability_per_file = []
                 for json_path in json_paths:
                     try:
                         emgfile = emg.emg_from_json(str(json_path))
@@ -113,17 +123,30 @@ class DuplicateDetectionWorker(QThread):
                         logger.error(f"Failed to load {json_path}: {e}")
                         continue
 
+                    try:
+                        from hdsemg_pipe.actions.decomposition_file import DecompositionFile
+                        dec = DecompositionFile.load(json_path)
+                        rel_df = dec.compute_reliability(default_thresholds)
+                    except Exception as e:
+                        logger.warning(f"Could not compute reliability for {json_path}: {e}")
+                        rel_df = None
+                    reliability_per_file.append(rel_df)
+
                 if len(emgfile_list) == 0:
                     logger.warning(f"Group '{group_name}': No files loaded, skipping")
                     continue
 
-                # Run detection
-                detection_result = detect_duplicates_in_group(
+                # Build per-file orientations: first file → orientation1, rest → orientation2.
+                orientations = [self.orientation1] + [self.orientation2] * (len(emgfile_list) - 1)
+
+                # Run MUAP-shape-based detection
+                detection_result = _detect_duplicates_openhdemg(
                     emgfile_list,
-                    maxlag=self.maxlag,
-                    jitter=self.jitter,
-                    tol=self.tol,
-                    fsamp=self.fsamp
+                    reliability_per_file=reliability_per_file,
+                    threshold=self.threshold,
+                    timewindow=self.timewindow,
+                    orientations=orientations,
+                    show_gui=self.show_gui,
                 )
 
                 # Store results with file paths (for later use)
@@ -180,32 +203,64 @@ class ViewDuplicateDialog(QDialog):
 
         header = QLabel(
             f"<b>Duplicate Group:</b> {mus_str}<br>"
-            f"<b>Survivor:</b> {survivor_str} (lowest CoV ISI)"
+            f"<b>Survivor:</b> {survivor_str} (best reliability)"
         )
         header.setStyleSheet(Styles.label_heading(size="lg"))
         header.setWordWrap(True)
         layout.addWidget(header)
 
-        # CoV ISI table
-        cov_group = QGroupBox("CoV ISI Values")
-        cov_layout = QVBoxLayout(cov_group)
+        # Reliability table
+        rel_group = QGroupBox("Reliability Scores")
+        rel_layout = QVBoxLayout(rel_group)
 
-        cov_str = "<table style='border-collapse: collapse;'>"
-        cov_str += "<tr><th style='padding: 5px; border: 1px solid #ccc;'>MU</th>"
-        cov_str += "<th style='padding: 5px; border: 1px solid #ccc;'>CoV ISI (%)</th></tr>"
-        for (f, m), cov_val in self.dup_group['cov_isi_values'].items():
+        rel_per_mu = self.dup_group.get('reliability_per_mu', {})
+        xcc_pairs = self.dup_group.get('xcc_pairs', {})
+
+        rel_str = "<table style='border-collapse: collapse;'>"
+        rel_str += (
+            "<tr>"
+            "<th style='padding:5px;border:1px solid #ccc;'>MU</th>"
+            "<th style='padding:5px;border:1px solid #ccc;'>Reliable</th>"
+            "<th style='padding:5px;border:1px solid #ccc;'>SIL</th>"
+            "<th style='padding:5px;border:1px solid #ccc;'>PNR</th>"
+            "<th style='padding:5px;border:1px solid #ccc;'>CoVISI (%)</th>"
+            "<th style='padding:5px;border:1px solid #ccc;'>Spikes</th>"
+            "</tr>"
+        )
+        for (f, m) in self.dup_group['mus']:
             is_survivor = (f, m) == self.dup_group['survivor']
-            style = "background-color: #d4edda;" if is_survivor else ""
-            cov_str += f"<tr style='{style}'>"
-            cov_str += f"<td style='padding: 5px; border: 1px solid #ccc;'>File{f}_MU{m}</td>"
-            cov_str += f"<td style='padding: 5px; border: 1px solid #ccc;'>{cov_val:.2f}</td>"
-            cov_str += "</tr>"
-        cov_str += "</table>"
+            row_style = "background-color: #d4edda;" if is_survivor else ""
+            scores = rel_per_mu.get((f, m), {})
+            rel_str += f"<tr style='{row_style}'>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>File{f}_MU{m}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{'Yes' if scores.get('is_reliable') else 'No'}</td>"
+            sil = scores.get('sil', float('nan'))
+            pnr = scores.get('pnr', float('nan'))
+            covisi = scores.get('covisi', float('nan'))
+            n_spikes = scores.get('n_spikes', '—')
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{sil:.3f if isinstance(sil, float) else '—'}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{pnr:.1f if isinstance(pnr, float) else '—'}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{covisi:.1f if isinstance(covisi, float) else '—'}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{n_spikes}</td>"
+            rel_str += "</tr>"
+        rel_str += "</table>"
 
-        cov_label = QLabel(cov_str)
-        cov_label.setTextFormat(Qt.RichText)
-        cov_layout.addWidget(cov_label)
-        layout.addWidget(cov_group)
+        # XCC values between pairs in this group
+        if xcc_pairs:
+            mus = self.dup_group['mus']
+            for fi1, mi1 in mus:
+                for fi2, mi2 in mus:
+                    xcc = xcc_pairs.get((fi1, mi1, fi2, mi2))
+                    if xcc is not None:
+                        rel_str += (
+                            f"<br><small>XCC File{fi1}_MU{mi1} ↔ File{fi2}_MU{mi2}: "
+                            f"<b>{xcc:.3f}</b></small>"
+                        )
+
+        rel_label = QLabel(rel_str)
+        rel_label.setTextFormat(Qt.RichText)
+        rel_layout.addWidget(rel_label)
+        layout.addWidget(rel_group)
 
         # Spike train plots
         plot_group = QGroupBox("Spike Trains")
@@ -551,44 +606,130 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         row.setSpacing(Spacing.MD)
         row.setContentsMargins(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM)
 
-        # Jitter
-        row.addWidget(QLabel("Jitter:"))
-        self.jitter_spin = QDoubleSpinBox()
-        self.jitter_spin.setRange(0.01, 0.2)
-        self.jitter_spin.setValue(0.05)
-        self.jitter_spin.setSuffix(" s")
-        self.jitter_spin.setDecimals(3)
-        self.jitter_spin.setFixedWidth(80)
-        self.jitter_spin.setToolTip("Time tolerance for spike matching (default: 0.05s = 50ms)")
-        row.addWidget(self.jitter_spin)
+        # XCC threshold
+        row.addWidget(QLabel("XCC threshold:"))
+        self.threshold_spin = QDoubleSpinBox()
+        self.threshold_spin.setRange(0.5, 1.0)
+        self.threshold_spin.setValue(0.9)
+        self.threshold_spin.setSingleStep(0.05)
+        self.threshold_spin.setDecimals(2)
+        self.threshold_spin.setFixedWidth(70)
+        self.threshold_spin.setToolTip(
+            "Minimum normalised 2-D cross-correlation to consider two MUs duplicates.\n"
+            "openhdemg default: 0.9  (range 0–1, higher = stricter)"
+        )
+        row.addWidget(self.threshold_spin)
 
-        # MaxLag
-        row.addWidget(QLabel("Max lag:"))
-        self.maxlag_spin = QSpinBox()
-        self.maxlag_spin.setRange(64, 2048)
-        self.maxlag_spin.setValue(512)
-        self.maxlag_spin.setSuffix(" samp")
-        self.maxlag_spin.setFixedWidth(100)
-        self.maxlag_spin.setToolTip("Maximum time shift for cross-correlation (default: 512)")
-        row.addWidget(self.maxlag_spin)
+        # STA timewindow
+        row.addWidget(QLabel("Timewindow:"))
+        self.timewindow_spin = QSpinBox()
+        self.timewindow_spin.setRange(10, 200)
+        self.timewindow_spin.setValue(50)
+        self.timewindow_spin.setSuffix(" ms")
+        self.timewindow_spin.setFixedWidth(80)
+        self.timewindow_spin.setToolTip(
+            "STA timewindow used to compute MUAPs (default: 50 ms)"
+        )
+        row.addWidget(self.timewindow_spin)
 
-        # Overlap threshold
-        row.addWidget(QLabel("Overlap:"))
-        self.tol_spin = QDoubleSpinBox()
-        self.tol_spin.setRange(0.5, 1.0)
-        self.tol_spin.setValue(0.8)
-        self.tol_spin.setSingleStep(0.05)
-        self.tol_spin.setDecimals(2)
-        self.tol_spin.setFixedWidth(60)
-        self.tol_spin.setToolTip("Overlap threshold for duplicate detection (default: 0.8 = 80%)")
-        row.addWidget(self.tol_spin)
-
-        # Fsamp
+        # Fsamp (informational)
         row.addWidget(QLabel("Fsamp:"))
         self.lbl_fsamp = QLabel("Auto")
         self.lbl_fsamp.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-style: italic;")
         self.lbl_fsamp.setMinimumWidth(80)
         row.addWidget(self.lbl_fsamp)
+
+        # Per-file grid orientations — Grid 1 / Grid 2+
+        base_tooltip = (
+            "Physical mounting orientation (same as in OTBiolab+).\n"
+            "180° = connector toward the user (OT Biolab default).\n"
+            "0° = connector away from the user.\n"
+            "Ignored when matrixcode is not a known openhdemg code."
+        )
+        popup_view_style = f"""
+            QAbstractItemView {{
+                background-color: {Colors.BG_PRIMARY};
+                color: {Colors.TEXT_PRIMARY};
+                selection-background-color: {Colors.BLUE_100};
+                selection-color: {Colors.TEXT_PRIMARY};
+                outline: none;
+            }}
+            QAbstractItemView::item {{
+                color: {Colors.TEXT_PRIMARY};
+                background-color: {Colors.BG_PRIMARY};
+                padding: 4px 8px;
+                min-height: 22px;
+            }}
+            QAbstractItemView::item:selected,
+            QAbstractItemView::item:hover {{
+                background-color: {Colors.BLUE_100};
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """
+        fusion = QStyleFactory.create("Fusion")
+        # Widget-level stylesheet on the combo itself is required to force Qt into
+        # QStyleSheetStyle mode. Without it, macOS native rendering controls the popup
+        # even when Fusion style is set, making view().setStyleSheet() ineffective.
+        combo_style = f"""
+            QComboBox {{
+                background-color: {Colors.BG_PRIMARY};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.MD};
+                padding: 2px 6px;
+                font-size: {Fonts.SIZE_BASE};
+            }}
+            QComboBox::drop-down {{ border: none; width: 14px; }}
+        """
+
+        # Palette to force Fusion's item delegate to render dark text on white background
+        # regardless of the macOS dark-mode palette.
+        popup_palette = QPalette()
+        popup_palette.setColor(QPalette.All, QPalette.Base, QColor(Colors.BG_PRIMARY))
+        popup_palette.setColor(QPalette.All, QPalette.Text, QColor(Colors.TEXT_PRIMARY))
+        popup_palette.setColor(QPalette.All, QPalette.Window, QColor(Colors.BG_PRIMARY))
+        popup_palette.setColor(QPalette.All, QPalette.WindowText, QColor(Colors.TEXT_PRIMARY))
+        popup_palette.setColor(QPalette.All, QPalette.Highlight, QColor(Colors.BLUE_100))
+        popup_palette.setColor(QPalette.All, QPalette.HighlightedText, QColor(Colors.TEXT_PRIMARY))
+
+        row.addWidget(QLabel("Orientation:"))
+        self.orientation1_combo = QComboBox()
+        if fusion:
+            self.orientation1_combo.setStyle(fusion)
+        self.orientation1_combo.setStyleSheet(combo_style)
+        self.orientation1_combo.addItem("180°", 180)
+        self.orientation1_combo.setItemData(0, QSize(80, 24), Qt.SizeHintRole)
+        self.orientation1_combo.addItem("0°", 0)
+        self.orientation1_combo.setItemData(1, QSize(80, 24), Qt.SizeHintRole)
+        self.orientation1_combo.setMinimumWidth(70)
+        self.orientation1_combo.setToolTip("Grid 1 (first file in each group).\n" + base_tooltip)
+        self.orientation1_combo.view().setStyleSheet(popup_view_style)
+        self.orientation1_combo.view().setPalette(popup_palette)
+        row.addWidget(self.orientation1_combo)
+        row.addWidget(QLabel("/"))
+        self.orientation2_combo = QComboBox()
+        if fusion:
+            self.orientation2_combo.setStyle(fusion)
+        self.orientation2_combo.setStyleSheet(combo_style)
+        self.orientation2_combo.addItem("180°", 180)
+        self.orientation2_combo.setItemData(0, QSize(80, 24), Qt.SizeHintRole)
+        self.orientation2_combo.addItem("0°", 0)
+        self.orientation2_combo.setItemData(1, QSize(80, 24), Qt.SizeHintRole)
+        self.orientation2_combo.setMinimumWidth(70)
+        self.orientation2_combo.setToolTip("Grid 2+ (second and further files in each group).\n" + base_tooltip)
+        self.orientation2_combo.view().setStyleSheet(popup_view_style)
+        self.orientation2_combo.view().setPalette(popup_palette)
+        row.addWidget(self.orientation2_combo)
+
+        # openhdemg GUI toggle
+        self.chk_show_gui = QCheckBox("Show openhdemg GUI")
+        self.chk_show_gui.setChecked(False)
+        self.chk_show_gui.setToolTip(
+            "Open the openhdemg tracking GUI after each file pair to\n"
+            "visually inspect and manually confirm/reject MU pairs.\n"
+            "Leave unchecked for fully automatic detection."
+        )
+        row.addWidget(self.chk_show_gui)
 
         row.addStretch()
 
@@ -605,7 +746,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(6)
         self.results_table.setHorizontalHeaderLabels([
-            "Group", "MUs in Duplicate", "Overlap %", "Survivor", "Action", "View"
+            "Group", "MUs in Duplicate", "Avg XCC", "Survivor", "Action", "View"
         ])
         self.results_table.horizontalHeader().setStretchLastSection(False)
         self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
@@ -682,12 +823,10 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             'duplicate_detection_report.json'
         }
 
-        # Include *_covisi_filtered.pkl alongside JSON files when using scd_edition
         self.json_files = [
             os.path.join(source_folder, f)
             for f in os.listdir(source_folder)
-            if (f.endswith('.json') and f not in state_files and not f.startswith('algorithm_params'))
-            or (f.endswith('_covisi_filtered.pkl'))
+            if f.endswith('.json') and f not in state_files and not f.startswith('algorithm_params')
         ]
 
         self.lbl_files_found.setText(f"Found {len(self.json_files)} file(s) in {Path(source_folder).name}/")
@@ -786,10 +925,11 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
             self.detection_worker = DuplicateDetectionWorker(
                 groups,
-                maxlag=self.maxlag_spin.value(),
-                jitter=self.jitter_spin.value(),
-                tol=self.tol_spin.value(),
-                fsamp=None  # Auto-detect
+                threshold=self.threshold_spin.value(),
+                timewindow=self.timewindow_spin.value(),
+                orientation1=self.orientation1_combo.currentData(),
+                orientation2=self.orientation2_combo.currentData(),
+                show_gui=self.chk_show_gui.isChecked(),
             )
 
             self.detection_worker.progress.connect(self.on_detection_progress)
@@ -812,12 +952,9 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         output_folder = global_state.get_decomposition_removed_duplicates_path()
         self.pkl_dup_worker = PklDuplicateWorker(
             pkl_files, output_folder,
-            maxlag=self.maxlag_spin.value(),
-            jitter=self.jitter_spin.value(),
-            tol=self.tol_spin.value(),
         )
         self.pkl_dup_worker.progress.connect(
-            lambda cur, tot, msg: (self.progress_bar.setValue(cur), self.status_label.setText(msg))
+            lambda cur, tot, msg: (self.progress_bar.setValue(cur), self.lbl_summary.setText(msg))
         )
         self.pkl_dup_worker.finished.connect(self._on_pkl_dup_finished)
         self.pkl_dup_worker.error.connect(self._on_pkl_dup_error)
@@ -831,14 +968,16 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         if skipped:
             msg += f", {skipped} skipped"
         self.success(msg)
-        self.status_label.setText(msg)
+        self.results_group.setVisible(True)
+        self.lbl_summary.setText(msg)
         self.complete_step()
 
     def _on_pkl_dup_error(self, error_msg):
         self.progress_bar.setVisible(False)
         self.btn_detect.setEnabled(True)
         self.error(error_msg)
-        self.status_label.setText(f"Error: {error_msg}")
+        self.results_group.setVisible(True)
+        self.lbl_summary.setText(f"Error: {error_msg}")
 
     def on_detection_progress(self, current, total, message):
         """Handle detection progress updates."""
@@ -864,7 +1003,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             self.success(f"Found {results['total_duplicate_groups']} duplicate groups")
         else:
             # No duplicates found - automatically copy files and complete step
-            self.info("No duplicates found - all MUs are unique. Auto-completing step...")
+            self.info("No duplicates found — step completed. Adjust parameters and re-run if needed.")
             self.auto_complete_no_duplicates(results)
 
     def auto_complete_no_duplicates(self, results):
@@ -899,6 +1038,9 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
             logger.info(f"Copied {len(self.saved_json_paths)} files (no duplicates + ungrouped)")
 
+            # Suppress auto-navigation so the user stays on this step and can re-run
+            self._suppress_auto_navigate = True
+
             # Export to MAT format for MUEdit
             self.start_export_to_muedit()
 
@@ -931,10 +1073,17 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                 mus_str = ", ".join([f"F{f}M{m}" for f, m in dup_group['mus']])
                 self.results_table.setItem(row, 1, QTableWidgetItem(mus_str))
 
-                # Column 2: Average overlap
-                avg_overlap = sum(sum(row_scores) for row_scores in dup_group['overlap_scores']) / \
-                              (len(dup_group['mus']) ** 2)
-                self.results_table.setItem(row, 2, QTableWidgetItem(f"{avg_overlap*100:.1f}%"))
+                # Column 2: Average XCC across pairs in this group
+                xcc_pairs = dup_group.get('xcc_pairs', {})
+                mus = dup_group['mus']
+                xcc_values = []
+                for fi1, mi1 in mus:
+                    for fi2, mi2 in mus:
+                        v = xcc_pairs.get((fi1, mi1, fi2, mi2))
+                        if v is not None:
+                            xcc_values.append(v)
+                avg_xcc = sum(xcc_values) / len(xcc_values) if xcc_values else 0.0
+                self.results_table.setItem(row, 2, QTableWidgetItem(f"{avg_xcc:.3f}"))
 
                 # Column 3: Survivor
                 survivor_str = f"F{dup_group['survivor'][0]}M{dup_group['survivor'][1]}"
@@ -1100,6 +1249,10 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         )
         self.complete_step()
 
+        # Re-enable detection controls so user can adjust parameters and re-run
+        self.btn_detect.setEnabled(True)
+        self.btn_configure.setEnabled(True)
+
     def on_export_error(self, error_msg):
         """Handle export errors."""
         self.progress_bar.setVisible(False)
@@ -1117,10 +1270,12 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
         report = {
             'timestamp': datetime.now().isoformat(),
+            'algorithm': 'openhdemg_muap_tracking',
             'parameters': {
-                'jitter': self.jitter_spin.value(),
-                'maxlag': self.maxlag_spin.value(),
-                'tol': self.tol_spin.value(),
+                'xcc_threshold': self.threshold_spin.value(),
+                'timewindow_ms': self.timewindow_spin.value(),
+                'orientation_grid1_deg': self.orientation1_combo.currentData(),
+                'orientation_grid2plus_deg': self.orientation2_combo.currentData(),
                 'grouping_strategy': 'file_and_muscle'
             },
             'summary': {

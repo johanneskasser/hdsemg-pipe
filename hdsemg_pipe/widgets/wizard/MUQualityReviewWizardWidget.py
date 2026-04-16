@@ -9,19 +9,23 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -52,6 +56,7 @@ from hdsemg_pipe.actions.decomposition_file import DecompositionFile, Reliabilit
 from hdsemg_pipe.actions.file_grouping import get_group_key, shorten_group_labels
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Spacing, Styles
+from hdsemg_pipe.ui_elements.toast import toast_manager
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 
 
@@ -113,7 +118,7 @@ class _STAWorker(QThread):
 
 class _ProceedWorker(QThread):
     progress = pyqtSignal(int, int)
-    finished = pyqtSignal()
+    finished = pyqtSignal(int)   # emits n_written
     error = pyqtSignal(str)
 
     def __init__(
@@ -137,29 +142,69 @@ class _ProceedWorker(QThread):
         try:
             self._dest_dir.mkdir(parents=True, exist_ok=True)
             total = len(self._kept_files)
+            n_written = 0
 
             for i, filename in enumerate(self._kept_files):
                 self.progress.emit(i + 1, total)
-                src_path = self._source_dir / filename
-                if not src_path.exists():
-                    logger.warning("Source file not found: %s", src_path)
+                src_json = self._source_dir / filename
+                if not src_json.exists():
+                    logger.warning("Source file not found: %s", src_json)
                     continue
 
-                dec = DecompositionFile.load(src_path)
+                # --- Determine which MU indices to keep from JSON analysis ---
+                dec_json = DecompositionFile.load(src_json)
                 file_overrides_raw = self._overrides.get(filename, {})
-                # JSON files are single-port; use port_idx=0
                 file_overrides = {
                     (0, int(k)): v for k, v in file_overrides_raw.items()
                 }
-                filtered = dec.filter_mus_by_reliability(self._thresholds, file_overrides)
 
-                stem = src_path.stem
-                if not stem.endswith("_covisi_filtered"):
-                    out_stem = stem + "_covisi_filtered"
-                else:
-                    out_stem = stem
-                out_path = self._dest_dir / (out_stem + src_path.suffix)
-                filtered.save(out_path)
+                # Compute reliability to find which MUs survive
+                rel_df = dec_json.compute_reliability(self._thresholds)
+                keep_mu_indices: set = set()
+                for _, row in rel_df.iterrows():
+                    mu = int(row["mu_index"])
+                    key = (0, mu)
+                    decision = file_overrides.get(key, "Auto")
+                    if decision == "Keep":
+                        keep_mu_indices.add(mu)
+                    elif decision == "Filter":
+                        pass  # explicitly filtered
+                    elif bool(row["is_reliable"]):
+                        keep_mu_indices.add(mu)
+
+                stem = src_json.stem
+                out_stem = stem if stem.endswith("_covisi_filtered") else stem + "_covisi_filtered"
+
+                # --- 1. Filter and save JSON ---
+                filtered_json = dec_json.filter_mus_by_reliability(self._thresholds, file_overrides)
+                out_json = self._dest_dir / (out_stem + ".json")
+                filtered_json.save(out_json)
+                n_written += 1
+
+                # --- 2. Filter sibling PKL (same stem, .pkl extension) ---
+                # PKL files lack IPTS, so SIL/PNR cannot be recomputed from them.
+                # Apply the same keep_mu_indices derived from the JSON analysis above.
+                src_pkl = self._source_dir / (stem + ".pkl")
+                if src_pkl.exists():
+                    try:
+                        dec_pkl = DecompositionFile.load(src_pkl)
+                        dec_pkl._pkl_keep_indices = {0: keep_mu_indices}
+                        out_pkl = self._dest_dir / (out_stem + ".pkl")
+                        dec_pkl.save(out_pkl)
+                        n_written += 1
+                    except Exception as exc:
+                        logger.warning("PKL filter failed for %s: %s", src_pkl.name, exc)
+
+                # --- 3. Filter sibling MAT (same stem + _muedit.mat) ---
+                src_mat = self._source_dir / (stem + "_muedit.mat")
+                if src_mat.exists():
+                    try:
+                        dec_mat = DecompositionFile.load(src_mat)
+                        out_mat = self._dest_dir / (out_stem + "_muedit.mat")
+                        dec_mat._filter_mat_pulsetrain_by_indices(keep_mu_indices, out_mat)
+                        n_written += 1
+                    except Exception as exc:
+                        logger.warning("MAT filter failed for %s: %s", src_mat.name, exc)
 
             # Write manifest
             manifest = {
@@ -172,9 +217,223 @@ class _ProceedWorker(QThread):
             with open(self._manifest_path, "w", encoding="utf-8") as fh:
                 json.dump(manifest, fh, indent=2)
 
-            self.finished.emit()
+            self.finished.emit(n_written)
         except Exception as exc:
             self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Custom grouping dialog
+# ---------------------------------------------------------------------------
+
+class _CustomGroupingDialog(QDialog):
+    """Dialog for applying a custom regex-based file grouping pattern."""
+
+    _PRESETS = [
+        ("Default (strip grid dims)", ""),
+        ("Subject + Block (e.g. 2_Pyr_1)", r"^(\d+(?:_[A-Za-z]+)+_\d+)"),
+        ("First 2 underscore parts", r"^((?:[^_]+_){1}[^_]+)"),
+        ("First 3 underscore parts", r"^((?:[^_]+_){2}[^_]+)"),
+    ]
+
+    def __init__(self, filepaths: List[str], current_regex: Optional[str] = None, parent=None):
+        super().__init__(parent)
+        self._filepaths = filepaths
+        self._regex = current_regex or ""
+        self.setWindowTitle("Custom File Grouping")
+        self.resize(720, 520)
+        self._build_ui()
+        self._update_preview()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        # Header
+        header = QLabel(
+            "<b>Custom Grouping by Regex</b><br>"
+            "<span style='color:#666; font-size:12px;'>"
+            "Enter a Python regex to extract the group key from each filename stem "
+            "(without extension). Use a <b>capture group</b> <code>(...)</code> to "
+            "define exactly which part becomes the key; without one the whole match is used."
+            "</span>"
+        )
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        # Presets
+        preset_label = QLabel("Presets:")
+        preset_label.setStyleSheet("color: #555; font-size: 11px; font-weight: bold;")
+        layout.addWidget(preset_label)
+
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(6)
+        for name, pattern in self._PRESETS:
+            btn = QPushButton(name)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.BG_SECONDARY};
+                    color: {Colors.TEXT_PRIMARY};
+                    border: 1px solid {Colors.BORDER_DEFAULT};
+                    border-radius: {BorderRadius.SM};
+                    padding: 4px 10px;
+                    font-size: 11px;
+                }}
+                QPushButton:hover {{
+                    background-color: {Colors.BLUE_50};
+                    border-color: {Colors.BLUE_500};
+                }}
+            """)
+            btn.clicked.connect(lambda _, p=pattern: self._apply_preset(p))
+            preset_row.addWidget(btn)
+        preset_row.addStretch()
+        layout.addLayout(preset_row)
+
+        # Regex input row
+        input_frame = QFrame()
+        input_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {Colors.BG_SECONDARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: 8px;
+            }}
+        """)
+        input_layout = QHBoxLayout(input_frame)
+        input_layout.setContentsMargins(8, 4, 8, 4)
+
+        regex_label = QLabel("Regex:")
+        regex_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-weight: bold; min-width: 48px;")
+        input_layout.addWidget(regex_label)
+
+        self._regex_input = QLineEdit(self._regex)
+        self._regex_input.setPlaceholderText(
+            r"e.g.  ^(\d+_Pyr_\d+)   or leave empty to use the default logic"
+        )
+        self._regex_input.setStyleSheet(f"""
+            QLineEdit {{
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: 4px 8px;
+                font-family: monospace;
+                font-size: 12px;
+                background-color: white;
+            }}
+            QLineEdit:focus {{
+                border-color: {Colors.BLUE_500};
+            }}
+        """)
+        self._regex_input.textChanged.connect(self._on_regex_changed)
+        input_layout.addWidget(self._regex_input, 1)
+        layout.addWidget(input_frame)
+
+        # Validation error label
+        self._error_label = QLabel()
+        self._error_label.setStyleSheet("color: #dc2626; font-size: 11px;")
+        self._error_label.setVisible(False)
+        layout.addWidget(self._error_label)
+
+        # Preview table
+        preview_label = QLabel("Preview — how files are grouped with current pattern:")
+        preview_label.setStyleSheet("color: #555; font-size: 11px; font-weight: bold;")
+        layout.addWidget(preview_label)
+
+        self._preview_table = QTableWidget()
+        self._preview_table.setColumnCount(2)
+        self._preview_table.setHorizontalHeaderLabels(["Filename stem", "Group key"])
+        self._preview_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self._preview_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self._preview_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._preview_table.setSelectionMode(QTableWidget.NoSelection)
+        self._preview_table.setAlternatingRowColors(True)
+        self._preview_table.setStyleSheet(f"""
+            QTableWidget {{
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                font-size: 11px;
+            }}
+            QHeaderView::section {{
+                background-color: {Colors.BG_SECONDARY};
+                padding: 4px 8px;
+                border: none;
+                border-bottom: 1px solid {Colors.BORDER_DEFAULT};
+                font-weight: bold;
+                color: {Colors.TEXT_SECONDARY};
+            }}
+        """)
+        layout.addWidget(self._preview_table, 1)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(Styles.button_secondary())
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        self._apply_btn = QPushButton("Apply Grouping")
+        self._apply_btn.setStyleSheet(Styles.button_primary())
+        self._apply_btn.clicked.connect(self._on_accept)
+        btn_row.addWidget(self._apply_btn)
+        layout.addLayout(btn_row)
+
+    def _apply_preset(self, pattern: str):
+        self._regex_input.setText(pattern)
+
+    def _on_regex_changed(self, text: str):
+        self._regex = text
+        self._update_preview()
+
+    def _update_preview(self):
+        regex = self._regex.strip()
+        if regex:
+            try:
+                re.compile(regex)
+                self._error_label.setVisible(False)
+                self._apply_btn.setEnabled(True)
+            except re.error as exc:
+                self._error_label.setText(f"Invalid regex: {exc}")
+                self._error_label.setVisible(True)
+                self._apply_btn.setEnabled(False)
+                self._preview_table.setRowCount(0)
+                return
+
+        rows = []
+        for fp in self._filepaths[:60]:
+            name = os.path.basename(fp)
+            key = get_group_key(name, regex if regex else None)
+            rows.append((Path(fp).stem, key))
+
+        self._preview_table.setRowCount(len(rows))
+        # Colour rows by group to make grouping visually obvious
+        group_colors: Dict[str, str] = {}
+        palette = ["#eff6ff", "#f0fdf4", "#fff7ed", "#fdf4ff", "#fefce8"]
+        for i, (stem, key) in enumerate(rows):
+            if key not in group_colors:
+                group_colors[key] = palette[len(group_colors) % len(palette)]
+            bg = QColor(group_colors[key])
+            for col, text in enumerate([stem, key]):
+                cell = QTableWidgetItem(text)
+                cell.setBackground(bg)
+                self._preview_table.setItem(i, col, cell)
+
+    def _on_accept(self):
+        regex = self._regex.strip()
+        if regex:
+            try:
+                re.compile(regex)
+            except re.error as exc:
+                self._error_label.setText(f"Invalid regex: {exc}")
+                self._error_label.setVisible(True)
+                return
+        self._regex = regex
+        self.accept()
+
+    def get_regex(self) -> str:
+        """Return the accepted regex (empty string → use default logic)."""
+        return self._regex
 
 
 # ---------------------------------------------------------------------------
@@ -186,24 +445,45 @@ class _GroupHeader(QWidget):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(Spacing.SM, Spacing.XS, Spacing.SM, Spacing.XS)
+        layout.setSpacing(4)
+
         lbl = QLabel(label)
         lbl.setStyleSheet(
             f"font-weight: bold; color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
         )
         layout.addWidget(lbl)
         layout.addStretch()
-        self.counter_label = QLabel()
-        self.counter_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
-        )
-        layout.addWidget(self.counter_label)
 
-    def set_counter(self, selected: int, total: int):
-        color = Colors.GREEN_600 if selected >= 1 else Colors.RED_600
-        self.counter_label.setStyleSheet(
-            f"color: {color}; font-size: 11px; font-weight: bold;"
+        # Pill: reliable MU count (populated after reliability data loads)
+        self._mu_pill = QLabel("…")
+        self._mu_pill.setStyleSheet(self._pill_style(Colors.GRAY_400))
+        layout.addWidget(self._mu_pill)
+
+        # Pill: selected files out of total
+        self._file_pill = QLabel()
+        self._file_pill.setStyleSheet(self._pill_style(Colors.GRAY_400))
+        layout.addWidget(self._file_pill)
+
+    @staticmethod
+    def _pill_style(bg_color: str) -> str:
+        return (
+            f"background-color: {bg_color}; color: white; font-size: 10px; "
+            f"font-weight: bold; border-radius: 7px; padding: 1px 6px;"
         )
-        self.counter_label.setText(f"{selected}/{total}")
+
+    def set_file_counter(self, selected: int, total: int):
+        color = Colors.GREEN_600 if selected >= 1 else Colors.RED_600
+        self._file_pill.setStyleSheet(self._pill_style(color))
+        self._file_pill.setText(f"{selected}/{total}")
+
+    def set_mu_counter(self, reliable: int, total: int):
+        color = Colors.GREEN_600 if reliable >= 1 else Colors.GRAY_400
+        self._mu_pill.setStyleSheet(self._pill_style(color))
+        self._mu_pill.setText(f"{reliable} MU" if total > 0 else "–")
+
+    # backward-compat alias used by restore_from_manifest path
+    def set_counter(self, selected: int, total: int):
+        self.set_file_counter(selected, total)
 
 
 class _FileListItem(QWidget):
@@ -294,6 +574,14 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._current_file: Optional[str] = None
         self._sta_cache: Dict[str, object] = {}
         self._worker: Optional[QThread] = None
+        self._bg_workers: List[QThread] = []   # keeps preload workers alive
+        self._custom_group_regex: Optional[str] = None
+        self._all_filepaths: List[str] = []
+        # Debounce timer for override-warning dialog
+        self._override_warn_timer = QTimer(self)
+        self._override_warn_timer.setSingleShot(True)
+        self._override_warn_timer.timeout.connect(self._check_overrides_after_threshold_change)
+        self._override_warned_for_count: int = 0  # avoids re-showing for same overrides
 
         self._build_ui()
 
@@ -333,6 +621,27 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._file_list_layout.addStretch()
         scroll.setWidget(self._file_list_widget)
         left_layout.addWidget(scroll)
+
+        self._grouping_btn = QPushButton("⚙ Custom Grouping")
+        self._grouping_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Colors.BG_SECONDARY};
+                color: {Colors.TEXT_SECONDARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.SM};
+                padding: {Spacing.XS}px {Spacing.SM}px;
+                font-size: 11px;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.BLUE_50};
+                color: {Colors.BLUE_700};
+                border-color: {Colors.BLUE_100};
+            }}
+        """)
+        self._grouping_btn.clicked.connect(self._open_custom_grouping_dialog)
+        left_layout.addWidget(self._grouping_btn)
+
         outer_splitter.addWidget(left)
 
         # ---- Right panel ----
@@ -466,14 +775,18 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
     # -- WizardStepWidget hook -------------------------------------------------
 
     def check(self):
-        """Populate file list from decomposition_results folder."""
+        """Populate file list from decomposition_auto folder."""
         if not global_state.is_widget_completed("step8"):
             return
-        source_dir = Path(global_state.get_decomposition_results_path())
+        source_dir = Path(global_state.get_decomposition_path())
         if not source_dir.exists():
             return
+        _EXCLUDED_PREFIXES = ("algorithm_params", "decomposition_mapping",
+                              "multigrid_groupings", "status_test")
         files = sorted(
-            str(p) for p in source_dir.iterdir() if p.suffix.lower() == ".json"
+            str(p) for p in source_dir.iterdir()
+            if p.suffix.lower() == ".json"
+            and not any(p.name.startswith(ex) for ex in _EXCLUDED_PREFIXES)
         )
         if files:
             self._populate_file_list(files)
@@ -519,6 +832,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
     # -- Private helpers -------------------------------------------------------
 
     def _populate_file_list(self, filepaths: List[str]):
+        self._all_filepaths = filepaths
         # Clear existing widgets (keep stretch at end)
         while self._file_list_layout.count() > 1:
             item = self._file_list_layout.takeAt(0)
@@ -531,7 +845,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._checked.clear()
 
         for fp in filepaths:
-            key = get_group_key(os.path.basename(fp))
+            key = get_group_key(os.path.basename(fp), self._custom_group_regex)
             self._groups.setdefault(key, []).append(fp)
 
         labels = shorten_group_labels(list(self._groups.keys()))
@@ -557,6 +871,34 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
         if filepaths:
             self._on_file_selected(filepaths[0])
+        self._preload_all_reliability()
+
+    def _preload_all_reliability(self):
+        """Launch background reliability workers for every file not yet cached.
+
+        This populates the group-header MU counters without requiring the user
+        to manually click through each file first.
+        """
+        self._bg_workers.clear()
+        for fp in self._all_filepaths:
+            if fp in self._reliability_cache:
+                continue
+            try:
+                dec = DecompositionFile.load(Path(fp))
+            except Exception as exc:
+                logger.warning("Preload: could not load %s: %s", fp, exc)
+                continue
+            if fp not in self._emgfile_cache:
+                self._emgfile_cache[fp] = dec.get_emgfile_for_plotting()
+            worker = _ReliabilityWorker(dec, self._thresholds)
+            worker.finished.connect(
+                lambda df, p=fp: self._on_reliability_loaded(p, df)
+            )
+            worker.error.connect(
+                lambda err: logger.warning("Preload reliability error: %s", err)
+            )
+            self._bg_workers.append(worker)
+            worker.start()
 
     def _on_file_toggled(self, filepath: str, checked: bool):
         self._checked[filepath] = checked
@@ -612,6 +954,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         if filepath == self._current_file:
             self._refresh_mu_table(filepath)
             self._refresh_plot(filepath)
+        self._update_group_headers()
         self._update_footer()
 
     def _refresh_mu_table(self, filepath: str):
@@ -710,7 +1053,9 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             overrides.pop(str(mu), None)
         else:
             self._overrides.setdefault(self._current_file, {})[str(mu)] = next_override
+        self._override_warned_for_count = 0  # allow re-warning on next threshold change
         self._refresh_mu_table(self._current_file)
+        self._update_group_headers()
         self._update_footer()
 
     def _refresh_plot(self, filepath: str):
@@ -846,9 +1191,48 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
     def _on_threshold_changed(self):
         self._thresholds = self._build_thresholds()
         self._reliability_cache.clear()
+        self._update_group_headers()  # resets to file counts while cache is empty
         if self._current_file:
             self._load_file_data(self._current_file)
+        self._preload_all_reliability()
         self._update_footer()
+        # Debounced check: warn about active manual overrides once the user
+        # stops adjusting sliders (600 ms of silence).
+        total_overrides = sum(len(v) for v in self._overrides.values())
+        if total_overrides > 0 and total_overrides != self._override_warned_for_count:
+            self._override_warn_timer.start(600)
+
+    def _check_overrides_after_threshold_change(self):
+        """Show a one-time dialog when thresholds change while manual overrides exist."""
+        total_overrides = sum(len(v) for v in self._overrides.values())
+        if total_overrides == 0:
+            return
+        # Don't re-warn for the exact same count we already warned about
+        if total_overrides == self._override_warned_for_count:
+            return
+        self._override_warned_for_count = total_overrides
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Manual MU Overrides Active")
+        msg.setIcon(QMessageBox.Information)
+        msg.setText(
+            f"<b>{total_overrides} MU decision(s)</b> have been set manually (marked with *).<br><br>"
+            "Changing thresholds updates the <i>automatic</i> decisions, but "
+            "your manual overrides are <b>kept as-is</b>.<br><br>"
+            "What would you like to do?"
+        )
+        keep_btn = msg.addButton("Keep manual decisions", QMessageBox.AcceptRole)
+        reset_btn = msg.addButton("Reset all to Auto", QMessageBox.ResetRole)
+        msg.setDefaultButton(keep_btn)
+        msg.exec_()
+
+        if msg.clickedButton() == reset_btn:
+            self._overrides.clear()
+            self._override_warned_for_count = 0
+            if self._current_file:
+                self._refresh_mu_table(self._current_file)
+            self._update_group_headers()
+            self._update_footer()
 
     def _build_thresholds(self) -> ReliabilityThresholds:
         return ReliabilityThresholds(
@@ -861,11 +1245,35 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         )
 
     def _update_group_headers(self):
+        thresholds = self._build_thresholds()
         for key, fps in self._groups.items():
             header = self._group_headers.get(key)
-            if header:
-                checked = sum(1 for fp in fps if self._checked.get(fp, True))
-                header.set_counter(checked, len(fps))
+            if not header:
+                continue
+            checked_fps = [fp for fp in fps if self._checked.get(fp, True)]
+
+            # File pill — always up to date
+            header.set_file_counter(len(checked_fps), len(fps))
+
+            # MU pill — use whatever files have data; show partial count as data loads
+            total_reliable = 0
+            total_mus = 0
+            for fp in checked_fps:
+                df = self._reliability_cache.get(fp)
+                if df is None:
+                    continue
+                file_overrides = self._overrides.get(fp, {})
+                for _, row in df.iterrows():
+                    mu = int(row["mu_index"])
+                    total_mus += 1
+                    decision = file_overrides.get(str(mu), "Auto")
+                    sil = float(row["sil"])
+                    pnr = float(row["pnr"])
+                    covisi = float(row["covisi"])
+                    is_rel = thresholds.is_reliable(sil, pnr, covisi)
+                    if decision == "Keep" or (decision == "Auto" and is_rel):
+                        total_reliable += 1
+            header.set_mu_counter(total_reliable, total_mus)
 
     def _update_proceed_button(self):
         all_ok = all(
@@ -900,6 +1308,28 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             f"{filtered_mus} of {total_mus} total MUs filtered"
         )
 
+    def _open_custom_grouping_dialog(self):
+        dialog = _CustomGroupingDialog(
+            self._all_filepaths,
+            current_regex=self._custom_group_regex,
+            parent=self,
+        )
+        if dialog.exec_() == QDialog.Accepted:
+            regex = dialog.get_regex()
+            self._custom_group_regex = regex if regex else None
+            # Update button label to indicate an active custom pattern
+            if self._custom_group_regex:
+                self._grouping_btn.setText(f"⚙ Custom: {self._custom_group_regex[:24]}…"
+                                           if len(self._custom_group_regex) > 24
+                                           else f"⚙ Custom: {self._custom_group_regex}")
+                self._grouping_btn.setStyleSheet(self._grouping_btn.styleSheet().replace(
+                    Colors.BG_SECONDARY, Colors.BLUE_50
+                ).replace(Colors.TEXT_SECONDARY, Colors.BLUE_700))
+            else:
+                self._grouping_btn.setText("⚙ Custom Grouping")
+            if self._all_filepaths:
+                self._populate_file_list(self._all_filepaths)
+
     def _on_proceed(self):
         unvisited = [
             fp for fp in self._checked
@@ -922,7 +1352,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             for fp, checked in self._checked.items()
             if checked
         ]
-        source_dir = Path(global_state.get_decomposition_results_path())
+        source_dir = Path(global_state.get_decomposition_path())
         dest_dir = Path(global_state.get_decomposition_covisi_filtered_path())
         manifest_path = Path(global_state.get_analysis_path()) / "mu_quality_selection.json"
 
@@ -937,13 +1367,19 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         )
         worker.finished.connect(self._on_proceed_done)
         worker.error.connect(self._on_proceed_error)
+        worker.progress.connect(
+            lambda cur, tot: self._proceed_btn.setText(f"Processing {cur}/{tot}…")
+        )
         self._worker = worker
         worker.start()
 
-    def _on_proceed_done(self):
-        global_state.complete_widget("step9")
+    def _on_proceed_done(self, n_written: int):
         self._proceed_btn.setEnabled(True)
+        self._proceed_btn.setText("Proceed")
+        toast_manager.show_toast(f"Done — {n_written} file(s) written to covisi_filtered/", "success")
+        self.complete_step()  # marks complete, emits stepCompleted → triggers auto-navigation
 
     def _on_proceed_error(self, error: str):
-        QMessageBox.critical(self, "Proceed failed", error)
         self._proceed_btn.setEnabled(True)
+        self._proceed_btn.setText("Proceed")
+        toast_manager.show_toast(f"Proceed failed: {error}", "error", duration=8000)

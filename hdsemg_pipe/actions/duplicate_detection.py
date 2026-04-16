@@ -1,5 +1,17 @@
 """
-Duplicate Motor Unit Detection
+Duplicate Motor Unit Detection  [DEPRECATED]
+
+.. deprecated::
+    This module is superseded by
+    ``hdsemg_pipe.actions.duplicate_detection_openhdemg``, which uses
+    openhdemg's MUAP-shape-based ``tracking()`` algorithm and reliability-based
+    survivor selection.
+
+    This file is kept for one release cycle to allow rollback.
+    The wizard (``RemoveDuplicateMUsWizardWidget``) now uses the new module for
+    the JSON path; the removal/saving helpers below (``remove_duplicates_from_emgfiles``,
+    ``save_cleaned_jsons``) are still imported by the widget and will be migrated
+    in a follow-up cleanup.
 
 This module implements duplicate MU detection based on MUEdit's remduplicatesbgrids.m algorithm.
 Detects duplicate motor units within and between grids by comparing discharge times with
