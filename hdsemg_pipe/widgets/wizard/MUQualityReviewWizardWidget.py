@@ -1189,7 +1189,18 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             if plot_type == "Discharge Rate (IDR)":
                 fig = emg.plot_idr(emgfile, munumber="all", showimmediately=False)
             else:
-                fig = emg.plot_mupulses(emgfile, linewidths=0.8, showimmediately=False)
+                raw = emgfile.get("RAW_SIGNAL")
+                has_raw = (
+                    raw is not None
+                    and hasattr(raw, "shape")
+                    and raw.shape[0] > 0
+                )
+                fig = emg.plot_mupulses(
+                    emgfile,
+                    linewidths=0.8,
+                    addrefsig=has_raw,
+                    showimmediately=False,
+                )
             self._replace_canvas_figure(fig)
         except Exception as exc:
             self._figure.clear()
