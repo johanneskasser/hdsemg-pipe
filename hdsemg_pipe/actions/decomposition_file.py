@@ -330,7 +330,7 @@ def _read_mat_signal_scipy(path: Path) -> Optional[dict]:
     - single grid: ``signal.Pulsetrain`` → ``(nMU, n_samples)`` ndarray
     - multi grid:  ``signal.Pulsetrain`` → ``(ngrid,)`` object array, each element
                    ``(nMU_i, n_samples)``
-    - ``signal.Dischargetimes`` single grid → ``(nMU,)`` object array of time arrays
+    - ``signal.Dischargetimes`` single grid → ``(nMU,)`` obj array (squeezed from 1×nMU)
     - ``signal.Dischargetimes`` multi grid  → ``(ngrid, nMU)`` object array
 
     Returns an openhdemg-compatible dict or ``None`` if the file cannot be
@@ -401,21 +401,28 @@ def _read_mat_signal_scipy(path: Path) -> Optional[dict]:
     ipts_df = pd.DataFrame(pt_combined.T)  # (n_samples, nMU)
 
     # --- Dischargetimes ---
-    # Use the same direct-iteration pattern as _compute_covisi_mat_pulsetrain,
-    # which is proven to work.  Avoiding np.asarray(dtype=object) on the outer
-    # array prevents scipy from accidentally merging equal-length discharge
-    # time arrays into a 2-D float64 array, which would break indexing.
+    # Mirror the h5py version: anchor iteration to pt_parts so that
+    # len(mupulses) == n_mus regardless of Dischargetimes shape.
+    # With squeeze_me=True a {1×nMU} cell becomes (nMU,); a {ngrid×nMU}
+    # cell stays (ngrid, nMU).  Force dtype=object so numpy never tries
+    # to merge equal-length discharge-time arrays into a float64 matrix.
     dt_attr = getattr(sig, "Dischargetimes", None)
     mupulses = []
     if dt_attr is not None:
-        try:
-            for dt in dt_attr:
-                ts = np.asarray(dt, dtype=np.int64).flatten()
-                mupulses.append(ts - 1 if ts.size > 0 else np.array([], dtype=np.int64))
-        except TypeError:
-            # dt_attr squeezed to a 0-D array (single MU case)
-            ts = np.asarray(dt_attr, dtype=np.int64).flatten()
-            mupulses.append(ts - 1 if ts.size > 0 else np.array([], dtype=np.int64))
+        dt_arr = np.asarray(dt_attr, dtype=object)
+        if dt_arr.ndim < 2:
+            dt_arr = dt_arr.reshape(1, -1)  # → (1, nMU) for single-grid
+        for g_idx, pt_grid in enumerate(pt_parts):
+            for mu_local in range(pt_grid.shape[0]):
+                if g_idx < dt_arr.shape[0] and mu_local < dt_arr.shape[1]:
+                    cell = dt_arr[g_idx, mu_local]
+                    ts = np.asarray(cell, dtype=np.float64).flatten()
+                    mupulses.append(
+                        ts.astype(np.int64) - 1 if ts.size > 0
+                        else np.array([], dtype=np.int64)
+                    )
+                else:
+                    mupulses.append(np.array([], dtype=np.int64))
     if not mupulses:
         mupulses = [np.array([], dtype=np.int64)] * n_mus
 
