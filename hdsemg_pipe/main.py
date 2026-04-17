@@ -376,12 +376,17 @@ def main():
         folder = Path(args.review_mus)
         if not folder.is_dir():
             parser.error(f"--review-mus: '{folder}' is not a directory")
-        json_files = [
+        decomp_files = [
             p for p in folder.iterdir()
             if p.suffix.lower() == ".json"
+            or p.name.endswith("_muedit.mat")
+            or p.name.endswith("_muedit.mat_edited.mat")
         ]
-        if not json_files:
-            parser.error(f"--review-mus: no JSON files found in '{folder}'")
+        if not decomp_files:
+            parser.error(
+                f"--review-mus: no decomposition files found in '{folder}' "
+                "(expected .json, _muedit.mat, or _muedit.mat_edited.mat)"
+            )
         from hdsemg_pipe.widgets.standalone.review_window import StandaloneReviewWindow
         window = StandaloneReviewWindow(folder_path=folder)
     else:
