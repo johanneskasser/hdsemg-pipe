@@ -381,11 +381,12 @@ def main():
             if p.suffix.lower() == ".json"
             or p.name.endswith("_muedit.mat")
             or p.name.endswith("_muedit.mat_edited.mat")
+            or p.name.endswith("_muedit_autoclean.mat")
         ]
         if not decomp_files:
             parser.error(
                 f"--review-mus: no decomposition files found in '{folder}' "
-                "(expected .json, _muedit.mat, or _muedit.mat_edited.mat)"
+                "(expected .json, _muedit.mat, _muedit.mat_edited.mat or _muedit_autoclean.mat)"
             )
         from hdsemg_pipe.widgets.standalone.review_window import StandaloneReviewWindow
         window = StandaloneReviewWindow(folder_path=folder)
