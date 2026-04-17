@@ -904,6 +904,19 @@ class DecompositionFile:
             if ef is None:
                 return None
 
+            # openhdemg's plot_mupulses builds x_axis from RAW_SIGNAL.index.
+            # MAT pulsetrain files have no raw electrode matrix, so RAW_SIGNAL
+            # is an empty DataFrame whose index has length 0 — causing a shape
+            # mismatch when REF_SIGNAL has EMG_LENGTH rows.  Pad RAW_SIGNAL
+            # with a dummy zero-filled single column so the index matches.
+            raw = ef.get("RAW_SIGNAL")
+            if isinstance(raw, pd.DataFrame) and raw.shape[0] == 0:
+                emg_len = int(ef.get("EMG_LENGTH", 0))
+                if emg_len > 0:
+                    ef["RAW_SIGNAL"] = pd.DataFrame(
+                        np.zeros((emg_len, 1), dtype=np.float64)
+                    )
+
         else:
             return None
 

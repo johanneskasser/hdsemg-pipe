@@ -1189,18 +1189,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             if plot_type == "Discharge Rate (IDR)":
                 fig = emg.plot_idr(emgfile, munumber="all", showimmediately=False)
             else:
-                raw = emgfile.get("RAW_SIGNAL")
-                has_raw = (
-                    raw is not None
-                    and hasattr(raw, "shape")
-                    and raw.shape[0] > 0
-                )
-                fig = emg.plot_mupulses(
-                    emgfile,
-                    linewidths=0.8,
-                    addrefsig=has_raw,
-                    showimmediately=False,
-                )
+                fig = emg.plot_mupulses(emgfile, linewidths=0.8, showimmediately=False)
             self._replace_canvas_figure(fig)
         except Exception as exc:
             self._figure.clear()
@@ -1232,6 +1221,21 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         if filepath in self._sta_cache:
             self._draw_muaps(self._sta_cache[filepath])
             return
+        # MAT pulsetrain files have no raw electrode matrix — STA is not possible.
+        # RAW_SIGNAL is padded with zeros in get_emgfile_for_plotting() so that
+        # plot_mupulses can build its x_axis, but those zeros are not real signal.
+        # Detect this by checking whether RAW_SIGNAL is all-zero (or a single column).
+        raw = emgfile.get("RAW_SIGNAL")
+        no_raw = (
+            raw is None
+            or not hasattr(raw, "shape")
+            or raw.shape[0] == 0
+            or (raw.shape[1] <= 1 and (raw.values == 0).all())
+        )
+        if no_raw:
+            self._sta_cache[filepath] = None
+            self._draw_muaps(None)
+            return
         # Clear stale canvas and show computing indicator while STA runs
         self._figure.clear()
         ax = self._figure.add_subplot(111)
@@ -1259,8 +1263,9 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             self._figure.clear()
             ax = self._figure.add_subplot(111)
             ax.text(
-                0.5, 0.5, "MUAPs unavailable",
+                0.5, 0.5, "MUAPs not available\n(no raw electrode signal in file)",
                 ha="center", va="center", transform=ax.transAxes,
+                fontsize=9, color="gray",
             )
             self._canvas.draw()
             return
