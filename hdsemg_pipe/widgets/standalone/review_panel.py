@@ -129,22 +129,26 @@ class StandaloneMUReviewPanel(QWidget):
         """Strip MUedit suffixes to get the recording base stem."""
         return (mat_name
                 .replace("_muedit.mat_edited.mat", "")
+                .replace("_muedit_autoclean.mat", "")
                 .replace("_muedit.mat", ""))
 
     def _scan_folder(self, folder: Path) -> tuple:
         """Collect decomposition files from *folder*.
 
-        Returns ``(json_files, mat_unedited, mat_edited, json_stems)`` where
-        each entry is a list of absolute path strings and ``json_stems`` is a
+        Returns ``(json_files, mat_unedited, mat_edited, mat_autoclean, json_stems)``
+        where each entry is a list of absolute path strings and ``json_stems`` is a
         set of JSON base stems (for sibling detection).
 
-        MAT files are split into unedited (``signal.*``) and edited
-        (``edition.*``) groups so the caller can resolve conflicts.
+        MAT files are split into three groups:
+        - unedited  (``signal.*``)         → ``*_muedit.mat``
+        - edited    (``edition.*``)         → ``*_muedit.mat_edited.mat``
+        - autoclean (``signal.*`` cleaned)  → ``*_muedit_autoclean.mat``
         """
         json_stems: set = set()
         json_files: List[str] = []
-        mat_unedited: List[str] = []  # *_muedit.mat
-        mat_edited: List[str] = []    # *_muedit.mat_edited.mat
+        mat_unedited: List[str] = []    # *_muedit.mat
+        mat_edited: List[str] = []      # *_muedit.mat_edited.mat
+        mat_autoclean: List[str] = []   # *_muedit_autoclean.mat
 
         for p in sorted(folder.iterdir()):
             if any(p.name.startswith(ex) for ex in _EXCLUDED_PREFIXES):
@@ -155,10 +159,12 @@ class StandaloneMUReviewPanel(QWidget):
                 json_stems.add(p.stem)
             elif name.endswith("_muedit.mat_edited.mat"):
                 mat_edited.append(str(p))
+            elif name.endswith("_muedit_autoclean.mat"):
+                mat_autoclean.append(str(p))
             elif name.endswith("_muedit.mat"):
                 mat_unedited.append(str(p))
 
-        return json_files, mat_unedited, mat_edited, json_stems
+        return json_files, mat_unedited, mat_edited, mat_autoclean, json_stems
 
     def _resolve_files(self, folder: Path, parent: QWidget) -> List[str]:
         """Return the final list of primary files for the review panel.
@@ -166,10 +172,11 @@ class StandaloneMUReviewPanel(QWidget):
         Resolution rules
         ----------------
         1. JSON always wins over any MAT with the same base stem.
-        2. For standalone MAT (no companion JSON): if both unedited AND edited
-           versions exist for the same recording, ask the user which to use.
+        2. Autoclean MAT files are included directly (no conflict with other types).
+        3. For standalone unedited/edited MAT (no companion JSON): if both exist
+           for the same recording, ask the user which to use.
         """
-        json_files, mat_unedited, mat_edited, json_stems = self._scan_folder(folder)
+        json_files, mat_unedited, mat_edited, mat_autoclean, json_stems = self._scan_folder(folder)
 
         # Filter out MATs that have a companion JSON
         def no_json(paths: List[str]) -> List[str]:
@@ -178,6 +185,7 @@ class StandaloneMUReviewPanel(QWidget):
 
         standalone_unedited = no_json(mat_unedited)
         standalone_edited = no_json(mat_edited)
+        standalone_autoclean = no_json(mat_autoclean)
 
         # Find conflicts: same base stem appears in both lists
         unedited_by_base = {self._mat_base_stem(Path(p).name): p for p in standalone_unedited}
@@ -210,6 +218,9 @@ class StandaloneMUReviewPanel(QWidget):
                     chosen_mats.append(epath)
         else:
             chosen_mats = standalone_unedited + standalone_edited
+
+        # Autoclean files are always included — no conflict resolution needed
+        chosen_mats.extend(standalone_autoclean)
 
         return sorted(json_files + chosen_mats)
 
