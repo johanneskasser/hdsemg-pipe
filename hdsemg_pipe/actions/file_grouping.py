@@ -60,9 +60,9 @@ def get_group_key(filename: str, regex: Optional[str] = None) -> str:
 
 
 def build_auto_mapping(
-    decomp_files: list[str],
-    chan_files: list[str],
-) -> dict[str, str] | None:
+    decomp_files: List[str],
+    chan_files: List[str],
+) -> Optional[Dict[str, str]]:
     """Try to automatically map decomposition filenames to channel-selection filenames.
 
     Uses :func:`get_group_key` to strip grid/spacing suffixes from both sides and
@@ -78,12 +78,12 @@ def build_auto_mapping(
         return {}
 
     # Build a lookup: stem → list of chan filenames that share that stem
-    chan_stem_map: dict[str, list[str]] = {}
+    chan_stem_map: Dict[str, List[str]] = {}
     for chan_file in chan_files:
         key = get_group_key(chan_file)
         chan_stem_map.setdefault(key, []).append(chan_file)
 
-    mapping: dict[str, str] = {}
+    mapping: Dict[str, str] = {}
     for decomp_file in decomp_files:
         decomp_key = get_group_key(decomp_file)
         candidates = chan_stem_map.get(decomp_key, [])
