@@ -347,21 +347,55 @@ class WizardMainWindow(QMainWindow):
 
 
 def main():
-    # Force light mode on macOS 
+    import argparse
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(
+        prog="hdsemg-pipe",
+        description="HD-sEMG processing pipeline",
+    )
+    parser.add_argument(
+        "--review-mus",
+        metavar="FOLDER",
+        help="Launch standalone MU Quality Review on a folder of openhdemg JSON files",
+    )
+    # parse_known_args so that Qt's own flags (e.g. -platform) are left intact
+    args, qt_args = parser.parse_known_args()
+
+    # Force light mode on macOS
     # This prevents the system's dark mode from interfering with the app's custom theme.
     if sys.platform == 'darwin':
         os.environ['QT_MAC_WANTS_LIGHT_THEME'] = '1'
 
+    app = QApplication([sys.argv[0]] + qt_args)
 
-    app = QApplication(sys.argv)
-    
     setup_logging()
     sys.excepthook = exception_hook
-    
-    window = WizardMainWindow()
-    window.showMaximized()  # Show the window maximized
+
+    if args.review_mus:
+        folder = Path(args.review_mus)
+        if not folder.is_dir():
+            parser.error(f"--review-mus: '{folder}' is not a directory")
+        decomp_files = [
+            p for p in folder.iterdir()
+            if p.suffix.lower() == ".json"
+            or p.name.endswith("_muedit.mat")
+            or p.name.endswith("_muedit.mat_edited.mat")
+            or p.name.endswith("_muedit_autoclean.mat")
+        ]
+        if not decomp_files:
+            parser.error(
+                f"--review-mus: no decomposition files found in '{folder}' "
+                "(expected .json, _muedit.mat, _muedit.mat_edited.mat or _muedit_autoclean.mat)"
+            )
+        from hdsemg_pipe.widgets.standalone.review_window import StandaloneReviewWindow
+        window = StandaloneReviewWindow(folder_path=folder)
+    else:
+        window = WizardMainWindow()
+
+    window.showMaximized()
     app.setStyleSheet(get_app_stylesheet())
-    
+
     sys.exit(app.exec_())
 
 

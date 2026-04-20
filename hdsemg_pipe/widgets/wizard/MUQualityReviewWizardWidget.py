@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QFontMetrics, QPainter
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -440,27 +440,83 @@ class _CustomGroupingDialog(QDialog):
 # File list items
 # ---------------------------------------------------------------------------
 
+_LIST_ROW_HEIGHT = 26  # Shared fixed height for group headers and file items
+
+
+class _ElidedLabel(QLabel):
+    """QLabel that shows '…' when text is wider than the widget."""
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        metrics = QFontMetrics(self.font())
+        elided = metrics.elidedText(self.text(), Qt.ElideRight, self.width())
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.setFont(self.font())
+        painter.drawText(self.contentsRect(), Qt.AlignLeft | Qt.AlignVCenter, elided)
+
+
 class _GroupHeader(QWidget):
-    def __init__(self, label: str, parent=None):
+    """Group label + select-all checkbox. Pills live in the synchronized _GroupHeaderPills column."""
+
+    group_toggled = pyqtSignal(str, bool)  # group_key, check_all
+
+    def __init__(self, label: str, group_key: str, parent=None):
         super().__init__(parent)
+        self.setFixedHeight(_LIST_ROW_HEIGHT)
+        self._group_key = group_key
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(Spacing.SM, Spacing.XS, Spacing.SM, Spacing.XS)
+        layout.setContentsMargins(Spacing.SM, 0, Spacing.SM, 0)
         layout.setSpacing(4)
 
-        lbl = QLabel(label)
+        self.checkbox = QCheckBox()
+        self.checkbox.setTristate(True)
+        self.checkbox.setCheckState(Qt.Checked)
+        self.checkbox.clicked.connect(self._on_clicked)
+        layout.addWidget(self.checkbox)
+
+        lbl = _ElidedLabel(label)
         lbl.setStyleSheet(
             f"font-weight: bold; color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
         )
+        lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        lbl.setMinimumWidth(0)
         layout.addWidget(lbl)
-        layout.addStretch()
 
-        # Pill: reliable MU count (populated after reliability data loads)
+    def _on_clicked(self):
+        # Tristate cycles Unchecked→PartiallyChecked on first click from unchecked;
+        # normalize partial → checked so the user only gets all-or-nothing toggling.
+        if self.checkbox.checkState() == Qt.PartiallyChecked:
+            self.checkbox.blockSignals(True)
+            self.checkbox.setCheckState(Qt.Checked)
+            self.checkbox.blockSignals(False)
+        self.group_toggled.emit(self._group_key, self.checkbox.isChecked())
+
+    def update_check_state(self, n_checked: int, n_total: int):
+        self.checkbox.blockSignals(True)
+        if n_checked == 0:
+            self.checkbox.setCheckState(Qt.Unchecked)
+        elif n_checked == n_total:
+            self.checkbox.setCheckState(Qt.Checked)
+        else:
+            self.checkbox.setCheckState(Qt.PartiallyChecked)
+        self.checkbox.blockSignals(False)
+
+
+class _GroupHeaderPills(QWidget):
+    """The MU-count and file-count pills, always visible in the pinned pills column."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(_LIST_ROW_HEIGHT)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 0, Spacing.SM, 0)
+        layout.setSpacing(4)
+
         self._mu_pill = QLabel("…")
         self._mu_pill.setStyleSheet(self._pill_style(Colors.GRAY_400))
         layout.addWidget(self._mu_pill)
 
-        # Pill: selected files out of total
-        self._file_pill = QLabel()
+        self._file_pill = QLabel("…")
         self._file_pill.setStyleSheet(self._pill_style(Colors.GRAY_400))
         layout.addWidget(self._file_pill)
 
@@ -481,7 +537,6 @@ class _GroupHeader(QWidget):
         self._mu_pill.setStyleSheet(self._pill_style(color))
         self._mu_pill.setText(f"{reliable} MU" if total > 0 else "–")
 
-    # backward-compat alias used by restore_from_manifest path
     def set_counter(self, selected: int, total: int):
         self.set_file_counter(selected, total)
 
@@ -492,11 +547,12 @@ class _FileListItem(QWidget):
 
     def __init__(self, filepath: str, label: str, parent=None):
         super().__init__(parent)
+        self.setFixedHeight(_LIST_ROW_HEIGHT)
         self.filepath = filepath
         self._is_selected = False
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(Spacing.MD, Spacing.XS, Spacing.SM, Spacing.XS)
+        layout.setContentsMargins(Spacing.MD, 0, Spacing.SM, 0)
 
         self.checkbox = QCheckBox()
         self.checkbox.setChecked(True)
@@ -521,9 +577,6 @@ class _FileListItem(QWidget):
         bg = Colors.BLUE_100 if selected else "transparent"
         self.setStyleSheet(f"background-color: {bg}; border-radius: 4px;")
 
-    def set_force_checked(self, force: bool):
-        """Disable checkbox when this is the last checked file in the group."""
-        self.checkbox.setEnabled(not force)
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +623,8 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._checked: Dict[str, bool] = {}
         self._groups: Dict[str, List[str]] = {}
         self._items: Dict[str, _FileListItem] = {}
-        self._group_headers: Dict[str, _GroupHeader] = {}
+        self._group_headers: Dict[str, _GroupHeaderPills] = {}
+        self._group_header_widgets: Dict[str, _GroupHeader] = {}
         self._current_file: Optional[str] = None
         self._sta_cache: Dict[str, object] = {}
         self._worker: Optional[QThread] = None
@@ -603,16 +657,18 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         outer_splitter = QSplitter(Qt.Horizontal)
         root.addWidget(outer_splitter)
 
-        # ---- Left panel: file list ----
+        # ---- Left panel: file list + always-visible pills column ----
         left = QWidget()
-        left.setFixedWidth(240)
+        left.setMinimumWidth(160)
         left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM)
+        left_layout.setContentsMargins(Spacing.SM, Spacing.SM, 0, Spacing.SM)
         left_layout.setSpacing(0)
 
+        # File-names scroll area: horizontal scroll enabled for long names
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         self._file_list_widget = QWidget()
         self._file_list_layout = QVBoxLayout(self._file_list_widget)
@@ -620,7 +676,37 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._file_list_layout.setSpacing(2)
         self._file_list_layout.addStretch()
         scroll.setWidget(self._file_list_widget)
-        left_layout.addWidget(scroll)
+
+        # Pills column: fixed width, V-scroll synced with file list, no H-scroll
+        self._pills_col_widget = QWidget()
+        self._pills_col_layout = QVBoxLayout(self._pills_col_widget)
+        self._pills_col_layout.setContentsMargins(0, 0, 0, 0)
+        self._pills_col_layout.setSpacing(2)
+        self._pills_col_layout.addStretch()
+
+        self._pills_col_scroll = QScrollArea()
+        self._pills_col_scroll.setWidget(self._pills_col_widget)
+        self._pills_col_scroll.setWidgetResizable(True)
+        self._pills_col_scroll.setFrameShape(QFrame.NoFrame)
+        self._pills_col_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._pills_col_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._pills_col_scroll.setFixedWidth(90)
+
+        # Bidirectional V-scroll sync (Qt skips signal if value unchanged → no loop)
+        scroll.verticalScrollBar().valueChanged.connect(
+            self._pills_col_scroll.verticalScrollBar().setValue
+        )
+        self._pills_col_scroll.verticalScrollBar().valueChanged.connect(
+            scroll.verticalScrollBar().setValue
+        )
+
+        list_area = QWidget()
+        list_area_layout = QHBoxLayout(list_area)
+        list_area_layout.setContentsMargins(0, 0, 0, 0)
+        list_area_layout.setSpacing(0)
+        list_area_layout.addWidget(scroll)
+        list_area_layout.addWidget(self._pills_col_scroll)
+        left_layout.addWidget(list_area)
 
         self._grouping_btn = QPushButton("⚙ Custom Grouping")
         self._grouping_btn.setStyleSheet(f"""
@@ -833,14 +919,16 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
     def _populate_file_list(self, filepaths: List[str]):
         self._all_filepaths = filepaths
-        # Clear existing widgets (keep stretch at end)
-        while self._file_list_layout.count() > 1:
-            item = self._file_list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        # Clear both layouts (keep the stretch item at the end of each)
+        for layout in (self._file_list_layout, self._pills_col_layout):
+            while layout.count() > 1:
+                item = layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
 
         self._items.clear()
         self._group_headers.clear()
+        self._group_header_widgets.clear()
         self._groups.clear()
         self._checked.clear()
 
@@ -852,9 +940,17 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
         insert_pos = 0
         for key, fps in self._groups.items():
-            header = _GroupHeader(labels.get(key, key))
-            self._group_headers[key] = header
-            self._file_list_layout.insertWidget(insert_pos, header)
+            # File-names column: group label + select-all checkbox
+            header_widget = _GroupHeader(labels.get(key, key), group_key=key)
+            header_widget.group_toggled.connect(self._on_group_toggled)
+            self._group_header_widgets[key] = header_widget
+            self._file_list_layout.insertWidget(insert_pos, header_widget)
+
+            # Pills column: always-visible pills for this group
+            pills = _GroupHeaderPills()
+            self._group_headers[key] = pills
+            self._pills_col_layout.insertWidget(insert_pos, pills)
+
             insert_pos += 1
             for fp in fps:
                 item = _FileListItem(fp, Path(fp).name)
@@ -863,10 +959,15 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
                 self._items[fp] = item
                 self._checked[fp] = True
                 self._file_list_layout.insertWidget(insert_pos, item)
+
+                # Spacer in pills column matching each file item row
+                spacer = QWidget()
+                spacer.setFixedHeight(_LIST_ROW_HEIGHT)
+                self._pills_col_layout.insertWidget(insert_pos, spacer)
+
                 insert_pos += 1
 
         self._update_group_headers()
-        self._enforce_last_in_group()
         self._update_proceed_button()
 
         if filepaths:
@@ -903,19 +1004,21 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
     def _on_file_toggled(self, filepath: str, checked: bool):
         self._checked[filepath] = checked
         self._update_group_headers()
-        self._enforce_last_in_group()
         self._update_proceed_button()
         self._update_footer()
 
-    def _enforce_last_in_group(self):
-        for fps in self._groups.values():
-            checked_fps = [fp for fp in fps if self._checked.get(fp, True)]
-            for fp in fps:
-                item = self._items.get(fp)
-                if item:
-                    item.set_force_checked(
-                        len(checked_fps) == 1 and fp in checked_fps
-                    )
+    def _on_group_toggled(self, group_key: str, check_all: bool):
+        fps = self._groups.get(group_key, [])
+        for fp in fps:
+            self._checked[fp] = check_all
+            item = self._items.get(fp)
+            if item:
+                item.checkbox.blockSignals(True)
+                item.checkbox.setChecked(check_all)
+                item.checkbox.blockSignals(False)
+        self._update_group_headers()
+        self._update_proceed_button()
+        self._update_footer()
 
     def _on_file_selected(self, filepath: str):
         if self._current_file:
@@ -1118,6 +1221,21 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         if filepath in self._sta_cache:
             self._draw_muaps(self._sta_cache[filepath])
             return
+        # MAT pulsetrain files have no raw electrode matrix — STA is not possible.
+        # RAW_SIGNAL is padded with zeros in get_emgfile_for_plotting() so that
+        # plot_mupulses can build its x_axis, but those zeros are not real signal.
+        # Detect this by checking whether RAW_SIGNAL is all-zero (or a single column).
+        raw = emgfile.get("RAW_SIGNAL")
+        no_raw = (
+            raw is None
+            or not hasattr(raw, "shape")
+            or raw.shape[0] == 0
+            or (raw.shape[1] <= 1 and (raw.values == 0).all())
+        )
+        if no_raw:
+            self._sta_cache[filepath] = None
+            self._draw_muaps(None)
+            return
         # Clear stale canvas and show computing indicator while STA runs
         self._figure.clear()
         ax = self._figure.add_subplot(111)
@@ -1145,8 +1263,9 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             self._figure.clear()
             ax = self._figure.add_subplot(111)
             ax.text(
-                0.5, 0.5, "MUAPs unavailable",
+                0.5, 0.5, "MUAPs not available\n(no raw electrode signal in file)",
                 ha="center", va="center", transform=ax.transAxes,
+                fontsize=9, color="gray",
             )
             self._canvas.draw()
             return
@@ -1190,11 +1309,18 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
     def _on_threshold_changed(self):
         self._thresholds = self._build_thresholds()
-        self._reliability_cache.clear()
-        self._update_group_headers()  # resets to file counts while cache is empty
+        # The reliability cache stores raw SIL/PNR/CoVISI values that are
+        # threshold-independent.  All display helpers (_refresh_mu_table,
+        # _update_group_headers, _update_footer) already apply self._thresholds
+        # live to those raw values, so we only need to repaint — no cache
+        # invalidation, no worker launch, no disk I/O.
+        self._update_group_headers()
         if self._current_file:
-            self._load_file_data(self._current_file)
-        self._preload_all_reliability()
+            if self._current_file in self._reliability_cache:
+                self._refresh_mu_table(self._current_file)
+            else:
+                # File not yet loaded — trigger initial load (first visit only)
+                self._load_file_data(self._current_file)
         self._update_footer()
         # Debounced check: warn about active manual overrides once the user
         # stops adjusting sliders (600 ms of silence).
@@ -1255,6 +1381,11 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             # File pill — always up to date
             header.set_file_counter(len(checked_fps), len(fps))
 
+            # Group header checkbox — reflects current selection state
+            hw = self._group_header_widgets.get(key)
+            if hw:
+                hw.update_check_state(len(checked_fps), len(fps))
+
             # MU pill — use whatever files have data; show partial count as data loads
             total_reliable = 0
             total_mus = 0
@@ -1276,11 +1407,12 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             header.set_mu_counter(total_reliable, total_mus)
 
     def _update_proceed_button(self):
-        all_ok = all(
-            any(self._checked.get(fp, True) for fp in fps)
+        any_checked = any(
+            self._checked.get(fp, True)
             for fps in self._groups.values()
+            for fp in fps
         )
-        self._proceed_btn.setEnabled(all_ok and bool(self._groups))
+        self._proceed_btn.setEnabled(any_checked and bool(self._groups))
 
     def _update_footer(self):
         import math
