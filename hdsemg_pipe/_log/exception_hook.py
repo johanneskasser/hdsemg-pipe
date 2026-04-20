@@ -83,7 +83,7 @@ def _build_detailed_text(exec_value, tb, exc_type):
     exec_value_str += "\n\n==== Last 50 Logs ====\n"
     # Append the last 50 lines of the log file
     try:
-        with open("hdsemg-pipe.log", "r") as log_file:
+        with open("hdsemg-pipe.log", "r", encoding="utf-8", errors="replace") as log_file:
             lines = log_file.readlines()
             start_index = max(0, len(lines) - 50)
             last_lines = lines[start_index:]
