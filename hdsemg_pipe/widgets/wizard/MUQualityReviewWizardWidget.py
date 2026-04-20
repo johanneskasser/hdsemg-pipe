@@ -118,7 +118,7 @@ class _STAWorker(QThread):
 
 class _ProceedWorker(QThread):
     progress = pyqtSignal(int, int)
-    finished = pyqtSignal(int)   # emits n_written
+    finished = pyqtSignal(int, int)   # emits (n_written, n_skipped)
     error = pyqtSignal(str)
 
     def __init__(
@@ -143,6 +143,7 @@ class _ProceedWorker(QThread):
             self._dest_dir.mkdir(parents=True, exist_ok=True)
             total = len(self._kept_files)
             n_written = 0
+            n_skipped = 0
 
             for i, filename in enumerate(self._kept_files):
                 self.progress.emit(i + 1, total)
@@ -159,7 +160,14 @@ class _ProceedWorker(QThread):
                 }
 
                 # Compute reliability to find which MUs survive
-                rel_df = dec_json.compute_reliability(self._thresholds)
+                try:
+                    rel_df = dec_json.compute_reliability(self._thresholds)
+                except Exception as exc:
+                    if "no motor units" in str(exc).lower():
+                        logger.info("Skipping %s: no motor units", filename)
+                        n_skipped += 1
+                        continue
+                    raise
                 keep_mu_indices: set = set()
                 for _, row in rel_df.iterrows():
                     mu = int(row["mu_index"])
@@ -217,7 +225,7 @@ class _ProceedWorker(QThread):
             with open(self._manifest_path, "w", encoding="utf-8") as fh:
                 json.dump(manifest, fh, indent=2)
 
-            self.finished.emit(n_written)
+            self.finished.emit(n_written, n_skipped)
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -1497,7 +1505,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             dest_dir=dest_dir,
             manifest_path=manifest_path,
         )
-        worker.finished.connect(self._on_proceed_done)
+        worker.finished.connect(self._on_proceed_done)  # (n_written, n_skipped)
         worker.error.connect(self._on_proceed_error)
         worker.progress.connect(
             lambda cur, tot: self._proceed_btn.setText(f"Processing {cur}/{tot}…")
@@ -1505,10 +1513,13 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._worker = worker
         worker.start()
 
-    def _on_proceed_done(self, n_written: int):
+    def _on_proceed_done(self, n_written: int, n_skipped: int):
         self._proceed_btn.setEnabled(True)
         self._proceed_btn.setText("Proceed")
-        toast_manager.show_toast(f"Done — {n_written} file(s) written to covisi_filtered/", "success")
+        msg = f"Done — {n_written} file(s) written to covisi_filtered/"
+        if n_skipped:
+            msg += f" ({n_skipped} skipped: no motor units)"
+        toast_manager.show_toast(msg, "success")
         self.complete_step()  # marks complete, emits stepCompleted → triggers auto-navigation
 
     def _on_proceed_error(self, error: str):
