@@ -14,6 +14,7 @@ from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.MappingDialog import MappingDialog
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, Fonts
+from hdsemg_pipe.actions.file_grouping import build_auto_mapping
 
 
 class DecompositionResultsWizardWidget(WizardStepWidget):
@@ -83,6 +84,13 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
         self.btn_skip.clicked.connect(self.skip_mapping)
         self.btn_skip.setEnabled(False)
         self.buttons.append(self.btn_skip)
+
+        self.btn_auto_map = QPushButton("Auto-Map")
+        self.btn_auto_map.setStyleSheet(Styles.button_secondary())
+        self.btn_auto_map.setToolTip("Automatically map decomposition files to channel selection files based on filename stems")
+        self.btn_auto_map.clicked.connect(self.try_auto_map)
+        self.btn_auto_map.setEnabled(False)
+        self.buttons.append(self.btn_auto_map)
 
         self.btn_apply_mapping = QPushButton("Apply Mapping")
         self.btn_apply_mapping.setStyleSheet(Styles.button_primary())
@@ -161,6 +169,7 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
             """)
             self.btn_apply_mapping.setEnabled(True)
             self.btn_skip.setEnabled(True)
+            self.btn_auto_map.setEnabled(True)
         else:
             self.file_counter_label.setText("Monitoring for decomposition files...")
             self.file_counter_label.setStyleSheet(f"""
@@ -172,6 +181,7 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
             """)
             self.btn_apply_mapping.setEnabled(False)
             self.btn_skip.setEnabled(False)
+            self.btn_auto_map.setEnabled(False)
 
         # Only log when file count changes to avoid spam
         if file_count_changed:
@@ -213,6 +223,44 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
 
         # Mark step as completed
         self.complete_step()
+
+    def try_auto_map(self):
+        """Attempt to automatically map decomposition files to channel selection files.
+
+        Uses filename-stem matching (via get_group_key) to build the mapping.
+        Shows a success message and completes the step if all files are matched
+        unambiguously; opens the manual MappingDialog otherwise.
+        """
+        if not self.resultfiles:
+            self.warn("No decomposition files found.")
+            return
+
+        chan_folder = global_state.get_channel_selection_path()
+        try:
+            chan_files = [
+                f for f in os.listdir(chan_folder) if f.endswith(".mat")
+            ]
+        except FileNotFoundError:
+            chan_files = []
+
+        decomp_basenames = [os.path.basename(f) for f in self.resultfiles]
+        mapping = build_auto_mapping(decomp_basenames, chan_files)
+
+        if mapping is not None:
+            self.decomp_mapping = mapping
+            mapped_count = len(mapping)
+            self.success(
+                f"Auto-mapping applied: {mapped_count} decomposition file(s) matched automatically."
+            )
+            logger.info(f"Auto decomposition mapping: {self.decomp_mapping}")
+            self.save_mapping_to_json()
+            self.complete_step()
+        else:
+            logger.info("Auto-mapping not possible – opening manual mapping dialog.")
+            self.warn(
+                "Could not auto-map all files. Please map them manually."
+            )
+            self.open_mapping_dialog()
 
     def open_mapping_dialog(self):
         """Open the mapping dialog to associate decomposition files with sources."""
