@@ -1022,6 +1022,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                     output_path = os.path.join(output_folder, Path(json_path).name)
                     shutil.copy2(json_path, output_path)
                     self.saved_json_paths.append(output_path)
+                    self._copy_sibling_pkl(json_path, output_folder)
                     processed_files.add(json_path)
                     logger.info(f"Copied {Path(json_path).name} (no duplicates found)")
 
@@ -1031,6 +1032,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                     output_path = os.path.join(output_folder, Path(json_path).name)
                     shutil.copy2(json_path, output_path)
                     self.saved_json_paths.append(output_path)
+                    self._copy_sibling_pkl(json_path, output_folder)
                     logger.info(f"Copied {Path(json_path).name} (not in any group)")
 
             # Save detection report
@@ -1290,6 +1292,14 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
         logger.info(f"Saved detection report: {report_path}")
 
+    def _copy_sibling_pkl(self, json_path: str, output_folder: str) -> None:
+        """Copy the sibling .pkl file (same stem) alongside the given JSON, if it exists."""
+        src_pkl = Path(json_path).with_suffix(".pkl")
+        if src_pkl.exists():
+            out_pkl = Path(output_folder) / src_pkl.name
+            shutil.copy2(src_pkl, out_pkl)
+            logger.info(f"Copied sibling PKL {src_pkl.name}")
+
     def skip_step(self):
         """Skip duplicate detection step - copy files and export to MAT."""
         try:
@@ -1307,6 +1317,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                 output_path = os.path.join(output_folder, Path(json_path).name)
                 shutil.copy2(json_path, output_path)
                 self.saved_json_paths.append(output_path)
+                self._copy_sibling_pkl(json_path, output_folder)
                 logger.info(f"Copied {Path(json_path).name} (step skipped)")
 
             logger.info(f"Copied {len(self.saved_json_paths)} files (duplicate detection skipped)")

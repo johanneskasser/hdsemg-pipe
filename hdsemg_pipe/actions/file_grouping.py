@@ -59,6 +59,41 @@ def get_group_key(filename: str, regex: Optional[str] = None) -> str:
     return re.sub(r"_\d+$", "", stem)
 
 
+def build_auto_mapping(
+    decomp_files: List[str],
+    chan_files: List[str],
+) -> Optional[Dict[str, str]]:
+    """Try to automatically map decomposition filenames to channel-selection filenames.
+
+    Uses :func:`get_group_key` to strip grid/spacing suffixes from both sides and
+    match on the resulting session stem.
+
+    Returns:
+        A ``{decomp_filename: chan_filename}`` dict when every decomposition file
+        maps to exactly one channel-selection file, or ``None`` if any mapping is
+        ambiguous (0 or ≥2 matches for a decomp file).
+        Returns an empty dict when *decomp_files* is empty.
+    """
+    if not decomp_files:
+        return {}
+
+    # Build a lookup: stem → list of chan filenames that share that stem
+    chan_stem_map: Dict[str, List[str]] = {}
+    for chan_file in chan_files:
+        key = get_group_key(chan_file)
+        chan_stem_map.setdefault(key, []).append(chan_file)
+
+    mapping: Dict[str, str] = {}
+    for decomp_file in decomp_files:
+        decomp_key = get_group_key(decomp_file)
+        candidates = chan_stem_map.get(decomp_key, [])
+        if len(candidates) != 1:
+            return None  # 0 matches or ambiguous
+        mapping[decomp_file] = candidates[0]
+
+    return mapping
+
+
 def shorten_group_labels(group_keys: List[str]) -> Dict[str, str]:
     """Return a human-readable label for each group key.
 
