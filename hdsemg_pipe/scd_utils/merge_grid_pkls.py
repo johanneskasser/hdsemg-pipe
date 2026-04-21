@@ -68,6 +68,17 @@ from detect_and_upgrade_pkl import (
 # Matches patterns like: 10mm_4x8, 10mm_4x8_2, 8mm_5x13, 8mm_5x13_2
 _GRID_KEY_RE = re.compile(r'\d+mm_\d+x\d+(?:_\d+)?')
 
+# Pipeline step suffixes that may appear in stems when merging from filtered folders
+_KNOWN_SUFFIXES = ("_covisi_filtered", "_duplicates_removed")
+
+
+def _strip_known_suffix(s: str) -> str:
+    """Strip a trailing pipeline step suffix from a stem or muscle string."""
+    for suf in _KNOWN_SUFFIXES:
+        if s.endswith(suf):
+            return s[: -len(suf)]
+    return s
+
 
 def _split_stem(pkl_path: Path, mat_dirs: list) -> tuple | None:
     """
@@ -89,8 +100,10 @@ def _split_stem(pkl_path: Path, mat_dirs: list) -> tuple | None:
                 idx = remaining.find(grid_key)
                 if idx >= 0:
                     task_prefix = remaining[:idx].rstrip("_")
-                    muscle = remaining[idx + len(grid_key):].lstrip("_")
-                    base = (mat_stem + "_" + task_prefix) if task_prefix else mat_stem
+                    muscle = _strip_known_suffix(remaining[idx + len(grid_key):].lstrip("_"))
+                    base = _strip_known_suffix(
+                        (mat_stem + "_" + task_prefix) if task_prefix else mat_stem
+                    )
                     return base, grid_key, muscle
 
     # --- Strategy 2: regex heuristic (no mat file needed) ---
@@ -98,8 +111,8 @@ def _split_stem(pkl_path: Path, mat_dirs: list) -> tuple | None:
     if not m:
         return None  # no grid key found — skip
     grid_key = m.group(0)
-    base = stem[: m.start()].rstrip("_")
-    muscle = stem[m.end():].lstrip("_")
+    base = _strip_known_suffix(stem[: m.start()].rstrip("_"))
+    muscle = _strip_known_suffix(stem[m.end():].lstrip("_"))
     return base, grid_key, muscle
 
 

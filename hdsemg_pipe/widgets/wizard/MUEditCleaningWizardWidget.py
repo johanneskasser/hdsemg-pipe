@@ -221,9 +221,9 @@ class _PklMergeWorker(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, decomp_auto_path: str, channelselection_path: str, parent=None):
+    def __init__(self, source_path: str, channelselection_path: str, parent=None):
         super().__init__(parent)
-        self.decomp_auto_path = decomp_auto_path
+        self.source_path = source_path
         self.channelselection_path = channelselection_path
 
     def run(self):
@@ -231,7 +231,7 @@ class _PklMergeWorker(QThread):
             from pathlib import Path as _Path
             from hdsemg_pipe.scd_utils import detect_and_upgrade_pkl, merge_grid_pkls
 
-            target = _Path(self.decomp_auto_path)
+            target = _Path(self.source_path)
             channelselection = _Path(self.channelselection_path)
 
             self.progress.emit("Checking PKL format compatibility…")
@@ -1147,19 +1147,42 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         else:
             self._run_pkl_merge_then_edit()
 
+    def _pick_pkl_merge_source(self) -> str | None:
+        """Return the newest folder that contains per-grid (unmerged) PKL files.
+
+        Priority: decomposition_removed_duplicates → decomposition_covisi_filtered
+                  → decomposition_auto.
+        A folder qualifies when it holds at least one .pkl whose stem matches the
+        grid-key pattern (i.e. still a single-grid file awaiting merging).
+        """
+        candidates = [
+            global_state.get_decomposition_removed_duplicates_path(),
+            global_state.get_decomposition_covisi_filtered_path(),
+            global_state.get_decomposition_path(),
+        ]
+        for folder in candidates:
+            if not folder or not os.path.isdir(folder):
+                continue
+            for fname in os.listdir(folder):
+                if (fname.endswith(".pkl") and not fname.endswith(".pkl.bak")
+                        and _GRID_KEY_RE.search(fname[:-4])):
+                    return folder
+        return None
+
     def _run_pkl_merge_then_edit(self):
         """Run PKL upgrade+merge in background, then start scd-edition."""
-        auto_folder = global_state.get_decomposition_path()
+        source_folder = self._pick_pkl_merge_source()
         channelselection = global_state.get_channel_selection_path()
-        if not auto_folder or not os.path.isdir(auto_folder):
-            self.error("decomposition_auto folder not found.")
+        if not source_folder:
+            self.error("No per-grid PKL files found to merge.")
             return
 
+        logger.info("PKL merge source: %s", source_folder)
         self.btn_launch_scd.setEnabled(False)
         self.loading_label.setText("Preparing PKL files…")
         self.loading_label.setVisible(True)
 
-        self.pkl_merge_worker = _PklMergeWorker(auto_folder, channelselection or "")
+        self.pkl_merge_worker = _PklMergeWorker(source_folder, channelselection or "")
         self.pkl_merge_worker.progress.connect(self._on_pkl_merge_progress)
         self.pkl_merge_worker.finished.connect(self._on_pkl_merge_finished)
         self.pkl_merge_worker.error.connect(self._on_pkl_merge_error)
