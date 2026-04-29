@@ -428,8 +428,16 @@ class FinalResultsWizardWidget(WizardStepWidget):
         elif auto_folder and os.path.isdir(auto_folder):
             source_dir = auto_folder
 
+        scd_output_dir = global_state.get_decomposition_scd_edition_path()
         self.edited_pkl_files = []
-        if source_dir:
+        if scd_output_dir and os.path.isdir(scd_output_dir):
+            self.edited_pkl_files = [
+                os.path.join(scd_output_dir, f)
+                for f in os.listdir(scd_output_dir)
+                if f.endswith("_edited.pkl")
+            ]
+        elif source_dir:
+            # Fallback: legacy workfolders where edited PKLs lived in source dir
             self.edited_pkl_files = [
                 os.path.join(source_dir, f)
                 for f in os.listdir(source_dir)

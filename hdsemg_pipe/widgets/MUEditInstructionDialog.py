@@ -489,6 +489,28 @@ class MUEditInstructionDialog(QDialog):
             skip_button.clicked.connect(lambda: self._skip_current_file(next_file))
             skip_layout.addWidget(skip_button)
 
+            # Restart MUedit button
+            restart_button = QPushButton("↺ Restart MUedit")
+            restart_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.BG_SECONDARY};
+                    color: {Colors.TEXT_PRIMARY};
+                    border: 1px solid {Colors.BORDER_DEFAULT};
+                    border-radius: {BorderRadius.SM};
+                    padding: 8px 16px;
+                    font-size: {Fonts.SIZE_SM};
+                    font-weight: {Fonts.WEIGHT_MEDIUM};
+                }}
+                QPushButton:hover {{
+                    background-color: {Colors.BG_TERTIARY};
+                    border-color: {Colors.BLUE_600};
+                }}
+            """)
+            restart_button.setFixedWidth(150)
+            restart_button.setToolTip("Relaunch MUedit to continue editing files")
+            restart_button.clicked.connect(self._restart_muedit)
+            skip_layout.addWidget(restart_button)
+
             layout.addWidget(skip_container)
 
         else:
@@ -531,6 +553,13 @@ class MUEditInstructionDialog(QDialog):
                     widget.setEnabled(True)
         except:
             pass
+
+    def _restart_muedit(self):
+        """Relaunch MUedit via the parent widget."""
+        if self.parent_widget and hasattr(self.parent_widget, "launch_muedit"):
+            self.parent_widget.launch_muedit()
+        else:
+            logger.warning("Cannot restart MUedit: parent widget not available")
 
     def _skip_current_file(self, file_path):
         """Marks the current file as skipped with an optional reason."""

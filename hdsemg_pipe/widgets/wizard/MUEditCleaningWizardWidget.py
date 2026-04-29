@@ -9,8 +9,8 @@ import re
 import subprocess
 from PyQt5.QtCore import QFileSystemWatcher, QTimer, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
-    QPushButton, QLabel, QVBoxLayout, QFrame, QScrollArea,
-    QWidget, QProgressBar
+    QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QFrame, QScrollArea,
+    QWidget, QProgressBar, QDialog, QDialogButtonBox
 )
 
 from hdsemg_pipe._log.log_config import logger
@@ -165,12 +165,14 @@ class ScdEditionWorker(QThread):
 
     progress = pyqtSignal(int, int, str)   # current, total, message
     file_done = pyqtSignal(str)            # path of successfully produced _edited.pkl
+    file_not_saved = pyqtSignal(str, str)  # pkl_path, expected_output_path
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, pkl_files, parent=None):
+    def __init__(self, pkl_files, output_dir, parent=None):
         super().__init__(parent)
         self.pkl_files = list(pkl_files)
+        self.output_dir = output_dir
         self._cancelled = False
 
     def cancel(self):
@@ -184,7 +186,7 @@ class ScdEditionWorker(QThread):
                 if self._cancelled:
                     break
                 stem = os.path.splitext(os.path.basename(pkl_path))[0]
-                output_path = os.path.join(os.path.dirname(pkl_path), f"{stem}_edited.pkl")
+                output_path = os.path.join(self.output_dir, f"{stem}_edited.pkl")
                 if os.path.exists(output_path):
                     done += 1
                     self.file_done.emit(output_path)
@@ -204,6 +206,7 @@ class ScdEditionWorker(QThread):
                     self.progress.emit(done, total, f"Done: {stem}")
                 else:
                     logger.warning("scd-edition closed without saving: %s", pkl_path)
+                    self.file_not_saved.emit(pkl_path, output_path)
         except Exception as e:
             logger.exception("ScdEditionWorker failed")
             self.error.emit(str(e))
@@ -299,6 +302,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.scd_worker = None
         self.pkl_merge_worker = None
         self._use_pkl = False
+        self.scd_skipped_files = {}       # pkl_path -> skip_reason
+        self.scd_files_not_saved = []     # list of (pkl_path, output_path) tuples
 
         # Loading animation timer
         self.loading_animation_timer = QTimer(self)
@@ -1262,10 +1267,15 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 continue  # single-grid PKL — skip, needs merge first
             pkl_files.append(os.path.join(source_dir, fname))
 
+        # Load skipped files from 05.3 folder so persisted skips survive restarts
+        if not self.scd_skipped_files:
+            self.scd_skipped_files = self._load_scd_skipped_files()
+
+        scd_output_dir = global_state.get_decomposition_scd_edition_path()
         edited_pkl_files = []
         for pkl in pkl_files:
             stem = os.path.splitext(os.path.basename(pkl))[0]
-            edited = os.path.join(source_dir, f"{stem}_edited.pkl")
+            edited = os.path.join(scd_output_dir, f"{stem}_edited.pkl")
             if os.path.exists(edited):
                 edited_pkl_files.append(edited)
 
@@ -1278,12 +1288,14 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         """Update progress UI for scd-edition PKL path."""
         total = len(self.pkl_files)
         edited = len(self.edited_pkl_files)
+        skipped = len([p for p in self.pkl_files if p in self.scd_skipped_files])
+        completed = edited + skipped
 
         self.progress_bar.setMaximum(total if total > 0 else 1)
-        self.progress_bar.setValue(edited)
+        self.progress_bar.setValue(completed)
         self.progress_bar.setFormat(
-            f"{edited} edited / {total} total "
-            f"({int(edited / total * 100) if total > 0 else 0}%)"
+            f"{edited} edited, {skipped} skipped / {total} total "
+            f"({int(completed / total * 100) if total > 0 else 0}%)"
         )
 
         while self.file_status_layout.count():
@@ -1300,6 +1312,13 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 status_label.setStyleSheet(
                     f"color: {Colors.GREEN_700}; font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;"
                 )
+            elif pkl_path in self.scd_skipped_files:
+                reason = self.scd_skipped_files[pkl_path]
+                text = f"⊘ {stem}.pkl ({reason})" if reason else f"⊘ {stem}.pkl (Skipped)"
+                status_label.setText(text)
+                status_label.setStyleSheet(
+                    f"color: {Colors.ORANGE_600}; font-size: {Fonts.SIZE_SM}; padding: {Spacing.XS}px;"
+                )
             else:
                 status_label.setText(f"⏳ {stem}.pkl")
                 status_label.setStyleSheet(
@@ -1307,8 +1326,8 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
                 )
             self.file_status_layout.addWidget(status_label)
 
-        if total > 0 and edited >= total and not self.step_completed:
-            logger.info(f"All PKL files edited! {edited} total")
+        if total > 0 and completed >= total and not self.step_completed:
+            logger.info(f"All PKL files done! {edited} edited, {skipped} skipped")
             self.complete_step()
 
     # ------------------------------------------------------------------
@@ -1321,9 +1340,14 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             self.error("No PKL files found to edit.")
             return
 
-        self.scd_worker = ScdEditionWorker(self.pkl_files)
+        scd_output_dir = global_state.get_decomposition_scd_edition_path()
+        os.makedirs(scd_output_dir, exist_ok=True)
+
+        self.scd_files_not_saved = []
+        self.scd_worker = ScdEditionWorker(self.pkl_files, scd_output_dir)
         self.scd_worker.progress.connect(self._on_scd_progress)
         self.scd_worker.file_done.connect(self._on_scd_file_done)
+        self.scd_worker.file_not_saved.connect(self._on_scd_file_not_saved)
         self.scd_worker.finished.connect(self._on_scd_finished)
         self.scd_worker.error.connect(self._on_scd_error)
         self.scd_worker.start()
@@ -1341,12 +1365,131 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             self.edited_pkl_files.append(edited_path)
         self._update_pkl_progress_ui()
 
+    def _on_scd_file_not_saved(self, pkl_path, output_path):
+        self.scd_files_not_saved.append((pkl_path, output_path))
+
     def _on_scd_finished(self):
         self.scd_worker = None
         self.loading_label.setVisible(False)
         self._scan_pkl_files()
         self._update_button_states()
+
+        not_saved = list(self.scd_files_not_saved)
+        self.scd_files_not_saved = []
+        for pkl_path, output_path in not_saved:
+            if pkl_path not in self.scd_skipped_files and not os.path.exists(output_path):
+                self._show_scd_missing_file_dialog(pkl_path, output_path)
+
         self.success("scd-edition session complete.")
+
+    def _show_scd_missing_file_dialog(self, pkl_path, output_path):
+        """Show a dialog when scd-edition closed without saving the expected output file."""
+        while True:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("scd-edition: File Not Saved")
+            dialog.setMinimumWidth(560)
+
+            layout = QVBoxLayout(dialog)
+            layout.setSpacing(Spacing.MD)
+
+            title = QLabel("File Not Found in Expected Location")
+            title.setStyleSheet(
+                f"font-size: 15px; font-weight: bold; color: {Colors.TEXT_PRIMARY};"
+            )
+            layout.addWidget(title)
+
+            msg = QLabel(
+                f"scd-edition closed without saving the output file.\n\n"
+                f"Expected:\n  {output_path}\n\n"
+                f"Source:\n  {pkl_path}\n\n"
+                "What would you like to do?"
+            )
+            msg.setWordWrap(True)
+            msg.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+            layout.addWidget(msg)
+
+            btn_row = QHBoxLayout()
+            btn_restart = QPushButton("↺ Restart scd-edition")
+            btn_restart.setStyleSheet(Styles.button_primary())
+            btn_skip = QPushButton("⊘ Skip")
+            btn_skip.setStyleSheet(Styles.button_secondary())
+            btn_check = QPushButton("↻ Check Again")
+            btn_check.setStyleSheet(Styles.button_secondary())
+            btn_row.addWidget(btn_restart)
+            btn_row.addWidget(btn_skip)
+            btn_row.addWidget(btn_check)
+            layout.addLayout(btn_row)
+
+            result = {"action": None}
+            btn_restart.clicked.connect(lambda: (result.update({"action": "restart"}), dialog.accept()))
+            btn_skip.clicked.connect(lambda: (result.update({"action": "skip"}), dialog.accept()))
+            btn_check.clicked.connect(lambda: (result.update({"action": "check"}), dialog.accept()))
+
+            dialog.exec_()
+            action = result["action"]
+
+            if action == "restart":
+                try:
+                    proc = subprocess.Popen([
+                        "scd-edition",
+                        "--open", pkl_path,
+                        "--output", output_path,
+                        "--quit-after-save",
+                    ])
+                    proc.wait()
+                except Exception as e:
+                    logger.error("Failed to restart scd-edition: %s", e)
+                if os.path.exists(output_path):
+                    self._on_scd_file_done(output_path)
+                    break
+                # File still missing → loop back and show dialog again
+            elif action == "skip":
+                self._scd_skip_file(pkl_path)
+                break
+            elif action == "check":
+                if os.path.exists(output_path):
+                    self._on_scd_file_done(output_path)
+                    break
+                # Still missing → loop back
+
+    def _get_scd_skipped_path(self):
+        scd_output_dir = global_state.get_decomposition_scd_edition_path()
+        if not scd_output_dir:
+            return None
+        return os.path.join(scd_output_dir, ".scd_skipped_files.json")
+
+    def _load_scd_skipped_files(self):
+        path = self._get_scd_skipped_path()
+        if not path or not os.path.exists(path):
+            return {}
+        try:
+            import json
+            with open(path, "r") as f:
+                data = json.load(f)
+            logger.info("Loaded %d scd-edition skipped files from %s", len(data), path)
+            return data
+        except Exception as e:
+            logger.error("Failed to load scd skipped files: %s", e)
+            return {}
+
+    def _save_scd_skipped_files(self):
+        scd_output_dir = global_state.get_decomposition_scd_edition_path()
+        if not scd_output_dir:
+            return
+        os.makedirs(scd_output_dir, exist_ok=True)
+        path = self._get_scd_skipped_path()
+        try:
+            import json
+            with open(path, "w") as f:
+                json.dump(self.scd_skipped_files, f, indent=2)
+            logger.info("Saved %d scd-edition skipped files to %s", len(self.scd_skipped_files), path)
+        except Exception as e:
+            logger.error("Failed to save scd skipped files: %s", e)
+
+    def _scd_skip_file(self, pkl_path, reason=""):
+        self.scd_skipped_files[pkl_path] = reason
+        self._save_scd_skipped_files()
+        self._update_pkl_progress_ui()
 
     def _on_scd_error(self, error_msg):
         self.scd_worker = None
