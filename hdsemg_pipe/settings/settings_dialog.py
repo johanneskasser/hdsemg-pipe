@@ -9,6 +9,7 @@ from hdsemg_pipe.settings.tabs.openhdemg import init as init_openhdemg_widget
 from hdsemg_pipe.settings.tabs.line_noise import init as init_line_noise_widget
 from hdsemg_pipe.settings.tabs.log_setting import init as init_logging_widget
 from hdsemg_pipe.settings.tabs.muedit_settings import init as init_muedit_widget
+from hdsemg_pipe.settings.tabs.updates_settings import init as init_updates_widget
 from hdsemg_pipe._log.log_config import logger
 from PyQt5.QtCore import pyqtSignal, Qt
 
@@ -41,6 +42,7 @@ class SettingsDialog(QDialog):
         self.openhdemg_tab = QWidget()
         self.muedit_tab = QWidget()
         self.logging_tab = QWidget()
+        self.updates_tab = QWidget()
 
         # Add tabs to the tab widget
         self.tab_widget.addTab(self.channel_selection_tab, "Channel Selection App")
@@ -49,7 +51,7 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(self.openhdemg_tab, "openhdemg")
         self.tab_widget.addTab(self.muedit_tab, "MUEdit")
         self.tab_widget.addTab(self.logging_tab, "Logging")
-
+        self.tab_widget.addTab(self.updates_tab, "Updates")
 
         # Initialize content for each tab
         self.initChannelSelectionTab()
@@ -58,6 +60,7 @@ class SettingsDialog(QDialog):
         self.initOpenHDsEMGTab()
         self.initMUEditTab()
         self.initLoggingTab()
+        self.initUpdatesTab()
 
         # Add standard dialog buttons (OK and Cancel) with default styling
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -95,6 +98,11 @@ class SettingsDialog(QDialog):
         """Initialize the 'Logging' settings tab."""
         log_tab = init_logging_widget(self)
         self._wrapInScrollArea(self.logging_tab, log_tab)
+
+    def initUpdatesTab(self):
+        """Initialize the 'Updates' settings tab."""
+        updates_tab = init_updates_widget(self)
+        self._wrapInScrollArea(self.updates_tab, updates_tab)
 
     def _wrapInScrollArea(self, tab_widget, content_layout):
         """Wrap tab content in a scroll area to make it scrollable."""

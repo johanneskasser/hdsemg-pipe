@@ -1,13 +1,27 @@
 """
-Background update checker for scd-edition, openhdemg, and MUedit.
+Background update checker for external tools used by hdsemg-pipe.
 
-Runs in a QThread on startup and emits signals when newer versions are available.
-Results are shown as toast notifications or dialogs (for scd-edition upgrade choice).
+Architecture
+------------
+Each tracked tool is described by a ``ToolSpec`` dataclass registered in
+``REGISTERED_TOOLS``.  Adding a new tool = appending one ``ToolSpec`` to that
+list; no other code needs to change.
 
-Checks performed:
-  scd-edition  — latest commit on main branch vs. installed commit (from direct_url.json)
-  openhdemg    — latest version on PyPI vs. installed version
-  MUedit       — latest commit on devHP branch vs. last-seen commit (stored in cache)
+``UpdateCheckerThread`` iterates the registry, resolves any user-configured
+fork override from the app config, calls the appropriate check function, and
+emits ``updates_ready`` with the results.
+
+``_handle_results`` dispatches each result to the right UI response:
+  - scd-edition  → interactive dialog (pip-installable, choose main vs stable)
+  - openhdemg    → info toast
+  - MUedit       → info toast + mark commit as seen in cache
+
+To register a new tool
+----------------------
+1. Define its default GitHub coordinates (owner, repo, branch) or PyPI package.
+2. Append a ``ToolSpec`` to ``REGISTERED_TOOLS`` at the bottom of this file.
+3. If the tool needs custom UI on update (like scd-edition), add a branch in
+   ``_handle_results``.
 """
 
 from __future__ import annotations
@@ -16,39 +30,23 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import requests
 from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QApplication,
-)
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 
 from hdsemg_pipe._log.log_config import logger
-from hdsemg_pipe.ui_elements.theme import Colors, Styles, Fonts, Spacing, BorderRadius
+from hdsemg_pipe.ui_elements.theme import Colors, Styles, Fonts, Spacing
 
 # ---------------------------------------------------------------------------
-# Config
+# Constants
 # ---------------------------------------------------------------------------
 
 _TIMEOUT = 6  # seconds per HTTP request
-
-_SCD_EDITION_OWNER  = "AgneGris"
-_SCD_EDITION_REPO   = "scd-edition"
-_SCD_EDITION_BRANCH = "main"
-_SCD_EDITION_GIT_URL = f"git+https://github.com/{_SCD_EDITION_OWNER}/{_SCD_EDITION_REPO}.git"
-
-_MUEDIT_OWNER  = "haripen"
-_MUEDIT_REPO   = "MUedit"
-_MUEDIT_BRANCH = "devHP"
-_MUEDIT_URL    = f"https://github.com/{_MUEDIT_OWNER}/{_MUEDIT_REPO}/tree/{_MUEDIT_BRANCH}"
-
-_OPENHDEMG_PACKAGE = "openhdemg"
-_OPENHDEMG_PYPI_URL = f"https://pypi.org/pypi/{_OPENHDEMG_PACKAGE}/json"
-
 _CACHE_FILE = Path.home() / ".hdsemg_pipe" / "update_cache.json"
 
 
@@ -58,19 +56,55 @@ _CACHE_FILE = Path.home() / ".hdsemg_pipe" / "update_cache.json"
 
 @dataclass
 class ReleaseInfo:
-    """Describes one available update."""
-    package: str
-    installed: str
-    latest: str
-    url: str
-    latest_sha: Optional[str] = None          # full SHA for cache storage
-    has_stable_release: bool = False          # scd-edition: whether GH releases exist
-    latest_stable: Optional[str] = None      # scd-edition: latest release tag, if any
+    """One available update returned by a check function."""
+    tool_key: str              # matches ToolSpec.key
+    display_name: str
+    installed: str             # human-readable installed version/commit
+    latest: str                # human-readable latest version/commit
+    latest_sha: Optional[str]  # full SHA (commit-based tools), for cache
+    url: str                   # link to changelog / repo
+    # scd-edition specific
+    has_stable_release: bool = False
+    latest_stable: Optional[str] = None
     latest_stable_url: Optional[str] = None
 
 
+@dataclass
+class ToolSpec:
+    """
+    Describes how to check updates for one external tool.
+
+    Fields
+    ------
+    key             Unique ID used as config dict key and cache key prefix.
+    display_name    Shown in settings UI and notifications.
+    default_owner   GitHub owner of the canonical upstream repo.
+    default_repo    GitHub repo name of the canonical upstream repo.
+    default_branch  Branch to track (None → use PyPI instead).
+    pypi_package    If set, check PyPI for the installed version and latest
+                    release.  Used as the primary check when default_branch
+                    is None; used as a fallback display version otherwise.
+    allows_fork     Whether the settings UI shows a "use fork" section.
+    check_fn        Injected at construction time; accepts (fork_cfg: dict)
+                    and returns Optional[ReleaseInfo].  Leave None here —
+                    it is set automatically by ``_build_check_fn``.
+    """
+    key: str
+    display_name: str
+    default_owner: str
+    default_repo: str
+    default_branch: Optional[str]   # None = PyPI-only check
+    pypi_package: Optional[str] = None
+    allows_fork: bool = True
+    check_fn: Optional[Callable] = field(default=None, repr=False)
+
+    @property
+    def default_github_url(self) -> str:
+        return f"https://github.com/{self.default_owner}/{self.default_repo}"
+
+
 # ---------------------------------------------------------------------------
-# Cache helpers (for MUedit / commit-based packages)
+# Cache helpers
 # ---------------------------------------------------------------------------
 
 def _load_cache() -> dict:
@@ -94,33 +128,32 @@ def _save_cache(data: dict) -> None:
 # Installed-version helpers
 # ---------------------------------------------------------------------------
 
-def _installed_scd_commit() -> Optional[str]:
-    """Read the installed git commit of scd-edition from its dist-info."""
-    try:
-        import importlib.metadata as meta
-        dist = meta.distribution("scd-edition")
-        direct_url_text = dist.read_text("direct_url.json")
-        if direct_url_text:
-            info = json.loads(direct_url_text)
-            return info.get("vcs_info", {}).get("commit_id")
-    except Exception:
-        pass
-    return None
-
-
-def _installed_version(package: str) -> Optional[str]:
+def _installed_pkg_version(package: str) -> Optional[str]:
     try:
         return pkg_version(package)
     except Exception:
         return None
 
 
+def _installed_git_commit(package_dist_name: str) -> Optional[str]:
+    """Read the installed git commit from a package's dist-info/direct_url.json."""
+    try:
+        import importlib.metadata as meta
+        dist = meta.distribution(package_dist_name)
+        text = dist.read_text("direct_url.json")
+        if text:
+            return json.loads(text).get("vcs_info", {}).get("commit_id")
+    except Exception:
+        pass
+    return None
+
+
 # ---------------------------------------------------------------------------
-# Remote-version helpers
+# Remote-data helpers
 # ---------------------------------------------------------------------------
 
 def _github_latest_commit(owner: str, repo: str, branch: str) -> Optional[dict]:
-    """Returns {'sha': ..., 'message': ..., 'date': ...} or None."""
+    """Returns {'sha', 'sha_short', 'message', 'date'} or None."""
     url = f"https://api.github.com/repos/{owner}/{repo}/commits/{branch}"
     try:
         r = requests.get(url, timeout=_TIMEOUT,
@@ -128,29 +161,29 @@ def _github_latest_commit(owner: str, repo: str, branch: str) -> Optional[dict]:
         r.raise_for_status()
         data = r.json()
         return {
-            "sha": data["sha"],
+            "sha":       data["sha"],
             "sha_short": data["sha"][:7],
-            "message": data["commit"]["message"].splitlines()[0],
-            "date": data["commit"]["committer"]["date"][:10],
+            "message":   data["commit"]["message"].splitlines()[0],
+            "date":      data["commit"]["committer"]["date"][:10],
         }
     except Exception as exc:
-        logger.debug(f"[update_checker] GitHub commit check failed ({owner}/{repo}): {exc}")
+        logger.debug(f"[update_checker] GitHub commit check failed ({owner}/{repo}@{branch}): {exc}")
         return None
 
 
 def _github_latest_release(owner: str, repo: str) -> Optional[dict]:
-    """Returns {'tag': ..., 'url': ..., 'date': ...} or None."""
+    """Returns {'tag', 'url', 'date'} or None (including when no releases exist)."""
     url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
     try:
         r = requests.get(url, timeout=_TIMEOUT,
                          headers={"Accept": "application/vnd.github+json"})
         if r.status_code == 404:
-            return None  # no releases
+            return None
         r.raise_for_status()
         data = r.json()
         return {
-            "tag": data["tag_name"],
-            "url": data["html_url"],
+            "tag":  data["tag_name"],
+            "url":  data["html_url"],
             "date": data.get("published_at", "")[:10],
         }
     except Exception as exc:
@@ -168,73 +201,6 @@ def _pypi_latest_version(package: str) -> Optional[str]:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Per-package checks
-# ---------------------------------------------------------------------------
-
-def _check_scd_edition() -> Optional[ReleaseInfo]:
-    installed_commit = _installed_scd_commit()
-    latest = _github_latest_commit(_SCD_EDITION_OWNER, _SCD_EDITION_REPO, _SCD_EDITION_BRANCH)
-    if not latest:
-        return None
-
-    latest_release = _github_latest_release(_SCD_EDITION_OWNER, _SCD_EDITION_REPO)
-
-    installed_display = installed_commit[:7] if installed_commit else "unknown"
-    latest_display = f"{latest['sha_short']} ({latest['date']})"
-
-    if installed_commit and installed_commit == latest["sha"]:
-        logger.debug("[update_checker] scd-edition is up to date")
-        return None
-
-    return ReleaseInfo(
-        package="scd-edition",
-        installed=installed_display,
-        latest=latest_display,
-        url=f"https://github.com/{_SCD_EDITION_OWNER}/{_SCD_EDITION_REPO}/commits/{_SCD_EDITION_BRANCH}",
-        has_stable_release=latest_release is not None,
-        latest_stable=latest_release["tag"] if latest_release else None,
-        latest_stable_url=latest_release["url"] if latest_release else None,
-    )
-
-
-def _check_openhdemg() -> Optional[ReleaseInfo]:
-    installed = _installed_version(_OPENHDEMG_PACKAGE)
-    if not installed:
-        return None
-    latest = _pypi_latest_version(_OPENHDEMG_PACKAGE)
-    if not latest:
-        return None
-    if _version_tuple(latest) <= _version_tuple(installed):
-        logger.debug("[update_checker] openhdemg is up to date")
-        return None
-    return ReleaseInfo(
-        package="openhdemg",
-        installed=installed,
-        latest=latest,
-        url=f"https://pypi.org/project/{_OPENHDEMG_PACKAGE}/{latest}/",
-    )
-
-
-def _check_muedit(cache: dict) -> Optional[ReleaseInfo]:
-    latest = _github_latest_commit(_MUEDIT_OWNER, _MUEDIT_REPO, _MUEDIT_BRANCH)
-    if not latest:
-        return None
-
-    seen_sha = cache.get("muedit_seen_commit")
-    if seen_sha and seen_sha == latest["sha"]:
-        logger.debug("[update_checker] MUedit is up to date")
-        return None
-
-    return ReleaseInfo(
-        package="MUedit",
-        installed=seen_sha[:7] if seen_sha else "unknown",
-        latest=f"{latest['sha_short']} ({latest['date']}: {latest['message'][:60]})",
-        url=_MUEDIT_URL,
-        latest_sha=latest["sha"],
-    )
-
-
 def _version_tuple(v: str) -> tuple:
     try:
         return tuple(int(x) for x in re.findall(r"\d+", v))
@@ -242,36 +208,222 @@ def _version_tuple(v: str) -> tuple:
         return (0,)
 
 
+def _parse_github_url(url: str) -> tuple[str, str] | None:
+    """Extract (owner, repo) from a GitHub URL. Returns None on failure."""
+    m = re.search(r"github\.com/([^/]+)/([^/\s]+?)(?:\.git)?$", url.strip().rstrip("/"))
+    if m:
+        return m.group(1), m.group(2)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Generic check builders — injected into ToolSpec.check_fn
+# ---------------------------------------------------------------------------
+
+def _make_github_commit_check(spec: ToolSpec) -> Callable:
+    """
+    Returns a check function for a GitHub-commit-tracked tool.
+    The last seen commit is stored in the cache under key
+    ``{spec.key}_seen_commit``.
+    """
+    def _check(fork_cfg: dict) -> Optional[ReleaseInfo]:
+        cache = _load_cache()
+
+        # Resolve coordinates: fork override > defaults
+        owner, repo = spec.default_owner, spec.default_repo
+        branch = spec.default_branch
+        if fork_cfg.get("github_url") and fork_cfg.get("branch"):
+            parsed = _parse_github_url(fork_cfg["github_url"])
+            if parsed:
+                owner, repo = parsed
+                branch = fork_cfg["branch"]
+
+        latest = _github_latest_commit(owner, repo, branch)
+        if not latest:
+            return None
+
+        seen_sha = cache.get(f"{spec.key}_seen_commit")
+        if seen_sha and seen_sha == latest["sha"]:
+            return None
+
+        installed_display = seen_sha[:7] if seen_sha else "unknown"
+        latest_display = f"{latest['sha_short']} ({latest['date']}: {latest['message'][:60]})"
+        repo_url = f"https://github.com/{owner}/{repo}/tree/{branch}"
+
+        return ReleaseInfo(
+            tool_key=spec.key,
+            display_name=spec.display_name,
+            installed=installed_display,
+            latest=latest_display,
+            latest_sha=latest["sha"],
+            url=repo_url,
+        )
+
+    return _check
+
+
+def _make_pypi_check(spec: ToolSpec) -> Callable:
+    """Returns a check function for a PyPI-versioned tool."""
+    def _check(fork_cfg: dict) -> Optional[ReleaseInfo]:
+        # If user configured a GitHub fork, switch to commit-based check
+        if fork_cfg.get("github_url") and fork_cfg.get("branch"):
+            commit_check = _make_github_commit_check(spec)
+            return commit_check(fork_cfg)
+
+        installed = _installed_pkg_version(spec.pypi_package)
+        if not installed:
+            return None
+        latest = _pypi_latest_version(spec.pypi_package)
+        if not latest:
+            return None
+        if _version_tuple(latest) <= _version_tuple(installed):
+            return None
+
+        return ReleaseInfo(
+            tool_key=spec.key,
+            display_name=spec.display_name,
+            installed=installed,
+            latest=latest,
+            latest_sha=None,
+            url=f"https://pypi.org/project/{spec.pypi_package}/{latest}/",
+        )
+
+    return _check
+
+
+def _make_scd_edition_check(spec: ToolSpec) -> Callable:
+    """
+    scd-edition specific check: compares installed git commit,
+    also fetches latest stable release (if any) for the upgrade dialog.
+    """
+    def _check(fork_cfg: dict) -> Optional[ReleaseInfo]:
+        owner, repo = spec.default_owner, spec.default_repo
+        branch = spec.default_branch
+        if fork_cfg.get("github_url") and fork_cfg.get("branch"):
+            parsed = _parse_github_url(fork_cfg["github_url"])
+            if parsed:
+                owner, repo = parsed
+                branch = fork_cfg["branch"]
+
+        installed_commit = _installed_git_commit("scd-edition")
+        latest = _github_latest_commit(owner, repo, branch)
+        if not latest:
+            return None
+
+        if installed_commit and installed_commit == latest["sha"]:
+            return None
+
+        latest_release = _github_latest_release(owner, repo)
+        installed_display = installed_commit[:7] if installed_commit else "unknown"
+        latest_display = f"{latest['sha_short']} ({latest['date']})"
+
+        return ReleaseInfo(
+            tool_key=spec.key,
+            display_name=spec.display_name,
+            installed=installed_display,
+            latest=latest_display,
+            latest_sha=latest["sha"],
+            url=f"https://github.com/{owner}/{repo}/commits/{branch}",
+            has_stable_release=latest_release is not None,
+            latest_stable=latest_release["tag"] if latest_release else None,
+            latest_stable_url=latest_release["url"] if latest_release else None,
+        )
+
+    return _check
+
+
+# ---------------------------------------------------------------------------
+# Tool registry — add new tools here
+# ---------------------------------------------------------------------------
+
+REGISTERED_TOOLS: list[ToolSpec] = [
+    ToolSpec(
+        key="scd_edition",
+        display_name="scd-edition",
+        default_owner="AgneGris",
+        default_repo="scd-edition",
+        default_branch="main",
+        pypi_package=None,
+        allows_fork=True,
+    ),
+    ToolSpec(
+        key="openhdemg",
+        display_name="openhdemg",
+        default_owner="GiacomoValliPhD",
+        default_repo="openhdemg",
+        default_branch=None,       # PyPI by default; GitHub when fork is set
+        pypi_package="openhdemg",
+        allows_fork=True,
+    ),
+    ToolSpec(
+        key="muedit",
+        display_name="MUedit",
+        default_owner="simonavrillon",
+        default_repo="MUedit",
+        default_branch="main",
+        pypi_package=None,
+        allows_fork=True,
+    ),
+]
+
+# Inject check functions
+for _spec in REGISTERED_TOOLS:
+    if _spec.key == "scd_edition":
+        _spec.check_fn = _make_scd_edition_check(_spec)
+    elif _spec.default_branch is None and _spec.pypi_package:
+        _spec.check_fn = _make_pypi_check(_spec)
+    else:
+        _spec.check_fn = _make_github_commit_check(_spec)
+
+
+def get_tool_spec(key: str) -> Optional[ToolSpec]:
+    return next((s for s in REGISTERED_TOOLS if s.key == key), None)
+
+
+# ---------------------------------------------------------------------------
+# Fork config accessor
+# ---------------------------------------------------------------------------
+
+def get_fork_config(tool_key: str) -> dict:
+    """Return the user-configured fork dict for a tool, or {}."""
+    try:
+        from hdsemg_pipe.config.config_manager import config
+        from hdsemg_pipe.config.config_enums import Settings
+        all_forks = config.get(Settings.UPDATE_FORK_CONFIG) or {}
+        return all_forks.get(tool_key, {})
+    except Exception:
+        return {}
+
+
+def save_fork_config(tool_key: str, github_url: str, branch: str) -> None:
+    """Persist fork config for one tool. Pass empty strings to reset to default."""
+    from hdsemg_pipe.config.config_manager import config
+    from hdsemg_pipe.config.config_enums import Settings
+    all_forks = dict(config.get(Settings.UPDATE_FORK_CONFIG) or {})
+    if github_url.strip() and branch.strip():
+        all_forks[tool_key] = {"github_url": github_url.strip(), "branch": branch.strip()}
+    else:
+        all_forks.pop(tool_key, None)
+    config.set(Settings.UPDATE_FORK_CONFIG, all_forks)
+
+
 # ---------------------------------------------------------------------------
 # QThread worker
 # ---------------------------------------------------------------------------
 
 class UpdateCheckerThread(QThread):
-    """Checks all packages in background and emits results."""
-
     updates_ready = pyqtSignal(list)  # list[ReleaseInfo]
 
     def run(self):
-        cache = _load_cache()
         results = []
-
-        for check_fn, name in [
-            (_check_scd_edition, "scd-edition"),
-            (_check_openhdemg,   "openhdemg"),
-        ]:
+        for spec in REGISTERED_TOOLS:
             try:
-                info = check_fn()
+                fork_cfg = get_fork_config(spec.key)
+                info = spec.check_fn(fork_cfg)
                 if info:
                     results.append(info)
             except Exception as exc:
-                logger.warning(f"[update_checker] {name} check error: {exc}")
-
-        try:
-            muedit_info = _check_muedit(cache)
-            if muedit_info:
-                results.append(muedit_info)
-        except Exception as exc:
-            logger.warning(f"[update_checker] MUedit check error: {exc}")
+                logger.warning(f"[update_checker] {spec.display_name} check error: {exc}")
 
         if results:
             self.updates_ready.emit(results)
@@ -282,12 +434,6 @@ class UpdateCheckerThread(QThread):
 # ---------------------------------------------------------------------------
 
 class ScdEditionUpdateDialog(QDialog):
-    """
-    Dialog shown when scd-edition has a newer main-branch commit.
-    Lets the user choose between installing latest main or keeping the
-    current install (or the latest stable release, if one exists).
-    """
-
     def __init__(self, info: ReleaseInfo, parent=None):
         super().__init__(parent)
         self.info = info
@@ -301,20 +447,25 @@ class ScdEditionUpdateDialog(QDialog):
         layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
 
         title = QLabel("scd-edition update available")
-        title.setStyleSheet(f"font-size: {Fonts.SIZE_LG}; font-weight: bold; color: {Colors.TEXT_PRIMARY};")
+        title.setStyleSheet(
+            f"font-size: {Fonts.SIZE_LG}; font-weight: bold; color: {Colors.TEXT_PRIMARY};"
+        )
         layout.addWidget(title)
 
+        stable_line = (
+            f"<br><b>Latest stable release:</b> {self.info.latest_stable}"
+            if self.info.has_stable_release
+            else "<br><i>No stable release yet — only main branch available.</i>"
+        )
         body = QLabel(
             f"<b>Installed:</b> {self.info.installed}<br>"
             f"<b>Latest main:</b> {self.info.latest}"
-            + (
-                f"<br><b>Latest stable release:</b> {self.info.latest_stable}"
-                if self.info.has_stable_release else
-                "<br><i>No stable release yet — only main branch available.</i>"
-            )
+            + stable_line
         )
         body.setWordWrap(True)
-        body.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+        body.setStyleSheet(
+            f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};"
+        )
         layout.addWidget(body)
 
         btn_row = QHBoxLayout()
@@ -339,12 +490,28 @@ class ScdEditionUpdateDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _install_main(self):
-        self._run_install(f"git+https://github.com/{_SCD_EDITION_OWNER}/{_SCD_EDITION_REPO}.git")
+        spec = get_tool_spec("scd_edition")
+        fork_cfg = get_fork_config("scd_edition")
+        if fork_cfg.get("github_url") and fork_cfg.get("branch"):
+            pip_spec = f"git+{fork_cfg['github_url'].rstrip('/')}.git@{fork_cfg['branch']}"
+        else:
+            pip_spec = (
+                f"git+https://github.com/{spec.default_owner}/{spec.default_repo}.git"
+                f"@{spec.default_branch}"
+            )
+        self._run_install(pip_spec)
 
     def _install_stable(self):
-        tag = self.info.latest_stable
+        spec = get_tool_spec("scd_edition")
+        fork_cfg = get_fork_config("scd_edition")
+        owner = spec.default_owner
+        repo = spec.default_repo
+        if fork_cfg.get("github_url"):
+            parsed = _parse_github_url(fork_cfg["github_url"])
+            if parsed:
+                owner, repo = parsed
         self._run_install(
-            f"git+https://github.com/{_SCD_EDITION_OWNER}/{_SCD_EDITION_REPO}.git@{tag}"
+            f"git+https://github.com/{owner}/{repo}.git@{self.info.latest_stable}"
         )
 
     def _run_install(self, pip_spec: str):
@@ -370,15 +537,54 @@ class ScdEditionUpdateDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# Result dispatcher
+# ---------------------------------------------------------------------------
+
+def _handle_results(results: list[ReleaseInfo], parent_window) -> None:
+    from hdsemg_pipe.ui_elements.toast import toast_manager
+    from PyQt5.QtCore import QTimer
+
+    cache = _load_cache()
+    delay_ms = 1500
+
+    for info in results:
+        if info.tool_key == "scd_edition":
+            QTimer.singleShot(
+                delay_ms,
+                lambda i=info: ScdEditionUpdateDialog(i, parent_window).exec_(),
+            )
+        elif info.latest_sha:
+            # Commit-based tool (MUedit or any future GitHub-commit tool)
+            toast_manager.show_toast(
+                f"{info.display_name} update available — {info.latest}\n"
+                f"Visit {info.url} to update.",
+                toast_type="info",
+                duration=12000,
+            )
+            cache[f"{info.tool_key}_seen_commit"] = info.latest_sha
+            _save_cache(cache)
+        else:
+            # Version-based tool (openhdemg / PyPI)
+            toast_manager.show_toast(
+                f"{info.display_name} {info.latest} available "
+                f"(installed: {info.installed})",
+                toast_type="info",
+                duration=10000,
+            )
+
+        delay_ms += 400
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
 def start_update_check(parent_window) -> UpdateCheckerThread:
     """
-    Start the background update check.  Attach the returned thread object to
-    a long-lived parent so it is not garbage-collected.
+    Start the background update check.  Attach the returned thread to a
+    long-lived parent so it is not garbage-collected before it finishes.
 
-    Usage (in WizardMainWindow.__init__ or after showMaximized):
+    Usage (after window.showMaximized()):
         self._update_thread = start_update_check(self)
     """
     thread = UpdateCheckerThread(parent=parent_window)
@@ -387,40 +593,3 @@ def start_update_check(parent_window) -> UpdateCheckerThread:
     )
     thread.start()
     return thread
-
-
-def _handle_results(results: list[ReleaseInfo], parent_window) -> None:
-    from hdsemg_pipe.ui_elements.toast import toast_manager
-    from PyQt5.QtCore import QTimer
-
-    cache = _load_cache()
-    delay_ms = 1500  # stagger toasts so they don't all appear at once
-
-    for info in results:
-        if info.package == "scd-edition":
-            # Show interactive dialog after a short delay
-            QTimer.singleShot(
-                delay_ms,
-                lambda i=info: ScdEditionUpdateDialog(i, parent_window).exec_(),
-            )
-            delay_ms += 400
-        elif info.package == "MUedit":
-            toast_manager.show_toast(
-                f"MUedit update available ({info.latest}) — "
-                f"visit GitHub to download the latest devHP branch.",
-                toast_type="info",
-                duration=12000,
-            )
-            # Remember that we've shown this commit so we don't nag every launch
-            if info.latest_sha:
-                cache["muedit_seen_commit"] = info.latest_sha
-                _save_cache(cache)
-            delay_ms += 400
-        else:
-            toast_manager.show_toast(
-                f"{info.package} {info.latest} available "
-                f"(installed: {info.installed})",
-                toast_type="info",
-                duration=10000,
-            )
-            delay_ms += 400

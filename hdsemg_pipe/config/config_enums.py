@@ -14,6 +14,7 @@ class Settings(Enum):
     MUEDIT_LAUNCH_METHOD = "MUEDIT_LAUNCH_METHOD"  # Method to launch MUEdit
     TRACKING_ERROR_METRIC = "TRACKING_ERROR_METRIC"  # Selected metric name, e.g. "NRMSE"
     TRACKING_ERROR_THRESHOLDS = "TRACKING_ERROR_THRESHOLDS"  # Dict[metric → Dict[tier → float]]
+    UPDATE_FORK_CONFIG = "UPDATE_FORK_CONFIG"  # Dict[tool_key → {"github_url": str, "branch": str}]
 
 
 class LineNoiseRegion(Enum):
