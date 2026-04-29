@@ -396,6 +396,10 @@ def main():
     window.showMaximized()
     app.setStyleSheet(get_app_stylesheet())
 
+    if isinstance(window, WizardMainWindow):
+        from hdsemg_pipe.updates.update_checker import start_update_check
+        window._update_thread = start_update_check(window)
+
     sys.exit(app.exec_())
 
 
