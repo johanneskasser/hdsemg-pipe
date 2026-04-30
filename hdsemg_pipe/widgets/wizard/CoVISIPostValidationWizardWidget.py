@@ -693,6 +693,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
         self.edited_pkl_files = []
         if source_dir:
+            logger.info(f"Scanning for edited PKL files in {source_dir}...")
             self.edited_pkl_files = [
                 os.path.join(source_dir, f)
                 for f in os.listdir(source_dir)
