@@ -1014,6 +1014,14 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.error(error_msg)
         self.status_label.setText(f"Error: {error_msg}")
 
+    def _get_report_path(self):
+        """Return the correct folder for the post-validation report depending on cleaning tool."""
+        if self._use_pkl:
+            folder = global_state.get_decomposition_scd_edition_path()
+        else:
+            folder = global_state.get_decomposition_path()
+        return os.path.join(folder, "covisi_post_validation_report.json")
+
     def accept_and_continue(self):
         """Accept all MUs and proceed to final results."""
         # Save validation report
@@ -1023,9 +1031,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         }
         report["action"] = "accepted_all"
 
-        report_path = os.path.join(
-            global_state.get_decomposition_path(), "covisi_post_validation_report.json"
-        )
+        report_path = self._get_report_path()
         save_covisi_report(report, report_path, report_type="post_validation")
 
         self.info("All MUs accepted. Proceeding to final results.")
@@ -1056,9 +1062,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                             {"file": filename, "mu_index": detail["mu_index"]}
                         )
 
-        report_path = os.path.join(
-            global_state.get_decomposition_path(), "covisi_post_validation_report.json"
-        )
+        report_path = self._get_report_path()
         save_covisi_report(report, report_path, report_type="post_validation")
 
         self.info(
@@ -1282,9 +1286,14 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
     def is_completed(self):
         """Check if this step is completed."""
-        report_path = os.path.join(
-            global_state.get_decomposition_path(), "covisi_post_validation_report.json"
-        )
+        use_pkl = (read_manual_cleaning_tool() == "scd_edition")
+        if use_pkl:
+            folder = global_state.get_decomposition_scd_edition_path()
+        else:
+            folder = global_state.get_decomposition_path()
+        if not folder:
+            return False
+        report_path = os.path.join(folder, "covisi_post_validation_report.json")
         return os.path.exists(report_path)
 
     def init_file_checking(self):
