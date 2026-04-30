@@ -217,6 +217,45 @@ def find_mat_for_pkl(pkl_path: Path, mat_dirs: list[Path]) -> tuple[Path | None,
     return None, None
 
 
+def load_ref_signal_from_mat(
+    mat_file: Path,
+    grid_key: str | None = None,
+    start_sample: int = 0,
+    n_samples: int | None = None,
+) -> tuple[np.ndarray, int]:
+    """
+    Load the "Performed Path" (measured force) reference signal from a .mat file.
+
+    Uses the sidecar channel-selection JSON to find the correct channel index.
+    Falls back to the OTBio Muovi/Syncstation default (channel 70).
+
+    Returns
+    -------
+    ref_signal : np.ndarray, shape (n_samples,)
+    ref_chan_idx : int  — absolute channel index used
+    """
+    mat = sio.loadmat(mat_file)
+    ref_measured_idx = 70  # OTBio default: "Performed Path"
+
+    json_data = load_channel_selection_json(mat_file)
+    if json_data and grid_key:
+        grids = get_grids_from_json(json_data)
+        matched = next((g for g in grids if g["grid_key"] == grid_key), None)
+        if matched:
+            for ref_sig in matched.get("reference_signals", []):
+                name = ref_sig.get("name", "").lower()
+                idx = ref_sig.get("ref_index")
+                if idx is None:
+                    continue
+                if "performed" in name or "measured" in name:
+                    ref_measured_idx = int(idx)
+
+    raw = mat["Data"]  # (time, all_channels)
+    end_sample = (start_sample + n_samples) if n_samples else raw.shape[0]
+    ref = raw[start_sample:end_sample, ref_measured_idx].astype(np.float64)
+    return ref, ref_measured_idx
+
+
 def load_emg_from_mat(
     mat_file: Path,
     grid_key: str | None = None,
@@ -274,6 +313,8 @@ def convert(
     extension_factor: int | None = None,
     peel_off_window_size_ms: int = 50,
     notch_params: list | None = None,
+    ref_signal: np.ndarray | None = None,
+    ref_chan_idx: int | None = None,
 ) -> dict:
     """
     Convert old SCD result dict to scd-edition format.
@@ -397,7 +438,6 @@ def convert(
         "dewhitened_filters": [None],
         "emg_mask": [None],
         "electrodes": [None],
-        "aux_channels": [{}],
 
         # Legacy quality metrics preserved for reference
         "_legacy_silhouettes": [to_numpy(s).item() for s in old_data.get("silhouettes", [])],
@@ -419,6 +459,18 @@ def convert(
         w_mat_np = to_numpy(old_data["w_mat"])
         if w_mat_np.size > 0:
             new_data["w_mat"] = [w_mat_np]
+
+    # Store reference signal ("Performed Path") in aux_channels so it survives
+    # the PKL round-trip and can be recovered without a sibling JSON.
+    aux_entries = []
+    if ref_signal is not None:
+        aux_entries.append({
+            "data": ref_signal.astype(np.float64),
+            "meta": {"name": "Performed Path", "type": "ref_signal"},
+            "start_chan": ref_chan_idx if ref_chan_idx is not None else -1,
+            "end_chan": (ref_chan_idx + 1) if ref_chan_idx is not None else -1,
+        })
+    new_data["aux_channels"] = aux_entries
 
     return new_data
 
@@ -444,6 +496,8 @@ def convert_file(
     n_pkl_samples = len(old_data.get("source", [{}])[0]) if old_data.get("source") else None
 
     emg = n_ch = ch_idx = None
+    ref_sig = None
+    ref_chan_idx = None
 
     # Try to resolve mat file
     resolved_mat = mat_file
@@ -476,6 +530,14 @@ def convert_file(
             )
             print(f"  EMG shape : {emg.shape}  ({n_ch} channels, "
                   f"start_sample={plateau_start})")
+
+            ref_sig, ref_chan_idx = load_ref_signal_from_mat(
+                resolved_mat,
+                grid_key=resolved_grid,
+                start_sample=plateau_start,
+                n_samples=n_pkl_samples,
+            )
+            print(f"  Ref signal: channel {ref_chan_idx}, {ref_sig.shape[0]} samples")
         except Exception as e:
             print(f"  EMG load  : FAILED ({e}) — converting without data")
 
@@ -488,6 +550,8 @@ def convert_file(
         time_differentiate=time_differentiate,
         extension_factor=extension_factor,
         peel_off_window_size_ms=peel_off_window_size_ms,
+        ref_signal=ref_sig,
+        ref_chan_idx=ref_chan_idx,
     )
 
     n_mu = new_data["_n_motor_units"]

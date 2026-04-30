@@ -10,6 +10,7 @@ from hdsemg_pipe.settings.tabs.line_noise import init as init_line_noise_widget
 from hdsemg_pipe.settings.tabs.log_setting import init as init_logging_widget
 from hdsemg_pipe.settings.tabs.muedit_settings import init as init_muedit_widget
 from hdsemg_pipe.settings.tabs.updates_settings import init as init_updates_widget
+from hdsemg_pipe.settings.tabs.mu_metrics import init as init_mu_metrics_widget
 from hdsemg_pipe._log.log_config import logger
 from PyQt5.QtCore import pyqtSignal, Qt
 
@@ -41,6 +42,7 @@ class SettingsDialog(QDialog):
         self.line_noise_tab = QWidget()
         self.openhdemg_tab = QWidget()
         self.muedit_tab = QWidget()
+        self.mu_metrics_tab = QWidget()
         self.logging_tab = QWidget()
         self.updates_tab = QWidget()
 
@@ -50,6 +52,7 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(self.line_noise_tab, "Line Noise Removal")
         self.tab_widget.addTab(self.openhdemg_tab, "openhdemg")
         self.tab_widget.addTab(self.muedit_tab, "MUEdit")
+        self.tab_widget.addTab(self.mu_metrics_tab, "MU Metrics")
         self.tab_widget.addTab(self.logging_tab, "Logging")
         self.tab_widget.addTab(self.updates_tab, "Updates")
 
@@ -59,6 +62,7 @@ class SettingsDialog(QDialog):
         self.initLineNoiseTab()
         self.initOpenHDsEMGTab()
         self.initMUEditTab()
+        self.initMuMetricsTab()
         self.initLoggingTab()
         self.initUpdatesTab()
 
@@ -93,6 +97,11 @@ class SettingsDialog(QDialog):
         """Initialize the 'MUEdit' settings tab."""
         muedit_tab = init_muedit_widget(self)
         self._wrapInScrollArea(self.muedit_tab, muedit_tab)
+
+    def initMuMetricsTab(self):
+        """Initialize the 'MU Metrics' settings tab."""
+        mu_metrics_tab = init_mu_metrics_widget(self)
+        self._wrapInScrollArea(self.mu_metrics_tab, mu_metrics_tab)
 
     def initLoggingTab(self):
         """Initialize the 'Logging' settings tab."""

@@ -193,6 +193,13 @@ def merge_group(entries: list) -> dict:
             chans_per_electrode.append(int(n_ch))
             channel_indices.append(None)
 
+    # aux_channels are recording-level (shared across all grids) — take from
+    # the first port that has a non-empty list.
+    aux_channels = next(
+        (data.get("aux_channels") for _, data in entries if data.get("aux_channels")),
+        [],
+    )
+
     merged = {
         "ports":                ports,
         "discharge_times":      discharge_times,
@@ -204,6 +211,7 @@ def merge_group(entries: list) -> dict:
         "emg_mask":             emg_masks,
         "chans_per_electrode":  chans_per_electrode,
         "channel_indices":      channel_indices,
+        "aux_channels":         aux_channels,
         "version":              1.0,
     }
 

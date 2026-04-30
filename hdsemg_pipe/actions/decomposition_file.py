@@ -45,6 +45,18 @@ try:
 except ImportError:
     _H5PY_AVAILABLE = False
 
+try:
+    from motor_unit_toolbox.props import (
+        get_coefficient_of_variation,
+        get_pulse_to_noise_ratio,
+        get_silhouette_measure,
+    )
+
+    _MU_TOOLBOX_AVAILABLE = True
+except ImportError:
+    _MU_TOOLBOX_AVAILABLE = False
+    logger.warning("motor_unit_toolbox not available -- SIL/PNR/CoVISI will return NaN")
+
 # -------------------------------------------------------------------------
 # MAT subtype constants
 # -------------------------------------------------------------------------
@@ -96,6 +108,122 @@ def _cov_isi(timestamps: np.ndarray) -> float:
     if mean_isi == 0:
         return float("nan")
     return float(np.std(isi) / mean_isi * 100.0)
+
+
+def _compute_mu_metrics_toolbox(
+    ipts_mat: np.ndarray,
+    binary_mat: np.ndarray,
+    fsamp: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute SIL, PNR, CoVISI for all MUs via motor_unit_toolbox (batch matrix call).
+
+    Returns (sil, pnr, covisi_pct) arrays of shape (n_mus,).
+    All-NaN when the toolbox is unavailable or matrices are empty.
+    """
+    n_mus = int(ipts_mat.shape[1]) if ipts_mat.ndim == 2 else 1
+    nan_arr = np.full(n_mus, float("nan"))
+
+    if not _MU_TOOLBOX_AVAILABLE or ipts_mat.size == 0 or binary_mat.size == 0:
+        return nan_arr.copy(), nan_arr.copy(), nan_arr.copy()
+
+    timestamps = np.arange(ipts_mat.shape[0]) / fsamp
+    try:
+        sil = get_silhouette_measure(binary_mat, ipts_mat)
+    except Exception:
+        sil = nan_arr.copy()
+    try:
+        pnr = get_pulse_to_noise_ratio(binary_mat, ipts_mat)
+    except Exception:
+        pnr = nan_arr.copy()
+    try:
+        covisi = get_coefficient_of_variation(binary_mat, timestamps)
+    except Exception:
+        covisi = nan_arr.copy()
+    return sil, pnr, covisi
+
+
+def _compute_mu_metrics_openhdemg(
+    ipts_mat: np.ndarray,
+    mupulses: list,
+    fsamp: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute SIL, PNR, CoVISI per-MU using openhdemg.
+
+    Returns (sil, pnr, covisi_pct) arrays of shape (n_mus,).
+    All-NaN when openhdemg is unavailable.
+    """
+    n_mus = int(ipts_mat.shape[1]) if ipts_mat.ndim == 2 else 1
+    sil_arr = np.full(n_mus, float("nan"))
+    pnr_arr = np.full(n_mus, float("nan"))
+    covisi_arr = np.full(n_mus, float("nan"))
+
+    if not _OPENHDEMG_AVAILABLE or ipts_mat.size == 0:
+        return sil_arr, pnr_arr, covisi_arr
+
+    for mu in range(n_mus):
+        pulses = np.asarray(
+            mupulses[mu] if mu < len(mupulses) else [], dtype=np.int64
+        ).flatten()
+        try:
+            ipts_col = ipts_mat[:, mu]
+        except Exception:
+            continue
+        try:
+            sil_arr[mu] = float(emg.compute_sil(ipts_col, pulses))
+        except Exception:
+            pass
+        try:
+            if len(pulses) > 0:
+                pnr_arr[mu] = float(emg.compute_pnr(ipts_col, pulses, fsamp))
+        except Exception:
+            pass
+        covisi_arr[mu] = _cov_isi(pulses)
+
+    return sil_arr, pnr_arr, covisi_arr
+
+
+def _compute_mu_metrics(
+    ipts_mat: np.ndarray,
+    binary_mat: np.ndarray,
+    mupulses: list,
+    fsamp: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Dispatch SIL/PNR/CoVISI computation to the backend selected in Settings.
+
+    Backend is read from Settings.MU_METRIC_BACKEND each call so that changes
+    in the settings dialog take effect immediately without restarting.
+
+    Returns (sil, pnr, covisi_pct) arrays of shape (n_mus,).
+    """
+    from hdsemg_pipe.config.config_enums import MuMetricBackend, Settings
+    from hdsemg_pipe.config.config_manager import config
+
+    backend = config.get(
+        Settings.MU_METRIC_BACKEND, MuMetricBackend.MOTOR_UNIT_TOOLBOX.value
+    )
+    if backend == MuMetricBackend.OPENHDEMG.value:
+        return _compute_mu_metrics_openhdemg(ipts_mat, mupulses, fsamp)
+    return _compute_mu_metrics_toolbox(ipts_mat, binary_mat, fsamp)
+
+
+def _load_ref_signal_from_aux_channels(pkl: dict) -> pd.DataFrame:
+    """Extract REF_SIGNAL from aux_channels embedded in a PKL dict."""
+    for entry in pkl.get("aux_channels", []):
+        if not isinstance(entry, dict):
+            continue
+        meta = entry.get("meta", {})
+        if meta.get("type") == "ref_signal":
+            data = entry.get("data")
+            if data is not None:
+                arr = np.asarray(data, dtype=np.float64).flatten()
+                return pd.DataFrame(arr.reshape(-1, 1))
+        name = str(meta.get("name", "")).lower()
+        if "performed" in name or "ref" in name:
+            data = entry.get("data")
+            if data is not None:
+                arr = np.asarray(data, dtype=np.float64).flatten()
+                return pd.DataFrame(arr.reshape(-1, 1))
+    return pd.DataFrame()
 
 
 def _load_ref_signal_from_sibling_json(json_path: Path) -> pd.DataFrame:
@@ -1027,7 +1155,7 @@ class DecompositionFile:
     def _compute_reliability_json(
         self, thresholds: "ReliabilityThresholds"
     ) -> pd.DataFrame:
-        if not _OPENHDEMG_AVAILABLE or self._emgfile is None:
+        if self._emgfile is None:
             return pd.DataFrame(
                 columns=["mu_index", "port_index", "sil", "pnr", "covisi",
                          "dr_mean", "n_spikes", "is_reliable"]
@@ -1035,51 +1163,38 @@ class DecompositionFile:
         ef = self._emgfile
         fsamp = float(ef.get("FSAMP", 2048.0))
         n_mus = int(ef.get("NUMBER_OF_MUS", 0))
-        ipts = ef.get("IPTS")
         mupulses = ef.get("MUPULSES", [])
 
-        # Estimate contraction duration from signal length
         ref_signal = ef.get("REF_SIGNAL")
         if ref_signal is not None and hasattr(ref_signal, "__len__"):
             duration_s = len(ref_signal) / fsamp
         else:
             duration_s = float("nan")
 
-        # Build CoVISI map from existing helper
-        covisi_df = self._compute_covisi_json("auto")
-        covisi_map = {
-            int(r["mu_index"]): float(r["covisi_all"])
-            for _, r in covisi_df.iterrows()
-        }
+        ipts = ef.get("IPTS")
+        ipts_mat = (
+            ipts.values.astype(np.float64)
+            if hasattr(ipts, "values")
+            else np.zeros((0, n_mus), dtype=np.float64)
+        )
+        binary_df = ef.get("BINARY_MUS_FIRING")
+        binary_mat = (
+            binary_df.values.astype(np.float64)
+            if hasattr(binary_df, "values")
+            else np.zeros_like(ipts_mat)
+        )
+        sil_arr, pnr_arr, covisi_arr = _compute_mu_metrics(
+            ipts_mat, binary_mat, mupulses, fsamp
+        )
 
         rows = []
         for mu in range(n_mus):
             pulses = mupulses[mu] if mu < len(mupulses) else []
             n_spikes = len(pulses)
             dr_mean = n_spikes / duration_s if duration_s > 0 else float("nan")
-
-            # SIL and PNR via openhdemg
-            try:
-                ipts_mu = ipts.iloc[:, mu] if hasattr(ipts, "iloc") else ipts[mu]
-            except Exception:
-                ipts_mu = None
-
-            try:
-                sil_val = float(emg.compute_sil(ipts_mu, np.array(pulses)))
-            except Exception:
-                sil_val = float("nan")
-
-            try:
-                if ipts_mu is not None:
-                    pnr_val = float(
-                        emg.compute_pnr(ipts_mu, np.array(pulses), fsamp)
-                    )
-                else:
-                    pnr_val = float("nan")
-            except Exception:
-                pnr_val = float("nan")
-
-            covisi_val = covisi_map.get(mu, float("nan"))
+            sil_val = float(sil_arr[mu]) if mu < len(sil_arr) else float("nan")
+            pnr_val = float(pnr_arr[mu]) if mu < len(pnr_arr) else float("nan")
+            covisi_val = float(covisi_arr[mu]) if mu < len(covisi_arr) else float("nan")
             reliable = thresholds.is_reliable(sil_val, pnr_val, covisi_val)
 
             rows.append({
@@ -1188,41 +1303,57 @@ class DecompositionFile:
         self, thresholds: "ReliabilityThresholds"
     ) -> pd.DataFrame:
         rows = []
-        covisi_df = self._compute_covisi_pkl()
-        covisi_map = {
-            (int(r["port_index"]), int(r["mu_index"])): float(r["covisi_all"])
-            for _, r in covisi_df.iterrows()
-        }
-
         pkl = self._pkl
         fsamp = float(pkl.get("sampling_rate", 2048.0))
         dt_list = pkl.get("discharge_times", [])
+        # scd-edition format stores impulse trains under "pulse_trains" (list-of-lists),
+        # while the legacy openhdemg-based format uses "ipts" (list of 2D arrays/DataFrames).
         ipts_list = pkl.get("ipts", [])
+        pulse_trains_list = pkl.get("pulse_trains", [])
 
         for port_idx, dt_port in enumerate(dt_list):
+            n_mus = len(dt_port)
             ipts_port = ipts_list[port_idx] if port_idx < len(ipts_list) else None
+            pt_port = pulse_trains_list[port_idx] if port_idx < len(pulse_trains_list) else None
             emg_length = _infer_emg_length_from_pkl(pkl, port_idx)
             duration_s = emg_length / fsamp if emg_length > 0 else float("nan")
+
+            if n_mus == 0 or emg_length == 0:
+                continue
+
+            # Build mupulses for binary firing matrix
+            mupulses = [np.asarray(dt, dtype=np.int64).flatten() for dt in dt_port]
+
+            # Build ipts_mat (time × nMU)
+            if ipts_port is not None:
+                ipts_mat = (
+                    ipts_port.values.astype(np.float64)
+                    if hasattr(ipts_port, "values")
+                    else np.asarray(ipts_port, dtype=np.float64)
+                )
+            elif pt_port is not None:
+                # scd-edition: stack 1D pulse trains into (emg_length, n_mus)
+                ipts_mat = np.zeros((emg_length, n_mus), dtype=np.float64)
+                for mu_idx, pt in enumerate(pt_port):
+                    arr = np.asarray(pt, dtype=np.float64).flatten()
+                    length = min(len(arr), emg_length)
+                    ipts_mat[:length, mu_idx] = arr[:length]
+            else:
+                ipts_mat = np.zeros((emg_length, n_mus), dtype=np.float64)
+
+            binary_df = _build_binary_mus_firing(mupulses, emg_length)
+            binary_mat = binary_df.values.astype(np.float64)
+
+            sil_arr, pnr_arr, covisi_arr = _compute_mu_metrics(
+                ipts_mat, binary_mat, mupulses, fsamp
+            )
 
             for mu, pulses in enumerate(dt_port):
                 n_spikes = len(pulses) if pulses is not None else 0
                 dr_mean = n_spikes / duration_s if duration_s > 0 else float("nan")
-
-                try:
-                    if ipts_port is not None:
-                        ipts_col = (
-                            ipts_port.iloc[:, mu]
-                            if hasattr(ipts_port, "iloc")
-                            else np.array(ipts_port)[:, mu]
-                        )
-                        sil_val = float(emg.compute_sil(ipts_col, np.array(pulses)))
-                        pnr_val = float(emg.compute_pnr(ipts_col, np.array(pulses), fsamp))
-                    else:
-                        sil_val = pnr_val = float("nan")
-                except Exception:
-                    sil_val = pnr_val = float("nan")
-
-                covisi_val = covisi_map.get((port_idx, mu), float("nan"))
+                sil_val = float(sil_arr[mu]) if mu < len(sil_arr) else float("nan")
+                pnr_val = float(pnr_arr[mu]) if mu < len(pnr_arr) else float("nan")
+                covisi_val = float(covisi_arr[mu]) if mu < len(covisi_arr) else float("nan")
                 reliable = thresholds.is_reliable(sil_val, pnr_val, covisi_val)
 
                 rows.append({
@@ -1276,41 +1407,40 @@ class DecompositionFile:
             columns=["mu_index", "port_index", "sil", "pnr", "covisi",
                      "dr_mean", "n_spikes", "is_reliable"]
         )
-        if not _OPENHDEMG_AVAILABLE:
-            return empty
-
         ef = _mat_to_emgfile_dict(self._path, self._mat_subtype)
         if ef is None:
             return empty
 
         n_mus = ef["NUMBER_OF_MUS"]
         fsamp = ef["FSAMP"]
-        ipts = ef.get("IPTS")
         mupulses = ef.get("MUPULSES", [])
         emg_length = ef.get("EMG_LENGTH", 0)
         duration_s = emg_length / fsamp if emg_length > 0 and fsamp > 0 else float("nan")
+
+        ipts = ef.get("IPTS")
+        ipts_mat = (
+            ipts.values.astype(np.float64)
+            if hasattr(ipts, "values")
+            else np.zeros((emg_length, n_mus), dtype=np.float64)
+        )
+        binary_df = ef.get("BINARY_MUS_FIRING")
+        binary_mat = (
+            binary_df.values.astype(np.float64)
+            if hasattr(binary_df, "values")
+            else np.zeros_like(ipts_mat)
+        )
+        sil_arr, pnr_arr, covisi_arr = _compute_mu_metrics(
+            ipts_mat, binary_mat, mupulses, fsamp
+        )
 
         rows = []
         for mu in range(n_mus):
             pulses = mupulses[mu] if mu < len(mupulses) else []
             n_spikes = len(pulses)
             dr_mean = n_spikes / duration_s if duration_s > 0 else float("nan")
-            covisi_val = _cov_isi(pulses)
-
-            try:
-                ipts_mu = ipts.iloc[:, mu] if hasattr(ipts, "iloc") else None
-            except Exception:
-                ipts_mu = None
-
-            try:
-                sil_val = float(emg.compute_sil(ipts_mu, np.array(pulses))) if ipts_mu is not None else float("nan")
-            except Exception:
-                sil_val = float("nan")
-
-            try:
-                pnr_val = float(emg.compute_pnr(ipts_mu, np.array(pulses), fsamp)) if ipts_mu is not None else float("nan")
-            except Exception:
-                pnr_val = float("nan")
+            sil_val = float(sil_arr[mu]) if mu < len(sil_arr) else float("nan")
+            pnr_val = float(pnr_arr[mu]) if mu < len(pnr_arr) else float("nan")
+            covisi_val = float(covisi_arr[mu]) if mu < len(covisi_arr) else float("nan")
 
             rows.append({
                 "mu_index": mu,
@@ -1382,8 +1512,11 @@ class DecompositionFile:
 
         pkl_dir = self._path.parent
         for port_idx, port_name in enumerate(ports):
-            sibling_json = pkl_dir / f"{stem}_{port_name}.json"
-            ref_signal = _load_ref_signal_from_sibling_json(sibling_json)
+            # Prefer ref signal embedded in aux_channels; fall back to sibling JSON.
+            ref_signal = _load_ref_signal_from_aux_channels(filtered_pkl)
+            if ref_signal is None or ref_signal.empty:
+                sibling_json = pkl_dir / f"{stem}_{port_name}.json"
+                ref_signal = _load_ref_signal_from_sibling_json(sibling_json)
             emgfile_dict = _pkl_to_emgfile_dict(filtered_pkl, port_idx, port_name,
                                                  ref_signal=ref_signal)
             out_name = f"{stem}_{port_name}_cleaned.json"

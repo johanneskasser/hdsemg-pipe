@@ -15,6 +15,7 @@ class Settings(Enum):
     TRACKING_ERROR_METRIC = "TRACKING_ERROR_METRIC"  # Selected metric name, e.g. "NRMSE"
     TRACKING_ERROR_THRESHOLDS = "TRACKING_ERROR_THRESHOLDS"  # Dict[metric → Dict[tier → float]]
     UPDATE_FORK_CONFIG = "UPDATE_FORK_CONFIG"  # Dict[tool_key → {"github_url": str, "branch": str}]
+    MU_METRIC_BACKEND = "MU_METRIC_BACKEND"  # "motor_unit_toolbox" or "openhdemg"
 
 
 class LineNoiseRegion(Enum):
@@ -37,5 +38,11 @@ class MUEditLaunchMethod(Enum):
     MATLAB_ENGINE = "MATLAB_ENGINE"  # Use MATLAB Engine API (reuse existing session)
     MATLAB_CLI = "MATLAB_CLI"  # Start new MATLAB process via CLI
     STANDALONE = "STANDALONE"  # Assume MUEdit is available as standalone command
+
+
+class MuMetricBackend(Enum):
+    """Backend for computing SIL, PNR and CoVISI motor unit quality metrics."""
+    MOTOR_UNIT_TOOLBOX = "motor_unit_toolbox"  # motor_unit_toolbox (Negro 2016, scientific default)
+    OPENHDEMG = "openhdemg"  # openhdemg per-MU implementation (legacy)
 
 
