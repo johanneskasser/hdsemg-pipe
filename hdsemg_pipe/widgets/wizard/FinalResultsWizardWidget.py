@@ -541,7 +541,16 @@ class FinalResultsWizardWidget(WizardStepWidget):
         # Show summary
         if success_count > 0 and error_count == 0:
             self.success(f"Successfully converted {success_count} file(s) to JSON format!")
-            self.status_label.setText(f"✓ Conversion complete: {success_count} file(s) in results folder")
+            note = (
+                "Note: Spike counts in the JSON may differ slightly from scd-edition's display. "
+                "scd-edition shows re-detected spikes from the full recording "
+                "(including outside the decomposition plateau); "
+                "the JSON contains only the saved within-plateau spikes."
+            ) if self._use_pkl else ""
+            self.status_label.setText(
+                f"✓ Conversion complete: {success_count} file(s) in results folder"
+                + (f"\n{note}" if note else "")
+            )
 
             # Mark step as completed
             self.complete_step()

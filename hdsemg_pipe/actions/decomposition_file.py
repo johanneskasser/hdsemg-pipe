@@ -323,13 +323,40 @@ def _pkl_to_emgfile_dict(pkl: dict, port_idx: int, port_name: str,
 
     n_mus = len(dt_port)
 
-    # MUPULSES: 0-based sample indices
+    # MUPULSES: 0-based sample indices (raw, before bounds check)
     mupulses = [
         np.asarray(dt, dtype=np.int64).flatten()
         for dt in dt_port
     ]
 
     emg_length = _infer_emg_length_from_pkl(pkl, port_idx)
+
+    # Extend emg_length if any discharge_times exceed the pulse_train boundary.
+    # This preserves spikes placed just beyond the plateau window in scd-edition
+    # instead of silently dropping them from BINARY_MUS_FIRING.
+    if mupulses:
+        max_discharge = max(
+            (int(pulses.max()) for pulses in mupulses if len(pulses) > 0),
+            default=-1,
+        )
+        if max_discharge >= emg_length:
+            n_over = sum(
+                int(np.sum(p >= emg_length)) for p in mupulses if len(p) > 0
+            )
+            logger.warning(
+                "Port %d: %d spike(s) exceed pulse_train length (%d). "
+                "Extending EMG_LENGTH to %d to preserve all spikes.",
+                port_idx, n_over, emg_length, max_discharge + 1,
+            )
+            emg_length = max_discharge + 1
+
+    # Remove spikes with negative indices (can occur when scd-edition saves
+    # re-detected timestamps that were converted back to plateau-local coords
+    # and fell before the plateau start).
+    mupulses = [
+        pulses[pulses >= 0] if len(pulses) > 0 else pulses
+        for pulses in mupulses
+    ]
 
     # IPTS: pulse trains as DataFrame (time x nMU)
     if n_mus > 0 and len(pt_port) > 0:

@@ -38,6 +38,8 @@ import numpy as np
 import scipy.io as sio
 import torch
 
+from hdsemg_shared.fileio.file_io import EMGFile
+
 sys.path.insert(0, str(Path(__file__).parent))
 from scd_channel_utils import (
     load_channel_selection_json,
@@ -81,9 +83,8 @@ def detect_plateau_from_mat(
     Detect plateau start/end sample indices from the force/reference signal.
 
     Uses the same force-threshold logic as loadEMG_updConfig in
-    scd/utils/preprocessing.py.  Reference signal indices are read from
-    the sidecar channel-selection JSON when available; otherwise the
-    OTBio Muovi/Syncstation defaults (measured=70, target=71) are used.
+    scd/utils/preprocessing.py.  Reference signal indices are resolved via
+    EMGFile (reads channel descriptions from the MAT file itself).
 
     Returns
     -------
@@ -96,34 +97,29 @@ def detect_plateau_from_mat(
 
     On any failure, returns (0, total_samples, sampling_rate).
     """
-    mat = sio.loadmat(mat_file)
-    fsamp = int(mat["SamplingFrequency"][0][0])
-    n_total = int(mat["Data"].shape[0])
+    emg_file = EMGFile.load(str(mat_file))
+    fsamp = int(emg_file.sampling_frequency)
+    n_total = emg_file.data.shape[0]
 
-    # Default reference signal indices (OTBio Muovi/Syncstation)
-    ref_target_idx   = 71   # "Original Path" / target
-    ref_measured_idx = 70   # "Performed Path" / measured
+    grid = emg_file.get_grid(grid_key=grid_key) if grid_key else None
+    if grid is None and emg_file.grids:
+        grid = emg_file.grids[0]
 
-    # Override from sidecar JSON if the grid_key is known
-    json_data = load_channel_selection_json(mat_file)
-    if json_data and grid_key:
-        grids = get_grids_from_json(json_data)
-        matched = next((g for g in grids if g["grid_key"] == grid_key), None)
-        if matched:
-            for ref_sig in matched.get("reference_signals", []):
-                name = ref_sig.get("name", "").lower()
-                idx  = ref_sig.get("ref_index")
-                if idx is None:
-                    continue
-                if "original" in name or "target" in name:
-                    ref_target_idx = int(idx)
-                elif "performed" in name or "measured" in name:
-                    ref_measured_idx = int(idx)
+    if grid is None:
+        print("  Plateau detect : no grid found in description → using full signal")
+        return 0, n_total, fsamp
+
+    ref_target = ref_measured = None
+    if grid.requested_path_idx is not None and grid.ref_indices:
+        ref_target = emg_file.data[:, grid.ref_indices[grid.requested_path_idx]].astype(np.float64)
+    if grid.performed_path_idx is not None and grid.ref_indices:
+        ref_measured = emg_file.data[:, grid.ref_indices[grid.performed_path_idx]].astype(np.float64)
+
+    if ref_target is None or ref_measured is None:
+        print("  Plateau detect : ref signals not found in description → using full signal")
+        return 0, n_total, fsamp
 
     try:
-        ref_target   = mat["Data"][:, ref_target_idx].astype(np.float64)
-        ref_measured = mat["Data"][:, ref_measured_idx].astype(np.float64)
-
         # Compute force threshold from baseline statistics at start and end
         baseline_s = ref_measured[int(fsamp * sFrom) : int(fsamp * sTo)]
         thr_s = baseline_s.mean() + baseline_s.std() * n_std
@@ -226,34 +222,30 @@ def load_ref_signal_from_mat(
     """
     Load the "Performed Path" (measured force) reference signal from a .mat file.
 
-    Uses the sidecar channel-selection JSON to find the correct channel index.
-    Falls back to the OTBio Muovi/Syncstation default (channel 70).
+    Channel index is resolved dynamically via EMGFile (reads the MAT file's
+    Description field — no hardcoded defaults, no sidecar JSON required).
 
     Returns
     -------
-    ref_signal : np.ndarray, shape (n_samples,)
-    ref_chan_idx : int  — absolute channel index used
+    ref_signal : np.ndarray, shape (n_samples,)  — zeros if not found
+    ref_chan_idx : int  — absolute channel index used, -1 if not found
     """
-    mat = sio.loadmat(mat_file)
-    ref_measured_idx = 70  # OTBio default: "Performed Path"
+    emg_file = EMGFile.load(str(mat_file))
+    n_total = emg_file.data.shape[0]
 
-    json_data = load_channel_selection_json(mat_file)
-    if json_data and grid_key:
-        grids = get_grids_from_json(json_data)
-        matched = next((g for g in grids if g["grid_key"] == grid_key), None)
-        if matched:
-            for ref_sig in matched.get("reference_signals", []):
-                name = ref_sig.get("name", "").lower()
-                idx = ref_sig.get("ref_index")
-                if idx is None:
-                    continue
-                if "performed" in name or "measured" in name:
-                    ref_measured_idx = int(idx)
+    grid = emg_file.get_grid(grid_key=grid_key) if grid_key else None
+    if grid is None and emg_file.grids:
+        grid = emg_file.grids[0]
 
-    raw = mat["Data"]  # (time, all_channels)
-    end_sample = (start_sample + n_samples) if n_samples else raw.shape[0]
-    ref = raw[start_sample:end_sample, ref_measured_idx].astype(np.float64)
-    return ref, ref_measured_idx
+    end_sample = (start_sample + n_samples) if n_samples else n_total
+
+    if grid is None or grid.performed_path_idx is None or not grid.ref_indices:
+        print("  Ref signal : performed path not found in description → zeros")
+        return np.zeros(end_sample - start_sample, dtype=np.float64), -1
+
+    ref_col_idx = grid.ref_indices[grid.performed_path_idx]
+    ref = emg_file.data[start_sample:end_sample, ref_col_idx].astype(np.float64)
+    return ref, ref_col_idx
 
 
 def load_emg_from_mat(
