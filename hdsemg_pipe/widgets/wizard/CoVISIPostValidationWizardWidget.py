@@ -677,7 +677,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         """Scan for edited PKL files for scd-edition post-validation."""
         removed_dups = global_state.get_decomposition_removed_duplicates_path()
         covisi_filtered = global_state.get_decomposition_covisi_filtered_path()
-        auto_folder = global_state.get_decomposition_path()
+        scd_edition_folder = global_state.get_decomposition_scd_edition_path()
 
         source_dir = None
         if removed_dups and os.path.isdir(removed_dups) and any(
@@ -688,8 +688,8 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             f.endswith("_covisi_filtered.pkl") for f in os.listdir(covisi_filtered)
         ):
             source_dir = covisi_filtered
-        elif auto_folder and os.path.isdir(auto_folder):
-            source_dir = auto_folder
+        elif scd_edition_folder and os.path.isdir(scd_edition_folder):
+            source_dir = scd_edition_folder
 
         self.edited_pkl_files = []
         if source_dir:
