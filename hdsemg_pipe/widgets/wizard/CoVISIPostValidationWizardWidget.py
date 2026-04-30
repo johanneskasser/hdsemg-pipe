@@ -675,21 +675,25 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
     def _scan_pkl_files(self):
         """Scan for edited PKL files for scd-edition post-validation."""
+        scd_edition_folder = global_state.get_decomposition_scd_edition_path()
         removed_dups = global_state.get_decomposition_removed_duplicates_path()
         covisi_filtered = global_state.get_decomposition_covisi_filtered_path()
-        scd_edition_folder = global_state.get_decomposition_scd_edition_path()
 
+        # scd-edition always writes edited PKL files to the scd_edition folder,
+        # so check there first before falling back to the upstream source folders.
         source_dir = None
-        if removed_dups and os.path.isdir(removed_dups) and any(
-            f.endswith("_duplicates_removed.pkl") for f in os.listdir(removed_dups)
+        if scd_edition_folder and os.path.isdir(scd_edition_folder) and any(
+            f.endswith("_edited.pkl") for f in os.listdir(scd_edition_folder)
+        ):
+            source_dir = scd_edition_folder
+        elif removed_dups and os.path.isdir(removed_dups) and any(
+            f.endswith("_edited.pkl") for f in os.listdir(removed_dups)
         ):
             source_dir = removed_dups
         elif covisi_filtered and os.path.isdir(covisi_filtered) and any(
-            f.endswith("_covisi_filtered.pkl") for f in os.listdir(covisi_filtered)
+            f.endswith("_edited.pkl") for f in os.listdir(covisi_filtered)
         ):
             source_dir = covisi_filtered
-        elif scd_edition_folder and os.path.isdir(scd_edition_folder):
-            source_dir = scd_edition_folder
 
         self.edited_pkl_files = []
         if source_dir:
