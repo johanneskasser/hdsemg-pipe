@@ -791,8 +791,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._rms_grids_container = QWidget()
         self._rms_grids_container.setStyleSheet("background:transparent;")
         self._rms_grids_vbox = QVBoxLayout(self._rms_grids_container)
-        self._rms_grids_vbox.setContentsMargins(0, 3, 0, 0)
-        self._rms_grids_vbox.setSpacing(2)
+        self._rms_grids_vbox.setContentsMargins(0, 2, 0, 0)
+        self._rms_grids_vbox.setSpacing(0)
         placeholder = QLabel("—")
         placeholder.setStyleSheet(
             f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
