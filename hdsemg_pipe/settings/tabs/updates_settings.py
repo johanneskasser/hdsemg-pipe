@@ -16,7 +16,10 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Fonts, Spacing, BorderRadius
-from hdsemg_pipe.updates.update_checker import REGISTERED_TOOLS, save_fork_config, get_fork_config
+from hdsemg_pipe.updates.update_checker import (
+    REGISTERED_TOOLS, save_fork_config, get_fork_config,
+    _installed_pkg_version, _pypi_latest_version, _version_tuple,
+)
 
 
 def init(parent) -> QVBoxLayout:
@@ -38,9 +41,10 @@ def init(parent) -> QVBoxLayout:
 
     # ── One group per registered tool ────────────────────────────────────
     for spec in REGISTERED_TOOLS:
-        if not spec.allows_fork:
-            continue
-        group = _build_tool_group(spec, parent)
+        if spec.allows_fork:
+            group = _build_tool_group(spec, parent)
+        else:
+            group = _build_pypi_only_group(spec)
         layout.addWidget(group)
 
     layout.addStretch()
@@ -156,6 +160,114 @@ def _build_tool_group(spec, parent) -> QGroupBox:
         status_label.setStyleSheet(f"color: {Colors.BLUE_600}; font-size: {Fonts.SIZE_SM};")
 
     return group
+
+
+def _build_pypi_only_group(spec) -> QGroupBox:
+    installed = _installed_pkg_version(spec.pypi_package) or "not installed"
+
+    group = QGroupBox(spec.display_name)
+    group.setStyleSheet(f"""
+        QGroupBox {{
+            font-size: {Fonts.SIZE_BASE};
+            font-weight: bold;
+            color: {Colors.TEXT_PRIMARY};
+            border: 1px solid {Colors.BORDER_DEFAULT};
+            border-radius: {BorderRadius.MD};
+            margin-top: 6px;
+            padding-top: 10px;
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 4px;
+        }}
+    """)
+
+    v = QVBoxLayout(group)
+    v.setSpacing(Spacing.MD)
+    v.setContentsMargins(Spacing.LG, Spacing.LG, Spacing.LG, Spacing.LG)
+
+    info_label = QLabel(
+        f"<b>Source:</b> PyPI &mdash; "
+        f"<a href='https://pypi.org/project/{spec.pypi_package}/'>"
+        f"pypi.org/project/{spec.pypi_package}</a><br>"
+        f"<b>Installed version:</b> {installed}"
+    )
+    info_label.setOpenExternalLinks(True)
+    info_label.setWordWrap(True)
+    info_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+    v.addWidget(info_label)
+
+    btn_row = QHBoxLayout()
+    btn_row.setSpacing(Spacing.MD)
+
+    status_label = QLabel("")
+    status_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+    btn_row.addWidget(status_label, stretch=1)
+
+    update_btn = QPushButton("Update to latest")
+    update_btn.setFixedWidth(140)
+    update_btn.setStyleSheet(Styles.button_primary())
+    update_btn.clicked.connect(
+        lambda _checked, s=spec, sl=status_label, btn=update_btn:
+            _on_pypi_update(s, sl, btn)
+    )
+    btn_row.addWidget(update_btn)
+
+    v.addLayout(btn_row)
+
+    return group
+
+
+def _on_pypi_update(spec, status_label: QLabel, btn: QPushButton) -> None:
+    import subprocess
+    import sys
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    btn.setEnabled(False)
+    status_label.setText("Checking PyPI…")
+    status_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+    QApplication.processEvents()
+
+    installed = _installed_pkg_version(spec.pypi_package)
+    latest = _pypi_latest_version(spec.pypi_package)
+
+    if not latest:
+        status_label.setText("Could not reach PyPI.")
+        status_label.setStyleSheet(f"color: {Colors.RED_600}; font-size: {Fonts.SIZE_SM};")
+        btn.setEnabled(True)
+        return
+
+    if not installed or _version_tuple(latest) <= _version_tuple(installed):
+        status_label.setText(f"Already up to date ({installed}).")
+        status_label.setStyleSheet(f"color: {Colors.GREEN_600}; font-size: {Fonts.SIZE_SM};")
+        btn.setEnabled(True)
+        return
+
+    status_label.setText(f"Installing {spec.pypi_package} {latest}…")
+    QApplication.processEvents()
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", spec.pypi_package],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            status_label.setText(f"Updated to {latest}. Please restart hdsemg-pipe.")
+            status_label.setStyleSheet(f"color: {Colors.GREEN_600}; font-size: {Fonts.SIZE_SM};")
+        else:
+            status_label.setText("Update failed — see error dialog.")
+            status_label.setStyleSheet(f"color: {Colors.RED_600}; font-size: {Fonts.SIZE_SM};")
+            QMessageBox.warning(
+                None, "Update failed",
+                f"pip install failed:\n{result.stderr[-800:]}",
+            )
+    except Exception as exc:
+        status_label.setText("Update error — see error dialog.")
+        status_label.setStyleSheet(f"color: {Colors.RED_600}; font-size: {Fonts.SIZE_SM};")
+        QMessageBox.critical(None, "Update error", str(exc))
+
+    btn.setEnabled(True)
 
 
 def _on_save(tool_key: str, url_input: QLineEdit, branch_input: QLineEdit,

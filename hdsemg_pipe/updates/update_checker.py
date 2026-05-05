@@ -36,8 +36,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import requests
-from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtWidgets import (
+    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+)
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.ui_elements.theme import Colors, Styles, Fonts, Spacing
@@ -99,7 +101,9 @@ class ToolSpec:
     check_fn: Optional[Callable] = field(default=None, repr=False)
 
     @property
-    def default_github_url(self) -> str:
+    def default_github_url(self) -> Optional[str]:
+        if not self.default_owner or not self.default_repo:
+            return None
         return f"https://github.com/{self.default_owner}/{self.default_repo}"
 
 
@@ -310,7 +314,12 @@ def _make_scd_edition_check(spec: ToolSpec) -> Callable:
         if not latest:
             return None
 
-        if installed_commit and installed_commit == latest["sha"]:
+        # Suppress if the installed commit matches, OR if the user already
+        # installed this exact SHA via the update dialog (cache fallback for
+        # environments where direct_url.json is not populated).
+        cache = _load_cache()
+        seen_sha = cache.get("scd_edition_seen_commit")
+        if (installed_commit and installed_commit == latest["sha"]) or seen_sha == latest["sha"]:
             return None
 
         latest_release = _github_latest_release(owner, repo)
@@ -363,6 +372,15 @@ REGISTERED_TOOLS: list[ToolSpec] = [
         default_branch="main",
         pypi_package=None,
         allows_fork=True,
+    ),
+    ToolSpec(
+        key="hdsemg_select",
+        display_name="hdsemg-select",
+        default_owner="",
+        default_repo="",
+        default_branch=None,   # PyPI-only
+        pypi_package="hdsemg-select",
+        allows_fork=False,
     ),
 ]
 
@@ -430,15 +448,19 @@ class UpdateCheckerThread(QThread):
 
 
 # ---------------------------------------------------------------------------
-# scd-edition upgrade dialog
+# Combined update dialog (scd-edition + hdsemg-select, stacked)
 # ---------------------------------------------------------------------------
 
-class ScdEditionUpdateDialog(QDialog):
-    def __init__(self, info: ReleaseInfo, parent=None):
+class CombinedUpdateDialog(QDialog):
+    """Single dialog showing all pip-installable updates, one section per tool."""
+
+    _DIALOG_KEYS = {"scd_edition", "hdsemg_select"}
+
+    def __init__(self, infos: list[ReleaseInfo], parent=None):
         super().__init__(parent)
-        self.info = info
-        self.setWindowTitle("scd-edition update available")
-        self.setMinimumWidth(480)
+        self.infos = infos
+        self.setWindowTitle("Updates available")
+        self.setMinimumWidth(500)
         self._build_ui()
 
     def _build_ui(self):
@@ -446,50 +468,105 @@ class ScdEditionUpdateDialog(QDialog):
         layout.setSpacing(Spacing.LG)
         layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
 
-        title = QLabel("scd-edition update available")
+        title = QLabel("Software updates available")
         title.setStyleSheet(
             f"font-size: {Fonts.SIZE_LG}; font-weight: bold; color: {Colors.TEXT_PRIMARY};"
         )
         layout.addWidget(title)
 
+        for i, info in enumerate(self.infos):
+            if i > 0:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.HLine)
+                sep.setStyleSheet(f"color: {Colors.BORDER_DEFAULT};")
+                layout.addWidget(sep)
+
+            if info.tool_key == "scd_edition":
+                layout.addWidget(self._build_scd_section(info))
+            elif info.tool_key == "hdsemg_select":
+                layout.addWidget(self._build_hdsemg_select_section(info))
+
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(Styles.button_secondary())
+        close_btn.clicked.connect(self.reject)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    # -- Section builders ----------------------------------------------------
+
+    def _build_scd_section(self, info: ReleaseInfo) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setSpacing(Spacing.SM)
+        v.setContentsMargins(0, 0, 0, 0)
+
+        name = QLabel("<b>scd-edition</b>")
+        name.setStyleSheet(f"font-size: {Fonts.SIZE_BASE}; color: {Colors.TEXT_PRIMARY};")
+        v.addWidget(name)
+
         stable_line = (
-            f"<br><b>Latest stable release:</b> {self.info.latest_stable}"
-            if self.info.has_stable_release
+            f"<br><b>Latest stable:</b> {info.latest_stable}"
+            if info.has_stable_release
             else "<br><i>No stable release yet — only main branch available.</i>"
         )
         body = QLabel(
-            f"<b>Installed:</b> {self.info.installed}<br>"
-            f"<b>Latest main:</b> {self.info.latest}"
-            + stable_line
+            f"<b>Installed:</b> {info.installed}<br>"
+            f"<b>Latest main:</b> {info.latest}" + stable_line
         )
         body.setWordWrap(True)
-        body.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};"
-        )
-        layout.addWidget(body)
+        body.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+        v.addWidget(body)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(Spacing.MD)
 
         btn_main = QPushButton("Install latest main")
         btn_main.setStyleSheet(Styles.button_primary())
-        btn_main.clicked.connect(self._install_main)
+        btn_main.clicked.connect(lambda: self._install_scd_main(info))
         btn_row.addWidget(btn_main)
 
-        if self.info.has_stable_release:
-            btn_stable = QPushButton(f"Install stable ({self.info.latest_stable})")
+        if info.has_stable_release:
+            btn_stable = QPushButton(f"Install stable ({info.latest_stable})")
             btn_stable.setStyleSheet(Styles.button_secondary())
-            btn_stable.clicked.connect(self._install_stable)
+            btn_stable.clicked.connect(lambda: self._install_scd_stable(info))
             btn_row.addWidget(btn_stable)
 
-        btn_skip = QPushButton("Skip")
-        btn_skip.setStyleSheet(Styles.button_secondary())
-        btn_skip.clicked.connect(self.reject)
-        btn_row.addWidget(btn_skip)
+        btn_row.addStretch()
+        v.addLayout(btn_row)
+        return w
 
-        layout.addLayout(btn_row)
+    def _build_hdsemg_select_section(self, info: ReleaseInfo) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setSpacing(Spacing.SM)
+        v.setContentsMargins(0, 0, 0, 0)
 
-    def _install_main(self):
+        name = QLabel("<b>hdsemg-select</b>")
+        name.setStyleSheet(f"font-size: {Fonts.SIZE_BASE}; color: {Colors.TEXT_PRIMARY};")
+        v.addWidget(name)
+
+        body = QLabel(
+            f"<b>Installed:</b> {info.installed}<br>"
+            f"<b>Latest (PyPI):</b> {info.latest}"
+        )
+        body.setWordWrap(True)
+        body.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+        v.addWidget(body)
+
+        btn_row = QHBoxLayout()
+        btn_install = QPushButton(f"Install {info.latest}")
+        btn_install.setStyleSheet(Styles.button_primary())
+        btn_install.clicked.connect(lambda: self._install_hdsemg_select(info))
+        btn_row.addWidget(btn_install)
+        btn_row.addStretch()
+        v.addLayout(btn_row)
+        return w
+
+    # -- Install actions -----------------------------------------------------
+
+    def _install_scd_main(self, info: ReleaseInfo):
         spec = get_tool_spec("scd_edition")
         fork_cfg = get_fork_config("scd_edition")
         if fork_cfg.get("github_url") and fork_cfg.get("branch"):
@@ -499,22 +576,27 @@ class ScdEditionUpdateDialog(QDialog):
                 f"git+https://github.com/{spec.default_owner}/{spec.default_repo}.git"
                 f"@{spec.default_branch}"
             )
-        self._run_install(pip_spec)
+        self._run_install("scd-edition", pip_spec, scd_sha=info.latest_sha)
 
-    def _install_stable(self):
+    def _install_scd_stable(self, info: ReleaseInfo):
         spec = get_tool_spec("scd_edition")
         fork_cfg = get_fork_config("scd_edition")
-        owner = spec.default_owner
-        repo = spec.default_repo
+        owner, repo = spec.default_owner, spec.default_repo
         if fork_cfg.get("github_url"):
             parsed = _parse_github_url(fork_cfg["github_url"])
             if parsed:
                 owner, repo = parsed
         self._run_install(
-            f"git+https://github.com/{owner}/{repo}.git@{self.info.latest_stable}"
+            "scd-edition",
+            f"git+https://github.com/{owner}/{repo}.git@{info.latest_stable}",
+            scd_sha=info.latest_sha,
         )
 
-    def _run_install(self, pip_spec: str):
+    def _install_hdsemg_select(self, info: ReleaseInfo):
+        spec = get_tool_spec("hdsemg_select")
+        self._run_install("hdsemg-select", spec.pypi_package, scd_sha=None)
+
+    def _run_install(self, display_name: str, pip_spec: str, *, scd_sha: Optional[str]):
         from PyQt5.QtWidgets import QMessageBox
         self.accept()
         try:
@@ -523,9 +605,13 @@ class ScdEditionUpdateDialog(QDialog):
                 capture_output=True, text=True, timeout=120,
             )
             if result.returncode == 0:
+                if scd_sha:
+                    cache = _load_cache()
+                    cache["scd_edition_seen_commit"] = scd_sha
+                    _save_cache(cache)
                 QMessageBox.information(
                     self.parent(), "Update successful",
-                    "scd-edition has been updated.\nPlease restart hdsemg-pipe.",
+                    f"{display_name} has been updated.\nPlease restart hdsemg-pipe.",
                 )
             else:
                 QMessageBox.warning(
@@ -545,14 +631,12 @@ def _handle_results(results: list[ReleaseInfo], parent_window) -> None:
     from PyQt5.QtCore import QTimer
 
     cache = _load_cache()
-    delay_ms = 1500
+    toast_delay_ms = 1500
+    dialog_infos: list[ReleaseInfo] = []
 
     for info in results:
-        if info.tool_key == "scd_edition":
-            QTimer.singleShot(
-                delay_ms,
-                lambda i=info: ScdEditionUpdateDialog(i, parent_window).exec_(),
-            )
+        if info.tool_key in CombinedUpdateDialog._DIALOG_KEYS:
+            dialog_infos.append(info)
         elif info.latest_sha:
             # Commit-based tool (MUedit or any future GitHub-commit tool)
             toast_manager.show_toast(
@@ -563,6 +647,7 @@ def _handle_results(results: list[ReleaseInfo], parent_window) -> None:
             )
             cache[f"{info.tool_key}_seen_commit"] = info.latest_sha
             _save_cache(cache)
+            toast_delay_ms += 400
         else:
             # Version-based tool (openhdemg / PyPI)
             toast_manager.show_toast(
@@ -571,8 +656,13 @@ def _handle_results(results: list[ReleaseInfo], parent_window) -> None:
                 toast_type="info",
                 duration=10000,
             )
+            toast_delay_ms += 400
 
-        delay_ms += 400
+    if dialog_infos:
+        QTimer.singleShot(
+            1500,
+            lambda: CombinedUpdateDialog(dialog_infos, parent_window).exec_(),
+        )
 
 
 # ---------------------------------------------------------------------------
