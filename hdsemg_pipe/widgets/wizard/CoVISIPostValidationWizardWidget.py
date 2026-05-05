@@ -188,9 +188,10 @@ class PklPostValidationWorker(QThread):
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, edited_pkl_files, parent=None):
+    def __init__(self, edited_pkl_files, source_pkl_folder=None, parent=None):
         super().__init__(parent)
         self.edited_pkl_files = list(edited_pkl_files)
+        self.source_pkl_folder = source_pkl_folder
 
     def run(self):
         from pathlib import Path as _Path
@@ -211,10 +212,14 @@ class PklPostValidationWorker(QThread):
                 filename = edited_path.name
                 self.progress.emit(idx, total, f"Validating {filename}...")
                 try:
-                    # Derive source PKL by stripping _edited from stem
+                    # Derive source PKL by stripping _edited from stem.
+                    # Source files live in source_pkl_folder (upstream), not the scd_edition folder.
                     stem = edited_path.stem
                     source_stem = stem[: -len("_edited")]
-                    source_path = edited_path.parent / f"{source_stem}.pkl"
+                    if self.source_pkl_folder:
+                        source_path = _Path(self.source_pkl_folder) / f"{source_stem}.pkl"
+                    else:
+                        source_path = edited_path.parent / f"{source_stem}.pkl"
 
                     if not source_path.exists():
                         logger.warning("Source PKL not found: %s", source_path)
@@ -287,6 +292,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.edited_files = []
         self.json_files = []
         self.edited_pkl_files = []
+        self.source_pkl_folder = None  # where unedited source PKLs live (pre-edit)
         self._use_pkl = False
         self.multigrid_skipped_count = 0  # count of multigrid files skipped (not validatable)
         self.fsamp_dict = {}
@@ -675,27 +681,47 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
     def _scan_pkl_files(self):
         """Scan for edited PKL files for scd-edition post-validation."""
+        scd_edition_folder = global_state.get_decomposition_scd_edition_path()
         removed_dups = global_state.get_decomposition_removed_duplicates_path()
         covisi_filtered = global_state.get_decomposition_covisi_filtered_path()
         auto_folder = global_state.get_decomposition_path()
 
-        source_dir = None
+        # scd-edition always writes edited PKL files to the scd_edition folder.
+        # Source (pre-edit) PKLs live in the upstream folder (removed_dups > covisi_filtered > auto).
+        edited_dir = None
+        if scd_edition_folder and os.path.isdir(scd_edition_folder) and any(
+            f.endswith("_edited.pkl") for f in os.listdir(scd_edition_folder)
+        ):
+            edited_dir = scd_edition_folder
+        elif removed_dups and os.path.isdir(removed_dups) and any(
+            f.endswith("_edited.pkl") for f in os.listdir(removed_dups)
+        ):
+            edited_dir = removed_dups
+        elif covisi_filtered and os.path.isdir(covisi_filtered) and any(
+            f.endswith("_edited.pkl") for f in os.listdir(covisi_filtered)
+        ):
+            edited_dir = covisi_filtered
+
+        # Determine source (unedited) PKL folder — highest priority upstream folder that exists.
         if removed_dups and os.path.isdir(removed_dups) and any(
             f.endswith("_duplicates_removed.pkl") for f in os.listdir(removed_dups)
         ):
-            source_dir = removed_dups
+            self.source_pkl_folder = removed_dups
         elif covisi_filtered and os.path.isdir(covisi_filtered) and any(
             f.endswith("_covisi_filtered.pkl") for f in os.listdir(covisi_filtered)
         ):
-            source_dir = covisi_filtered
+            self.source_pkl_folder = covisi_filtered
         elif auto_folder and os.path.isdir(auto_folder):
-            source_dir = auto_folder
+            self.source_pkl_folder = auto_folder
+        else:
+            self.source_pkl_folder = None
 
         self.edited_pkl_files = []
-        if source_dir:
+        if edited_dir:
+            logger.info(f"Scanning for edited PKL files in {edited_dir}...")
             self.edited_pkl_files = [
-                os.path.join(source_dir, f)
-                for f in os.listdir(source_dir)
+                os.path.join(edited_dir, f)
+                for f in os.listdir(edited_dir)
                 if f.endswith("_edited.pkl")
             ]
 
@@ -774,7 +800,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.summary_frame.setVisible(False)
         self.warning_frame.setVisible(False)
 
-        self.validation_worker = PklPostValidationWorker(self.edited_pkl_files)
+        self.validation_worker = PklPostValidationWorker(self.edited_pkl_files, self.source_pkl_folder)
         self.validation_worker.progress.connect(self.on_validation_progress)
         self.validation_worker.result.connect(self.on_validation_result)
         self.validation_worker.finished.connect(self.on_validation_finished)
@@ -988,6 +1014,14 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.error(error_msg)
         self.status_label.setText(f"Error: {error_msg}")
 
+    def _get_report_path(self):
+        """Return the correct folder for the post-validation report depending on cleaning tool."""
+        if self._use_pkl:
+            folder = global_state.get_decomposition_scd_edition_path()
+        else:
+            folder = global_state.get_decomposition_path()
+        return os.path.join(folder, "covisi_post_validation_report.json")
+
     def accept_and_continue(self):
         """Accept all MUs and proceed to final results."""
         # Save validation report
@@ -997,9 +1031,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         }
         report["action"] = "accepted_all"
 
-        report_path = os.path.join(
-            global_state.get_decomposition_path(), "covisi_post_validation_report.json"
-        )
+        report_path = self._get_report_path()
         save_covisi_report(report, report_path, report_type="post_validation")
 
         self.info("All MUs accepted. Proceeding to final results.")
@@ -1030,9 +1062,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                             {"file": filename, "mu_index": detail["mu_index"]}
                         )
 
-        report_path = os.path.join(
-            global_state.get_decomposition_path(), "covisi_post_validation_report.json"
-        )
+        report_path = self._get_report_path()
         save_covisi_report(report, report_path, report_type="post_validation")
 
         self.info(
@@ -1256,9 +1286,14 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
     def is_completed(self):
         """Check if this step is completed."""
-        report_path = os.path.join(
-            global_state.get_decomposition_path(), "covisi_post_validation_report.json"
-        )
+        use_pkl = (read_manual_cleaning_tool() == "scd_edition")
+        if use_pkl:
+            folder = global_state.get_decomposition_scd_edition_path()
+        else:
+            folder = global_state.get_decomposition_path()
+        if not folder:
+            return False
+        report_path = os.path.join(folder, "covisi_post_validation_report.json")
         return os.path.exists(report_path)
 
     def init_file_checking(self):

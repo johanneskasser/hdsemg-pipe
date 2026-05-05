@@ -460,7 +460,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         # Instance variables must be set before super().__init__ calls create_buttons()
         self._file_items: Dict[str, _FileListItem] = {}
         self._signal_cache: Dict[str, Tuple] = {}
-        self._rms_cache: Dict[str, Optional[Tuple[float, float]]] = {}
+        self._rms_cache: Dict[str, Optional[List[dict]]] = {}
         self._score_cache: Dict[str, Optional[float]] = {}
         self._current_file: Optional[str] = None
         self._rms_df: Optional[pd.DataFrame] = None
@@ -788,12 +788,18 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         rms_cv.setContentsMargins(0, 0, 0, 0)
         rms_cv.setSpacing(2)
         rms_cv.addWidget(QLabel("RMS NOISE QUALITY", styleSheet=_ts))
-        self._rms_value_lbl = QLabel("—")
-        self._rms_value_lbl.setStyleSheet(_vs)
-        self._rms_quality_lbl = QLabel("")
-        self._rms_quality_lbl.setStyleSheet(_qs)
-        rms_cv.addWidget(self._rms_value_lbl)
-        rms_cv.addWidget(self._rms_quality_lbl)
+        self._rms_grids_container = QWidget()
+        self._rms_grids_container.setStyleSheet("background:transparent;")
+        self._rms_grids_vbox = QVBoxLayout(self._rms_grids_container)
+        self._rms_grids_vbox.setContentsMargins(0, 2, 0, 0)
+        self._rms_grids_vbox.setSpacing(0)
+        placeholder = QLabel("—")
+        placeholder.setStyleSheet(
+            f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+            f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
+        )
+        self._rms_grids_vbox.addWidget(placeholder)
+        rms_cv.addWidget(self._rms_grids_container)
         stats_layout.addWidget(rms_col)
         stats_layout.addStretch()
 
@@ -1038,17 +1044,18 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         except Exception as e:
             logger.warning(f"Could not load RMS CSV: {e}")
 
-    def _get_rms_for_file(self, file_path: str) -> Optional[Tuple[float, float]]:
-        """Return (mean_rms, std_rms) in µV across all channels/grids, or None."""
+    def _get_rms_for_file(self, file_path: str) -> Optional[List[dict]]:
+        """Return per-grid RMS data, or None if unavailable.
+
+        Each dict: grid_key, label, mean_rms, std_rms, quality_label, color.
+        """
         if file_path in self._rms_cache:
             return self._rms_cache[file_path]
         if self._rms_df is None:
-            # Don't cache: CSV may appear later when check() reloads it
             return None
         filename = os.path.basename(file_path)
         rows = self._rms_df[self._rms_df["file_name"] == filename]
         if rows.empty:
-            # Fallback: match by stem in case extension differs
             stem = os.path.splitext(filename)[0]
             rows = self._rms_df[
                 self._rms_df["file_name"].str.startswith(stem + ".")
@@ -1058,11 +1065,35 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             logger.debug("RMS CSV: no rows matched for %s", filename)
             self._rms_cache[file_path] = None
             return None
-        mean_val = float(rows["rms_uv"].mean())
-        std_val = float(rows["rms_uv"].std(ddof=1)) if len(rows) > 1 else 0.0
-        result = (mean_val, std_val)
-        self._rms_cache[file_path] = result
-        return result
+
+        grids = []
+        for grid_key, gdf in rows.groupby("grid_key", sort=False):
+            mean_val = float(gdf["rms_uv"].mean())
+            std_val = float(gdf["rms_uv"].std(ddof=1)) if len(gdf) > 1 else 0.0
+            qlabel, qcolor = _rms_to_label_color(mean_val)
+
+            # Build human-readable label from new columns if present, else use grid_key
+            if "rows" in gdf.columns and "cols" in gdf.columns and "ied_mm" in gdf.columns:
+                r = gdf["rows"].iloc[0]
+                c = gdf["cols"].iloc[0]
+                ied = gdf["ied_mm"].iloc[0]
+                muscle = gdf["muscle"].iloc[0] if "muscle" in gdf.columns else None
+                muscle_str = f" {muscle}" if muscle and str(muscle) not in ("", "nan") else ""
+                label = f"{r}×{c} ({ied} mm){muscle_str}"
+            else:
+                label = str(grid_key)
+
+            grids.append({
+                "grid_key": grid_key,
+                "label": label,
+                "mean_rms": mean_val,
+                "std_rms": std_val,
+                "quality_label": qlabel,
+                "color": qcolor,
+            })
+
+        self._rms_cache[file_path] = grids if grids else None
+        return self._rms_cache[file_path]
 
     # ------------------------------------------------------------------
     # Signal loading
@@ -1166,10 +1197,9 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
 
         thresholds = self._get_active_thresholds()
 
-        # RMS
-        rms_result = self._get_rms_for_file(file_path)
-        rms_mean = rms_result[0] if rms_result is not None else None
-        rms_std = rms_result[1] if rms_result is not None else None
+        # RMS — per-grid data
+        rms_grids = self._get_rms_for_file(file_path)
+        rms_mean = float(np.mean([g["mean_rms"] for g in rms_grids])) if rms_grids else None
 
         # Update status dot colour in the list (prefer deviation score if available)
         if score is not None:
@@ -1189,16 +1219,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         else:
             self._reset_stat(self._dev_value_lbl, self._dev_quality_lbl)
 
-        # RMS stat — show mean ± std across all channels/grids
-        if rms_mean is not None and not np.isnan(rms_mean):
-            rlabel, rcolor = _rms_to_label_color(rms_mean)
-            value_text = (f"{rms_mean:.1f} ± {rms_std:.1f} µV"
-                          if rms_std is not None and not np.isnan(rms_std) and rms_std > 0
-                          else f"{rms_mean:.1f} µV")
-            self._update_stat(self._rms_value_lbl, self._rms_quality_lbl,
-                              value_text, rlabel, rcolor)
-        else:
-            self._reset_stat(self._rms_value_lbl, self._rms_quality_lbl)
+        # RMS stat — per-grid breakdown
+        self._refresh_rms_display(rms_grids)
 
     # ------------------------------------------------------------------
     # Metric / threshold helpers and slots
@@ -1257,6 +1279,45 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         quality_lbl.setStyleSheet(
             f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};background:transparent;border:none;"
         )
+
+    def _refresh_rms_display(self, grids: Optional[List[dict]]):
+        """Rebuild the per-grid RMS row list — one compact line per grid."""
+        layout = self._rms_grids_vbox
+
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not grids:
+            placeholder = QLabel("—")
+            placeholder.setStyleSheet(
+                f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+                f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
+            )
+            layout.addWidget(placeholder)
+            return
+
+        for g in grids:
+            std_str = f"±{g['std_rms']:.1f} " if g["std_rms"] > 0 else ""
+            c = g["color"]
+            lbl = g["label"]
+            mean = g["mean_rms"]
+            qlabel = g["quality_label"]
+            row = QLabel(
+                f"<span style='color:{c}'>●</span>"
+                f"&nbsp;<span style='color:{Colors.TEXT_MUTED}'>{lbl}</span>"
+                f"&nbsp;&nbsp;<span style='color:{c};font-weight:600'>"
+                f"{mean:.1f}&nbsp;{std_str}µV</span>"
+                f"&nbsp;<span style='color:{c}'>· {qlabel}</span>"
+            )
+            row.setTextFormat(Qt.RichText)
+            row.setStyleSheet(
+                f"font-size:{Fonts.SIZE_XS};background:transparent;border:none;"
+            )
+            layout.addWidget(row)
+
+        layout.addStretch()
 
     # ------------------------------------------------------------------
     # Plot

@@ -27,6 +27,7 @@ nav:
       - Getting Started: general/getting_started.md
       - Dashboard: general/dashboard.md
       - Application Settings: general/application_settings.md
+      - Update Notifications: general/update_notifications.md
   - Processing Steps:
       - Opening Data: processing/opening_data.md
       - Grid Association: processing/grid_association.md

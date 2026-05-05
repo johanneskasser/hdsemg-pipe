@@ -428,8 +428,16 @@ class FinalResultsWizardWidget(WizardStepWidget):
         elif auto_folder and os.path.isdir(auto_folder):
             source_dir = auto_folder
 
+        scd_output_dir = global_state.get_decomposition_scd_edition_path()
         self.edited_pkl_files = []
-        if source_dir:
+        if scd_output_dir and os.path.isdir(scd_output_dir):
+            self.edited_pkl_files = [
+                os.path.join(scd_output_dir, f)
+                for f in os.listdir(scd_output_dir)
+                if f.endswith("_edited.pkl")
+            ]
+        elif source_dir:
+            # Fallback: legacy workfolders where edited PKLs lived in source dir
             self.edited_pkl_files = [
                 os.path.join(source_dir, f)
                 for f in os.listdir(source_dir)
@@ -533,7 +541,16 @@ class FinalResultsWizardWidget(WizardStepWidget):
         # Show summary
         if success_count > 0 and error_count == 0:
             self.success(f"Successfully converted {success_count} file(s) to JSON format!")
-            self.status_label.setText(f"✓ Conversion complete: {success_count} file(s) in results folder")
+            note = (
+                "Note: Spike counts in the JSON may differ slightly from scd-edition's display. "
+                "scd-edition shows re-detected spikes from the full recording "
+                "(including outside the decomposition plateau); "
+                "the JSON contains only the saved within-plateau spikes."
+            ) if self._use_pkl else ""
+            self.status_label.setText(
+                f"✓ Conversion complete: {success_count} file(s) in results folder"
+                + (f"\n{note}" if note else "")
+            )
 
             # Mark step as completed
             self.complete_step()

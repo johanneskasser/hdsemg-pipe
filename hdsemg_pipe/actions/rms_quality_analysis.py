@@ -74,9 +74,13 @@ class ChannelRMSResult:
 
 @dataclass
 class FileRMSResult:
-    """Aggregated RMS results for a single file."""
+    """Aggregated RMS results for a single file-grid combination."""
     file_name: str
     grid_key: str
+    rows: int
+    cols: int
+    ied_mm: int
+    muscle: Optional[str]
     mean_rms: float
     std_rms: float
     min_rms: float
@@ -88,6 +92,14 @@ class FileRMSResult:
     def quality(self) -> str:
         """Overall quality based on mean RMS."""
         return classify_quality(self.mean_rms)
+
+    @property
+    def grid_label(self) -> str:
+        """Human-readable label: 'rows×cols (ied_mm mm) [muscle]'."""
+        base = f"{self.rows}×{self.cols} ({self.ied_mm} mm)"
+        if self.muscle:
+            return f"{base} {self.muscle}"
+        return base
 
 
 @dataclass
@@ -859,6 +871,10 @@ class RMSQualityDialog(QtWidgets.QDialog):
                 file_result = FileRMSResult(
                     file_name=file_name,
                     grid_key=grid.grid_key,
+                    rows=grid.rows,
+                    cols=grid.cols,
+                    ied_mm=grid.ied_mm,
+                    muscle=grid.muscle,
                     mean_rms=np.mean(rms_values),
                     std_rms=np.std(rms_values),
                     min_rms=np.min(rms_values),
@@ -942,14 +958,16 @@ class RMSQualityDialog(QtWidgets.QDialog):
 
         ax.set_xticks(x)
         if show_names:
-            file_names = [fr.file_name[:15] + '...' if len(fr.file_name) > 18 else fr.file_name
-                          for fr in results.file_results]
-            ax.set_xticklabels(file_names, rotation=45, ha='right', fontsize=8)
+            labels = []
+            for fr in results.file_results:
+                short_name = fr.file_name[:12] + '…' if len(fr.file_name) > 15 else fr.file_name
+                labels.append(f"{fr.grid_label}\n{short_name}")
+            ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=7)
             ax.set_xlabel("")
         else:
-            # Show index numbers instead
-            ax.set_xticklabels([str(i + 1) for i in range(len(results.file_results))], fontsize=8)
-            ax.set_xlabel("Grid #", fontsize=10, fontfamily='sans-serif')
+            labels = [f"#{i + 1}\n{fr.grid_label}" for i, fr in enumerate(results.file_results)]
+            ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=7)
+            ax.set_xlabel("Grid", fontsize=10, fontfamily='sans-serif')
 
         ax.set_ylabel("RMS Noise (µV)", fontsize=10, fontfamily='sans-serif')
         ax.set_title("RMS Noise Quality per Recording", fontsize=11, fontweight='bold', fontfamily='sans-serif')
@@ -996,27 +1014,47 @@ class RMSQualityDialog(QtWidgets.QDialog):
 
     def _update_summary_text(self, results: AnalysisResults):
         """Update the summary text label."""
-        summary = f"""
-<b>Analysis Summary</b><br>
-<br>
-<b>Region:</b> {results.region_start_s:.3f} - {results.region_end_s:.3f} s<br>
-<b>Files analyzed:</b> {len(results.file_results)}<br>
-<b>Total channels:</b> {results.total_channels}<br>
-<br>
-<b>RMS Statistics (µV):</b><br>
-• Mean: {results.grand_mean:.2f}<br>
-• Std: {results.grand_std:.2f}<br>
-• Min: {results.overall_min:.2f}<br>
-• Max: {results.overall_max:.2f}<br>
-<br>
-<b>Quality Breakdown:</b><br>
-• Excellent (≤5): {results.quality_counts['excellent']}<br>
-• Good (≤10): {results.quality_counts['good']}<br>
-• OK (≤15): {results.quality_counts['ok']}<br>
-• Troubled (≤20): {results.quality_counts['troubled']}<br>
-• Bad (>20): {results.quality_counts['bad']}
-"""
-        self.summary_label.setText(summary)
+        lines = [
+            "<b>Analysis Summary</b><br>",
+            f"<b>Region:</b> {results.region_start_s:.3f} – {results.region_end_s:.3f} s<br>",
+            f"<b>Grids analyzed:</b> {len(results.file_results)}<br>",
+            f"<b>Total channels:</b> {results.total_channels}<br>",
+            "<br>",
+            "<b>Per-Grid Results:</b><br>",
+        ]
+
+        for i, fr in enumerate(results.file_results):
+            short_name = fr.file_name[:20] + "…" if len(fr.file_name) > 23 else fr.file_name
+            muscle_str = f" · {fr.muscle}" if fr.muscle else ""
+            lines.append(
+                f"<b>{i + 1}. {fr.rows}×{fr.cols} ({fr.ied_mm} mm){muscle_str}</b> "
+                f"[{short_name}]<br>"
+            )
+            color = QUALITY_COLORS[fr.quality]
+            lines.append(
+                f"&nbsp;&nbsp;&nbsp;"
+                f"RMS: <span style='color:{color}'>{fr.mean_rms:.2f} ± {fr.std_rms:.2f} µV</span> "
+                f"(min {fr.min_rms:.2f} / max {fr.max_rms:.2f}) — "
+                f"<span style='color:{color}'>{fr.quality}</span><br>"
+            )
+
+        grand_color = QUALITY_COLORS[classify_quality(results.grand_mean)]
+        lines += [
+            "<br>",
+            "<b>Overall Average (all grids):</b><br>",
+            f"&nbsp;&nbsp;&nbsp;Mean: <span style='color:{grand_color}'>"
+            f"{results.grand_mean:.2f} ± {results.grand_std:.2f} µV</span><br>",
+            f"&nbsp;&nbsp;&nbsp;Range: {results.overall_min:.2f} – {results.overall_max:.2f} µV<br>",
+            "<br>",
+            "<b>Quality Breakdown:</b><br>",
+            f"• Excellent (≤5): {results.quality_counts['excellent']}<br>",
+            f"• Good (≤10): {results.quality_counts['good']}<br>",
+            f"• OK (≤15): {results.quality_counts['ok']}<br>",
+            f"• Troubled (≤20): {results.quality_counts['troubled']}<br>",
+            f"• Bad (>20): {results.quality_counts['bad']}",
+        ]
+
+        self.summary_label.setText("".join(lines))
 
     def save_and_close(self):
         """Save results to analysis folder and close dialog."""
@@ -1127,13 +1165,16 @@ class RMSQualityDialog(QtWidgets.QDialog):
 
         ax1.set_xticks(x)
         if self.show_filenames:
-            file_names = [fr.file_name for fr in results.file_results]
-            display_names = [fn[:20] + '...' if len(fn) > 23 else fn for fn in file_names]
-            ax1.set_xticklabels(display_names, rotation=45, ha='right', fontsize=9)
-            ax1.set_xlabel("Recording", fontsize=11, fontfamily='sans-serif')
+            labels = []
+            for fr in results.file_results:
+                short = fr.file_name[:15] + '…' if len(fr.file_name) > 18 else fr.file_name
+                labels.append(f"{fr.grid_label}\n{short}")
+            ax1.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
+            ax1.set_xlabel("Grid", fontsize=11, fontfamily='sans-serif')
         else:
-            ax1.set_xticklabels([str(i + 1) for i in range(len(results.file_results))], fontsize=9)
-            ax1.set_xlabel("Recording #", fontsize=11, fontfamily='sans-serif')
+            labels = [f"#{i + 1}\n{fr.grid_label}" for i, fr in enumerate(results.file_results)]
+            ax1.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
+            ax1.set_xlabel("Grid", fontsize=11, fontfamily='sans-serif')
 
         ax1.set_ylabel("RMS Noise (µV)", fontsize=11, fontfamily='sans-serif')
         ax1.set_title("A) RMS Noise Quality per Recording", fontsize=12, fontweight='bold',
@@ -1207,7 +1248,10 @@ class RMSQualityDialog(QtWidgets.QDialog):
 
         # Labels
         ax.set_yticks(np.arange(len(all_files)))
-        ax.set_yticklabels([fr.file_name for fr in all_files], fontsize=8)
+        ax.set_yticklabels(
+            [f"{fr.grid_label} | {fr.file_name}" for fr in all_files],
+            fontsize=7
+        )
         ax.set_xlabel("Channel Index", fontsize=11, fontfamily='sans-serif')
         ax.set_ylabel("Recording", fontsize=11, fontfamily='sans-serif')
         ax.set_title("RMS Noise per Channel (µV)", fontsize=12, fontweight='bold', fontfamily='sans-serif')
@@ -1226,11 +1270,14 @@ class RMSQualityDialog(QtWidgets.QDialog):
 
         csv_path = os.path.join(output_path, "rms_analysis_report.csv")
         with open(csv_path, 'w') as f:
-            f.write("file_name,grid_key,channel_idx,rms_uv,quality,region_start_s,region_end_s\n")
+            f.write("file_name,grid_key,rows,cols,ied_mm,muscle,channel_idx,rms_uv,quality,"
+                    "region_start_s,region_end_s\n")
             for fr in results.file_results:
                 for cr in fr.channel_results:
-                    f.write(f"{cr.file_name},{cr.grid_key},{cr.channel_idx},{cr.rms_uv:.4f},"
-                            f"{cr.quality},{results.region_start_s:.4f},{results.region_end_s:.4f}\n")
+                    muscle = fr.muscle or ""
+                    f.write(f"{cr.file_name},{cr.grid_key},{fr.rows},{fr.cols},{fr.ied_mm},"
+                            f"{muscle},{cr.channel_idx},{cr.rms_uv:.4f},{cr.quality},"
+                            f"{results.region_start_s:.4f},{results.region_end_s:.4f}\n")
 
         logger.info("CSV report saved to %s", csv_path)
 
@@ -1270,12 +1317,14 @@ class RMSQualityDialog(QtWidgets.QDialog):
             f.write("-" * 40 + "\n")
             f.write("PER-FILE SUMMARY\n")
             f.write("-" * 40 + "\n")
-            for fr in results.file_results:
-                f.write(f"\n{fr.file_name} ({fr.grid_key}):\n")
-                f.write(f"  Mean RMS: {fr.mean_rms:.2f} ± {fr.std_rms:.2f} µV\n")
-                f.write(f"  Min/Max:  {fr.min_rms:.2f} / {fr.max_rms:.2f} µV\n")
-                f.write(f"  Quality:  {fr.quality}\n")
-                f.write(f"  Channels: {len(fr.channel_results)}\n")
+            for i, fr in enumerate(results.file_results):
+                muscle_str = f" / {fr.muscle}" if fr.muscle else ""
+                f.write(f"\n{i + 1}. {fr.file_name}\n")
+                f.write(f"   Grid:     {fr.rows}×{fr.cols}, IED {fr.ied_mm} mm{muscle_str}\n")
+                f.write(f"   Mean RMS: {fr.mean_rms:.2f} ± {fr.std_rms:.2f} µV\n")
+                f.write(f"   Min/Max:  {fr.min_rms:.2f} / {fr.max_rms:.2f} µV\n")
+                f.write(f"   Quality:  {fr.quality}\n")
+                f.write(f"   Channels: {len(fr.channel_results)}\n")
 
             f.write("\n" + "=" * 60 + "\n")
 

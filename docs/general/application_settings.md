@@ -133,6 +133,31 @@ For more information about the Line Noise Removal step, see [Line Noise Removal]
 hdsemg-pipe can install the [openhdemg](https://www.giacomovalli.com/openhdemg/) open source project automatically from PyPI. If the application is running
 from the sources, you can install openhdemg by going to Settings > Preferences > openhdemg > Install openhdemg. More information about the project can be found here: [Official Openhdemg Documentation](https://www.giacomovalli.com/openhdemg/quick-start/).
 
+### MUEdit
+
+The **MUEdit** section allows you to configure the integration with [MUedit](https://github.com/simonavrillon/MUedit), the MATLAB-based motor unit editor used in the manual cleaning step.
+
+**MUEdit folder path** — set the path to the directory containing the MUedit MATLAB files (e.g. `MUedit_exported.m`). This path is added to the MATLAB path at runtime so MATLAB can find MUedit.
+
+**Launch method** — controls how hdsemg-pipe starts MATLAB when opening MUedit:
+
+| Method | Description |
+| --- | --- |
+| **Auto** | Detects the best available method automatically |
+| **MATLAB Engine** | Reuses an existing MATLAB Engine session (fastest, avoids extra MATLAB window) |
+| **MATLAB CLI** | Starts a new MATLAB process via the command line |
+| **Standalone** | Assumes MUedit is available as a standalone command |
+
+For more information about the MUEdit workflow see [MUEdit Export Workflow](../processing/muedit_export_workflow.md).
+
+### Updates
+
+The **Updates** section lets you configure custom forks for the external tools that hdsemg-pipe tracks for updates (scd-edition, openhdemg, MUedit).
+
+By default, hdsemg-pipe checks the official upstream repositories. If you work with a fork, enter the GitHub URL and branch here to track your fork instead.
+
+See [Update Notifications](update_notifications.md) for a full description of how update checks work and how to configure forks.
+
 ### Logging Level
 The **Logging Level** section allows you to specify the logging level of the application. This is useful for debugging and troubleshooting purposes. The available logging levels are:
 - `DEBUG`: Detailed information, useful for debugging.
