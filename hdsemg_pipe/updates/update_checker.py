@@ -295,6 +295,57 @@ def _make_pypi_check(spec: ToolSpec) -> Callable:
     return _check
 
 
+def _make_self_pypi_check(spec: ToolSpec) -> Callable:
+    """
+    PyPI check for hdsemg-pipe itself, with TestPyPI detection.
+
+    If the installed version is not published on the public PyPI (i.e. the user
+    installed from TestPyPI or a local/dev build), the check is skipped to
+    avoid prompting them to "downgrade" onto the public PyPI release.
+    """
+    def _check(fork_cfg: dict) -> Optional[ReleaseInfo]:
+        installed = _installed_pkg_version(spec.pypi_package)
+        if not installed:
+            return None
+
+        try:
+            r = requests.get(
+                f"https://pypi.org/pypi/{spec.pypi_package}/json",
+                timeout=_TIMEOUT,
+            )
+            r.raise_for_status()
+            data = r.json()
+        except Exception as exc:
+            logger.debug(
+                f"[update_checker] PyPI metadata fetch failed for "
+                f"{spec.pypi_package}: {exc}"
+            )
+            return None
+
+        releases = data.get("releases", {}) or {}
+        if installed not in releases:
+            logger.info(
+                f"[update_checker] {spec.pypi_package} {installed} not on PyPI — "
+                f"skipping self-update (likely TestPyPI or local dev install)"
+            )
+            return None
+
+        latest = (data.get("info") or {}).get("version")
+        if not latest or _version_tuple(latest) <= _version_tuple(installed):
+            return None
+
+        return ReleaseInfo(
+            tool_key=spec.key,
+            display_name=spec.display_name,
+            installed=installed,
+            latest=latest,
+            latest_sha=None,
+            url=f"https://pypi.org/project/{spec.pypi_package}/{latest}/",
+        )
+
+    return _check
+
+
 def _make_scd_edition_check(spec: ToolSpec) -> Callable:
     """
     scd-edition specific check: compares installed git commit,
@@ -382,12 +433,23 @@ REGISTERED_TOOLS: list[ToolSpec] = [
         pypi_package="hdsemg-select",
         allows_fork=False,
     ),
+    ToolSpec(
+        key="hdsemg_pipe",
+        display_name="hdsemg-pipe",
+        default_owner="",
+        default_repo="",
+        default_branch=None,   # PyPI-only, with TestPyPI skip
+        pypi_package="hdsemg-pipe",
+        allows_fork=False,
+    ),
 ]
 
 # Inject check functions
 for _spec in REGISTERED_TOOLS:
     if _spec.key == "scd_edition":
         _spec.check_fn = _make_scd_edition_check(_spec)
+    elif _spec.key == "hdsemg_pipe":
+        _spec.check_fn = _make_self_pypi_check(_spec)
     elif _spec.default_branch is None and _spec.pypi_package:
         _spec.check_fn = _make_pypi_check(_spec)
     else:
@@ -454,7 +516,7 @@ class UpdateCheckerThread(QThread):
 class CombinedUpdateDialog(QDialog):
     """Single dialog showing all pip-installable updates, one section per tool."""
 
-    _DIALOG_KEYS = {"scd_edition", "hdsemg_select"}
+    _DIALOG_KEYS = {"scd_edition", "hdsemg_select", "hdsemg_pipe"}
 
     def __init__(self, infos: list[ReleaseInfo], parent=None):
         super().__init__(parent)
@@ -485,6 +547,8 @@ class CombinedUpdateDialog(QDialog):
                 layout.addWidget(self._build_scd_section(info))
             elif info.tool_key == "hdsemg_select":
                 layout.addWidget(self._build_hdsemg_select_section(info))
+            elif info.tool_key == "hdsemg_pipe":
+                layout.addWidget(self._build_hdsemg_pipe_section(info))
 
         close_btn = QPushButton("Close")
         close_btn.setStyleSheet(Styles.button_secondary())
@@ -564,6 +628,33 @@ class CombinedUpdateDialog(QDialog):
         v.addLayout(btn_row)
         return w
 
+    def _build_hdsemg_pipe_section(self, info: ReleaseInfo) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setSpacing(Spacing.SM)
+        v.setContentsMargins(0, 0, 0, 0)
+
+        name = QLabel("<b>hdsemg-pipe</b> (this application)")
+        name.setStyleSheet(f"font-size: {Fonts.SIZE_BASE}; color: {Colors.TEXT_PRIMARY};")
+        v.addWidget(name)
+
+        body = QLabel(
+            f"<b>Installed:</b> {info.installed}<br>"
+            f"<b>Latest (PyPI):</b> {info.latest}"
+        )
+        body.setWordWrap(True)
+        body.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+        v.addWidget(body)
+
+        btn_row = QHBoxLayout()
+        btn_install = QPushButton(f"Install {info.latest}")
+        btn_install.setStyleSheet(Styles.button_primary())
+        btn_install.clicked.connect(lambda: self._install_hdsemg_pipe(info))
+        btn_row.addWidget(btn_install)
+        btn_row.addStretch()
+        v.addLayout(btn_row)
+        return w
+
     # -- Install actions -----------------------------------------------------
 
     def _install_scd_main(self, info: ReleaseInfo):
@@ -595,6 +686,10 @@ class CombinedUpdateDialog(QDialog):
     def _install_hdsemg_select(self, info: ReleaseInfo):
         spec = get_tool_spec("hdsemg_select")
         self._run_install("hdsemg-select", spec.pypi_package, scd_sha=None)
+
+    def _install_hdsemg_pipe(self, info: ReleaseInfo):
+        spec = get_tool_spec("hdsemg_pipe")
+        self._run_install("hdsemg-pipe", spec.pypi_package, scd_sha=None)
 
     def _run_install(self, display_name: str, pip_spec: str, *, scd_sha: Optional[str]):
         from PyQt5.QtWidgets import QMessageBox
