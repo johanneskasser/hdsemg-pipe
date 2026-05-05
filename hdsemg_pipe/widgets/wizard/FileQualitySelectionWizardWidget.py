@@ -788,14 +788,18 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         rms_cv.setContentsMargins(0, 0, 0, 0)
         rms_cv.setSpacing(2)
         rms_cv.addWidget(QLabel("RMS NOISE QUALITY", styleSheet=_ts))
-        self._rms_detail_lbl = QLabel("—")
-        self._rms_detail_lbl.setWordWrap(True)
-        self._rms_detail_lbl.setTextFormat(Qt.RichText)
-        self._rms_detail_lbl.setStyleSheet(
-            f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_SM};"
-            f"background:transparent;border:none;"
+        self._rms_grids_container = QWidget()
+        self._rms_grids_container.setStyleSheet("background:transparent;")
+        self._rms_grids_vbox = QVBoxLayout(self._rms_grids_container)
+        self._rms_grids_vbox.setContentsMargins(0, 4, 0, 0)
+        self._rms_grids_vbox.setSpacing(0)
+        placeholder = QLabel("—")
+        placeholder.setStyleSheet(
+            f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+            f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
         )
-        rms_cv.addWidget(self._rms_detail_lbl)
+        self._rms_grids_vbox.addWidget(placeholder)
+        rms_cv.addWidget(self._rms_grids_container)
         stats_layout.addWidget(rms_col)
         stats_layout.addStretch()
 
@@ -1216,24 +1220,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             self._reset_stat(self._dev_value_lbl, self._dev_quality_lbl)
 
         # RMS stat — per-grid breakdown
-        if rms_grids:
-            lines = []
-            for g in rms_grids:
-                std_str = (f" ± {g['std_rms']:.1f}" if g["std_rms"] > 0 else "")
-                color = g["color"]
-                label = g["label"]
-                mean = g["mean_rms"]
-                qlbl = g["quality_label"]
-                lines.append(
-                    f"<span style='color:{color}'>"
-                    f"{label}: {mean:.1f}{std_str} µV "
-                    f"— {qlbl}</span>"
-                )
-            self._rms_detail_lbl.setText("<br>".join(lines))
-        else:
-            self._rms_detail_lbl.setText(
-                f"<span style='color:{Colors.TEXT_PRIMARY}'>—</span>"
-            )
+        self._refresh_rms_display(rms_grids)
 
     # ------------------------------------------------------------------
     # Metric / threshold helpers and slots
@@ -1292,6 +1279,69 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         quality_lbl.setStyleSheet(
             f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};background:transparent;border:none;"
         )
+
+    def _refresh_rms_display(self, grids: Optional[List[dict]]):
+        """Rebuild the per-grid RMS card stack."""
+        layout = self._rms_grids_vbox
+
+        # Clear existing children
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not grids:
+            placeholder = QLabel("—")
+            placeholder.setStyleSheet(
+                f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+                f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
+            )
+            layout.addWidget(placeholder)
+            return
+
+        for i, g in enumerate(grids):
+            # Thin separator between cards (not before first)
+            if i > 0:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.HLine)
+                sep.setFixedHeight(1)
+                sep.setStyleSheet(f"background:{Colors.BORDER_MUTED};border:none;")
+                layout.addWidget(sep)
+
+            card = QWidget()
+            card.setStyleSheet("background:transparent;")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(0, 4, 0, 4)
+            card_layout.setSpacing(1)
+
+            # Grid metadata line (muted, small)
+            meta = QLabel(g["label"])
+            meta.setStyleSheet(
+                f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};"
+                f"background:transparent;border:none;"
+            )
+            card_layout.addWidget(meta)
+
+            # RMS value (large, colored)
+            std_str = f" ± {g['std_rms']:.1f}" if g["std_rms"] > 0 else ""
+            val = QLabel(f"{g['mean_rms']:.1f}{std_str} µV")
+            val.setStyleSheet(
+                f"color:{g['color']};font-size:{Fonts.SIZE_LG};"
+                f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
+            )
+            card_layout.addWidget(val)
+
+            # Quality label (small, colored)
+            qlbl = QLabel(g["quality_label"])
+            qlbl.setStyleSheet(
+                f"color:{g['color']};font-size:{Fonts.SIZE_XS};"
+                f"background:transparent;border:none;"
+            )
+            card_layout.addWidget(qlbl)
+
+            layout.addWidget(card)
+
+        layout.addStretch()
 
     # ------------------------------------------------------------------
     # Plot
