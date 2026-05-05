@@ -791,8 +791,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._rms_grids_container = QWidget()
         self._rms_grids_container.setStyleSheet("background:transparent;")
         self._rms_grids_vbox = QVBoxLayout(self._rms_grids_container)
-        self._rms_grids_vbox.setContentsMargins(0, 4, 0, 0)
-        self._rms_grids_vbox.setSpacing(0)
+        self._rms_grids_vbox.setContentsMargins(0, 3, 0, 0)
+        self._rms_grids_vbox.setSpacing(2)
         placeholder = QLabel("—")
         placeholder.setStyleSheet(
             f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
@@ -1281,10 +1281,9 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         )
 
     def _refresh_rms_display(self, grids: Optional[List[dict]]):
-        """Rebuild the per-grid RMS card stack."""
+        """Rebuild the per-grid RMS row list — one compact line per grid."""
         layout = self._rms_grids_vbox
 
-        # Clear existing children
         while layout.count():
             item = layout.takeAt(0)
             if item.widget():
@@ -1299,47 +1298,24 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             layout.addWidget(placeholder)
             return
 
-        for i, g in enumerate(grids):
-            # Thin separator between cards (not before first)
-            if i > 0:
-                sep = QFrame()
-                sep.setFrameShape(QFrame.HLine)
-                sep.setFixedHeight(1)
-                sep.setStyleSheet(f"background:{Colors.BORDER_MUTED};border:none;")
-                layout.addWidget(sep)
-
-            card = QWidget()
-            card.setStyleSheet("background:transparent;")
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(0, 4, 0, 4)
-            card_layout.setSpacing(1)
-
-            # Grid metadata line (muted, small)
-            meta = QLabel(g["label"])
-            meta.setStyleSheet(
-                f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};"
-                f"background:transparent;border:none;"
+        for g in grids:
+            std_str = f"±{g['std_rms']:.1f} " if g["std_rms"] > 0 else ""
+            c = g["color"]
+            lbl = g["label"]
+            mean = g["mean_rms"]
+            qlabel = g["quality_label"]
+            row = QLabel(
+                f"<span style='color:{c}'>●</span>"
+                f"&nbsp;<span style='color:{Colors.TEXT_MUTED}'>{lbl}</span>"
+                f"&nbsp;&nbsp;<span style='color:{c};font-weight:600'>"
+                f"{mean:.1f}&nbsp;{std_str}µV</span>"
+                f"&nbsp;<span style='color:{c}'>· {qlabel}</span>"
             )
-            card_layout.addWidget(meta)
-
-            # RMS value (large, colored)
-            std_str = f" ± {g['std_rms']:.1f}" if g["std_rms"] > 0 else ""
-            val = QLabel(f"{g['mean_rms']:.1f}{std_str} µV")
-            val.setStyleSheet(
-                f"color:{g['color']};font-size:{Fonts.SIZE_LG};"
-                f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
+            row.setTextFormat(Qt.RichText)
+            row.setStyleSheet(
+                f"font-size:{Fonts.SIZE_XS};background:transparent;border:none;"
             )
-            card_layout.addWidget(val)
-
-            # Quality label (small, colored)
-            qlbl = QLabel(g["quality_label"])
-            qlbl.setStyleSheet(
-                f"color:{g['color']};font-size:{Fonts.SIZE_XS};"
-                f"background:transparent;border:none;"
-            )
-            card_layout.addWidget(qlbl)
-
-            layout.addWidget(card)
+            layout.addWidget(row)
 
         layout.addStretch()
 
