@@ -72,6 +72,14 @@ def to_numpy(val):
 # Plateau detection from mat file force signal
 # ---------------------------------------------------------------------------
 
+def _safe_ref_col(grid, attr: str) -> int | None:
+    """Return the global data column for a Grid ref-path attribute, or None.
+
+    grid.performed_path_idx / requested_path_idx are DIRECT global channel
+    indices (e.g. 34), not indices into grid.ref_indices.  Return them as-is.
+    """
+    return getattr(grid, attr, None)
+
 def detect_plateau_from_mat(
     mat_file: Path,
     grid_key: str | None = None,
@@ -97,23 +105,37 @@ def detect_plateau_from_mat(
 
     On any failure, returns (0, total_samples, sampling_rate).
     """
-    emg_file = EMGFile.load(str(mat_file))
-    fsamp = int(emg_file.sampling_frequency)
-    n_total = emg_file.data.shape[0]
+    try:
+        emg_file = EMGFile.load(str(mat_file))
+        fsamp = int(emg_file.sampling_frequency)
+        n_total = emg_file.data.shape[0]
+    except Exception as exc:
+        print(f"  Plateau detect : EMGFile load failed ({exc}) → using start=0")
+        return 0, 0, 2000
 
-    grid = emg_file.get_grid(grid_key=grid_key) if grid_key else None
-    if grid is None and emg_file.grids:
-        grid = emg_file.grids[0]
+    try:
+        grid = emg_file.get_grid(grid_key=grid_key) if grid_key else None
+        if grid is None and emg_file.grids:
+            grid = emg_file.grids[0]
+    except Exception as exc:
+        print(f"  Plateau detect : get_grid failed ({exc}) → using full signal")
+        grid = None
 
     if grid is None:
         print("  Plateau detect : no grid found in description → using full signal")
         return 0, n_total, fsamp
 
-    ref_target = ref_measured = None
-    if grid.requested_path_idx is not None and grid.ref_indices:
-        ref_target = emg_file.data[:, grid.ref_indices[grid.requested_path_idx]].astype(np.float64)
-    if grid.performed_path_idx is not None and grid.ref_indices:
-        ref_measured = emg_file.data[:, grid.ref_indices[grid.performed_path_idx]].astype(np.float64)
+    try:
+        ref_target = ref_measured = None
+        target_col   = _safe_ref_col(grid, "requested_path_idx")
+        measured_col = _safe_ref_col(grid, "performed_path_idx")
+        if target_col is not None:
+            ref_target = emg_file.data[:, target_col].astype(np.float64)
+        if measured_col is not None:
+            ref_measured = emg_file.data[:, measured_col].astype(np.float64)
+    except Exception as exc:
+        print(f"  Plateau detect : ref signal access failed ({exc}) → using full signal")
+        return 0, n_total, fsamp
 
     if ref_target is None or ref_measured is None:
         print("  Plateau detect : ref signals not found in description → using full signal")
@@ -233,17 +255,22 @@ def load_ref_signal_from_mat(
     emg_file = EMGFile.load(str(mat_file))
     n_total = emg_file.data.shape[0]
 
-    grid = emg_file.get_grid(grid_key=grid_key) if grid_key else None
-    if grid is None and emg_file.grids:
-        grid = emg_file.grids[0]
+    try:
+        grid = emg_file.get_grid(grid_key=grid_key) if grid_key else None
+        if grid is None and emg_file.grids:
+            grid = emg_file.grids[0]
+    except Exception as exc:
+        print(f"  Ref signal : get_grid failed ({exc}) → zeros")
+        end_sample = (start_sample + n_samples) if n_samples else n_total
+        return np.zeros(end_sample - start_sample, dtype=np.float64), -1
 
     end_sample = (start_sample + n_samples) if n_samples else n_total
 
-    if grid is None or grid.performed_path_idx is None or not grid.ref_indices:
+    ref_col_idx = None if grid is None else _safe_ref_col(grid, "performed_path_idx")
+    if ref_col_idx is None:
         print("  Ref signal : performed path not found in description → zeros")
         return np.zeros(end_sample - start_sample, dtype=np.float64), -1
 
-    ref_col_idx = grid.ref_indices[grid.performed_path_idx]
     ref = emg_file.data[start_sample:end_sample, ref_col_idx].astype(np.float64)
     return ref, ref_col_idx
 
