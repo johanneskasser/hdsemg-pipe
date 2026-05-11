@@ -130,6 +130,7 @@ _JSON_TO_PREPROC_MAP = [
 def build_preprocessing_config(
     algo_params: dict,
     n_ch: int,
+    filter_dim: Optional[int] = None,
     sampling_rate: int = 2000,
 ) -> dict:
     """
@@ -163,17 +164,37 @@ def build_preprocessing_config(
         if json_key in scd_keys and json_key not in cfg and val is not None:
             cfg[json_key] = val
 
-    # extension_factor: when null in JSON, use the SCD formula round(1000 / n_good_channels)
+    # extension_factor: when null in JSON, use the SCD formula round(1000 / n_good_channels).
+    # When chans_per_electrode is not set (pkl has no embedded EMG), recover n_ch from
+    # filter_dim via the inverse: filter_dim = n_ch * round(1000/n_ch).
+    # Multiple n_ch values can satisfy this, so we search over typical HD-EMG electrode
+    # grid sizes first to select the physically meaningful answer.
+    _TYPICAL_GRID_CHANNELS = [32, 64, 65, 48, 128, 24, 16, 96, 256]
     if not cfg.get("extension_factor"):
-        if n_ch > 0:
-            inferred = round(1000 / n_ch)
+        effective_n_ch = n_ch
+        if effective_n_ch <= 0 and filter_dim:
+            # Search typical sizes first, then the full range as fallback
+            search_order = _TYPICAL_GRID_CHANNELS + [
+                c for c in range(1, filter_dim + 1)
+                if c not in _TYPICAL_GRID_CHANNELS
+            ]
+            for candidate in search_order:
+                if candidate > 0 and candidate * round(1000 / candidate) == filter_dim:
+                    effective_n_ch = candidate
+                    print(f"    [algo_params] n_ch recovered from filter_dim "
+                          f"{filter_dim}: {effective_n_ch}")
+                    break
+        if effective_n_ch > 0:
+            inferred = round(1000 / effective_n_ch)
             cfg["extension_factor"] = inferred
-            print(f"    [algo_params] extension_factor auto-inferred: "
-                  f"round(1000/{n_ch}) = {inferred}")
+            print(f"    [algo_params] extension_factor: "
+                  f"round(1000/{effective_n_ch}) = {inferred}")
         else:
             raise ValueError(
-                f"extension_factor is null in algorithm_params and n_ch={n_ch} "
-                f"— cannot compute round(1000/n_ch). Provide extension_factor explicitly."
+                f"extension_factor is null in algorithm_params and channel count "
+                f"cannot be determined (chans_per_electrode={n_ch}, "
+                f"filter_dim={filter_dim}). Re-run with --mat-dir to embed EMG "
+                f"(which sets the channel count), or set extension_factor explicitly."
             )
 
     # Mandatory defaults for keys not present in the JSON
@@ -372,13 +393,28 @@ def _apply_algo_params_config(data: dict, algo_params: dict, sampling_rate: int)
     """
     ports     = data.get("ports", [None])
     chans_lst = data.get("chans_per_electrode", [])
+    mf_lst    = data.get("mu_filters", [])
 
     new_configs = []
     for port_idx in range(len(ports)):
-        n_ch = int(chans_lst[port_idx]) if port_idx < len(chans_lst) else 0
+        # chans_per_electrode may be absent or None when no EMG is embedded yet
+        n_ch = 0
+        if port_idx < len(chans_lst) and chans_lst[port_idx] is not None:
+            try:
+                n_ch = int(chans_lst[port_idx])
+            except (TypeError, ValueError):
+                n_ch = 0
+
+        # filter_dim lets us recover n_ch when chans_per_electrode is not set
+        filter_dim = None
+        mf_port = mf_lst[port_idx] if port_idx < len(mf_lst) else None
+        if isinstance(mf_port, list) and mf_port:
+            filter_dim = int(np.asarray(mf_port[0]).size)
+        elif isinstance(mf_port, np.ndarray):
+            filter_dim = int(mf_port.shape[0])
 
         new_configs.append(
-            build_preprocessing_config(algo_params, n_ch, sampling_rate)
+            build_preprocessing_config(algo_params, n_ch, filter_dim, sampling_rate)
         )
 
     data["preprocessing_config"] = new_configs

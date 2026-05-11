@@ -259,11 +259,15 @@ class _PklMergeWorker(QThread):
                     )
                     return
 
+            mat_dirs = [str(channelselection)] if channelselection.is_dir() else []
+
             self.progress.emit("Checking PKL format compatibility…")
-            detect_and_upgrade_pkl.process_path(target)
+            detect_and_upgrade_pkl.process_path(
+                target,
+                mat_dirs=mat_dirs or None,
+            )
 
             self.progress.emit("Merging single-grid PKLs into multi-port files…")
-            mat_dirs = [str(channelselection)] if channelselection.is_dir() else []
             merge_grid_pkls.process(
                 target=target, out_dir=target, mat_dirs=mat_dirs,
                 algo_dir=algo_dir,
@@ -1234,12 +1238,16 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         else:
             self.error("PKL merge produced no files. Check decomposition_auto/ folder.")
             self._update_button_states()
+            # Restore the button so the user can fix the issue and try again
+            self.btn_launch_scd.setEnabled(True)
 
     def _on_pkl_merge_error(self, msg: str):
         self.pkl_merge_worker = None
         self.loading_label.setVisible(False)
         self.error(f"PKL preparation failed: {msg}")
         self._update_button_states()
+        # Restore the button so the user can fix the issue and try again
+        self.btn_launch_scd.setEnabled(True)
 
     # ------------------------------------------------------------------
     # PKL path: scanning and progress UI
