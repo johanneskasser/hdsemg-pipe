@@ -338,7 +338,6 @@ def load_aux_channels_from_mat(
     Returns an empty list if neither reference signal can be found.
     """
     try:
-        from scd.models.emgfile import EMGFile
         emg_file = EMGFile.load(str(mat_file))
         n_total = emg_file.data.shape[0]
     except Exception as exc:
