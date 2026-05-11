@@ -224,10 +224,12 @@ class _PklMergeWorker(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, source_path: str, channelselection_path: str, parent=None):
+    def __init__(self, source_path: str, channelselection_path: str,
+                 algo_dir: str = "", parent=None):
         super().__init__(parent)
         self.source_path = source_path
         self.channelselection_path = channelselection_path
+        self.algo_dir = algo_dir
 
     def run(self):
         try:
@@ -236,13 +238,36 @@ class _PklMergeWorker(QThread):
 
             target = _Path(self.source_path)
             channelselection = _Path(self.channelselection_path)
+            algo_dir = _Path(self.algo_dir) if self.algo_dir else None
+
+            # ── Pre-flight: verify algorithm_params file exists ───────────────
+            if algo_dir is not None and algo_dir.is_dir():
+                json_path = merge_grid_pkls.find_algo_params_json(algo_dir)
+                if json_path is None:
+                    scd_keys = merge_grid_pkls._get_scd_preprocess_config_keys()
+                    params_list = "\n".join(f"  • {k}" for k in scd_keys)
+                    self.error.emit(
+                        f"No algorithm_param*.json file found in:\n"
+                        f"  {algo_dir}\n\n"
+                        f"This file is written by SCD during decomposition and is required "
+                        f"to correctly reconstruct the preprocessing pipeline for each grid.\n\n"
+                        f"Parameters currently read by SCD edition "
+                        f"(resolved dynamically from the installed package):\n"
+                        f"{params_list}\n\n"
+                        f"Please ensure the decomposition_auto folder contains an "
+                        f"algorithm_params*.json file and try again."
+                    )
+                    return
 
             self.progress.emit("Checking PKL format compatibility…")
             detect_and_upgrade_pkl.process_path(target)
 
             self.progress.emit("Merging single-grid PKLs into multi-port files…")
             mat_dirs = [str(channelselection)] if channelselection.is_dir() else []
-            merge_grid_pkls.process(target=target, out_dir=target, mat_dirs=mat_dirs)
+            merge_grid_pkls.process(
+                target=target, out_dir=target, mat_dirs=mat_dirs,
+                algo_dir=algo_dir,
+            )
 
             merged = [
                 str(p) for p in sorted(target.glob("*.pkl"))
@@ -1187,7 +1212,11 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self.loading_label.setText("Preparing PKL files…")
         self.loading_label.setVisible(True)
 
-        self.pkl_merge_worker = _PklMergeWorker(source_folder, channelselection or "")
+        auto_folder = global_state.get_decomposition_path()
+        self.pkl_merge_worker = _PklMergeWorker(
+            source_folder, channelselection or "",
+            algo_dir=auto_folder or "",
+        )
         self.pkl_merge_worker.progress.connect(self._on_pkl_merge_progress)
         self.pkl_merge_worker.finished.connect(self._on_pkl_merge_finished)
         self.pkl_merge_worker.error.connect(self._on_pkl_merge_error)

@@ -47,6 +47,7 @@ from convert_pkl_to_scd_edition import (
     find_mat_for_pkl,
     convert,
     load_emg_from_mat,
+    load_aux_channels_from_mat,
     detect_plateau_from_mat,
 )
 from detect_and_upgrade_pkl import (
@@ -452,6 +453,12 @@ def _load_and_convert(pkl_path: Path, mat_dirs: list,
                     data["plateau_coords"]      = [0, int(emg_new.shape[1])]
                     print(f"      Re-embedded EMG: {emg_new.shape}  "
                           f"(start_sample={plateau_start})")
+                    aux = load_aux_channels_from_mat(
+                        mat_file, grid_key=grid_key,
+                        start_sample=plateau_start, n_samples=n_samples,
+                    )
+                    if aux:
+                        data["aux_channels"] = aux
                 except Exception as e:
                     print(f"      EMG re-embed failed for {pkl_path.name}: {e}")
         return data, "new"
@@ -481,6 +488,12 @@ def _load_and_convert(pkl_path: Path, mat_dirs: list,
                         start_sample=plateau_start, n_samples=n_samples,
                     )
                     etype = _get_electrode_type(mat_file, grid_key)
+                    aux = load_aux_channels_from_mat(
+                        mat_file, grid_key=grid_key,
+                        start_sample=plateau_start, n_samples=n_samples,
+                    )
+                    if aux:
+                        data["aux_channels"] = aux
                 except Exception as e:
                     print(f"      EMG load failed for {pkl_path.name}: {e}")
 
@@ -518,17 +531,17 @@ def process(target: Path, out_dir: Path, mat_dirs: list,
         json_path = find_algo_params_json(algo_dir)
         if json_path is None:
             print(
-                f"ERROR: No algorithm_param*.json found in '{algo_dir}'.\n"
-                f"       Provide the folder that contains the algorithm parameters file\n"
-                f"       used during decomposition (e.g. the decomposition_auto folder),\n"
-                f"       or omit --algo-dir to fall back to auto-inference."
+                f"WARNING: No algorithm_param*.json found in '{algo_dir}' — "
+                f"falling back to auto-inference of extension_factor.\n"
+                f"         For correct results, provide the decomposition_auto folder "
+                f"that contains the algorithm parameters file."
             )
-            return
-        with open(json_path, "r", encoding="utf-8") as fh:
-            algo_params = json.load(fh)
-        print(f"Algorithm params : {json_path.name}")
-        scd_keys = _get_scd_preprocess_config_keys()
-        print(f"SCD config keys  : {scd_keys}\n")
+        else:
+            with open(json_path, "r", encoding="utf-8") as fh:
+                algo_params = json.load(fh)
+            print(f"Algorithm params : {json_path.name}")
+            scd_keys = _get_scd_preprocess_config_keys()
+            print(f"SCD config keys  : {scd_keys}\n")
 
     pattern = "**/*.pkl" if recursive else "*.pkl"
     all_pkls = [

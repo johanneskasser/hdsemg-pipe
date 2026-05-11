@@ -317,6 +317,72 @@ def load_emg_from_mat(
     return emg, len(good_channels), good_channels
 
 
+def load_aux_channels_from_mat(
+    mat_file: Path,
+    grid_key: str | None = None,
+    start_sample: int = 0,
+    n_samples: int | None = None,
+) -> list:
+    """
+    Extract reference signals (requested and performed path) from a .mat file
+    and return them as a list of aux_channel dicts ready for storage in a
+    scd-edition pkl.
+
+    Each dict has the form::
+
+        {"name": str, "data": np.ndarray (float32, 1-D), "meta": {"name": str}}
+
+    Both ``name`` and ``meta.name`` are populated so the signal label appears
+    correctly in both the Edition tab and the Visualisation tab of scd-edition.
+
+    Returns an empty list if neither reference signal can be found.
+    """
+    try:
+        from scd.models.emgfile import EMGFile
+        emg_file = EMGFile.load(str(mat_file))
+        n_total = emg_file.data.shape[0]
+    except Exception as exc:
+        print(f"  Aux channels : EMGFile load failed ({exc})")
+        return []
+
+    try:
+        grid = emg_file.get_grid(grid_key=grid_key) if grid_key else None
+        if grid is None and emg_file.grids:
+            grid = emg_file.grids[0]
+    except Exception:
+        grid = None
+
+    if grid is None:
+        print("  Aux channels : no grid found → skipping reference signals")
+        return []
+
+    end_sample = (start_sample + n_samples) if n_samples else n_total
+    aux: list = []
+
+    for attr, label in (
+        ("requested_path_idx", "Requested Path"),
+        ("performed_path_idx", "Performed Path"),
+    ):
+        col = _safe_ref_col(grid, attr)
+        if col is None:
+            continue
+        try:
+            sig = emg_file.data[start_sample:end_sample, col].astype(np.float32)
+            aux.append({
+                "name": label,
+                "data": sig,
+                "meta": {"name": label},
+            })
+        except Exception as exc:
+            print(f"  Aux channels : could not read '{label}' (col {col}): {exc}")
+
+    if aux:
+        names = [ch["name"] for ch in aux]
+        print(f"  Aux channels : {names}  ({len(aux[0]['data'])} samples)")
+
+    return aux
+
+
 # ---------------------------------------------------------------------------
 # Core conversion
 # ---------------------------------------------------------------------------
