@@ -5,7 +5,7 @@ from threading import Lock
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.config.config_enums import Settings
 
-CONFIG_FILE = "config/config.json"
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 class ConfigManager:
     _instance = None
