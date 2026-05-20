@@ -884,6 +884,14 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         )
         if files:
             self._populate_file_list(files)
+            manifest_path = Path(global_state.get_analysis_path()) / "mu_quality_selection.json"
+            if manifest_path.exists():
+                try:
+                    with open(manifest_path, "r", encoding="utf-8") as fh:
+                        manifest = json.load(fh)
+                    self.restore_from_manifest(manifest)
+                except Exception as exc:
+                    logger.warning("Could not restore MU quality manifest: %s", exc)
 
     # -- Public API ------------------------------------------------------------
 
