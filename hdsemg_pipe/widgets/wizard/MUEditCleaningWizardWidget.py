@@ -286,6 +286,73 @@ class _PklMergeWorker(QThread):
             self.error.emit(str(exc))
 
 
+class FlaggedMUsDialog(QDialog):
+    """Modal dialog shown when a saved _edited.pkl contains MUs flagged but not yet deleted."""
+
+    def __init__(self, file_stem: str, flagged_mus: dict, is_final_check: bool = False,
+                 parent=None):
+        super().__init__(parent)
+        self.choice = "keep"
+        title = "Final Check: Flagged Motor Units" if is_final_check else "Flagged Motor Units Detected"
+        self.setWindowTitle(title)
+        self.setMinimumWidth(480)
+        self._build_ui(file_stem, flagged_mus)
+
+    def _build_ui(self, file_stem: str, flagged_mus: dict) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(Spacing.MD)
+
+        heading = QLabel("Flagged Motor Units Found")
+        heading.setStyleSheet(
+            f"font-size: 15px; font-weight: bold; color: {Colors.TEXT_PRIMARY};"
+        )
+        layout.addWidget(heading)
+
+        msg = QLabel(
+            f"<b>{file_stem}</b><br><br>"
+            f"scd-edition has flagged the following motor units for deletion. "
+            f"They have not been removed yet. What would you like to do?"
+        )
+        msg.setWordWrap(True)
+        msg.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+        layout.addWidget(msg)
+
+        total = 0
+        for port_name, mu_indices in sorted(flagged_mus.items()):
+            if not mu_indices:
+                continue
+            idx_str = ", ".join(str(i) for i in sorted(mu_indices))
+            n = len(mu_indices)
+            lbl = QLabel(f"  • <b>{port_name}</b>: MU {idx_str} ({n} MU{'s' if n > 1 else ''})")
+            lbl.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_SM};")
+            layout.addWidget(lbl)
+            total += n
+
+        summary = QLabel(f"<b>Total: {total} flagged MU{'s' if total != 1 else ''}</b>")
+        summary.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};")
+        layout.addWidget(summary)
+
+        btn_row = QHBoxLayout()
+        btn_delete = QPushButton("Delete Flagged MUs")
+        btn_delete.setStyleSheet(Styles.button_primary())
+        btn_keep = QPushButton("Keep Flagged MUs")
+        btn_keep.setStyleSheet(Styles.button_secondary())
+        btn_row.addWidget(btn_delete)
+        btn_row.addWidget(btn_keep)
+        layout.addLayout(btn_row)
+
+        btn_delete.clicked.connect(self._on_delete)
+        btn_keep.clicked.connect(self._on_keep)
+
+    def _on_delete(self) -> None:
+        self.choice = "delete"
+        self.accept()
+
+    def _on_keep(self) -> None:
+        self.choice = "keep"
+        self.accept()
+
+
 class MUEditCleaningWizardWidget(WizardStepWidget):
     """
     Step 10: Manual cleaning with MUEdit.
@@ -333,6 +400,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
         self._use_pkl = False
         self.scd_skipped_files = {}       # pkl_path -> skip_reason
         self.scd_files_not_saved = []     # list of (pkl_path, output_path) tuples
+        self._flagged_mus_handled: set = set()  # edited_path strings acted upon this session
 
         # Loading animation timer
         self.loading_animation_timer = QTimer(self)
@@ -1364,6 +1432,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             self.file_status_layout.addWidget(status_label)
 
         if total > 0 and completed >= total and not self.step_completed:
+            self._do_final_flagged_mus_check()
             logger.info(f"All PKL files done! {edited} edited, {skipped} skipped")
             self.complete_step()
 
@@ -1400,6 +1469,7 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
     def _on_scd_file_done(self, edited_path):
         if edited_path not in self.edited_pkl_files:
             self.edited_pkl_files.append(edited_path)
+        self._check_flagged_mus_in_file(edited_path)
         self._update_pkl_progress_ui()
 
     def _on_scd_file_not_saved(self, pkl_path, output_path):
@@ -1522,6 +1592,73 @@ class MUEditCleaningWizardWidget(WizardStepWidget):
             logger.info("Saved %d scd-edition skipped files to %s", len(self.scd_skipped_files), path)
         except Exception as e:
             logger.error("Failed to save scd skipped files: %s", e)
+
+    def _check_flagged_mus_in_file(self, edited_path: str, is_final_check: bool = False) -> None:
+        """Load an edited PKL and prompt the user if it contains flagged-but-not-deleted MUs."""
+        if edited_path in self._flagged_mus_handled:
+            return
+
+        self._flagged_mus_handled.add(edited_path)
+
+        try:
+            from pathlib import Path as _Path
+            from hdsemg_pipe.actions.decomposition_file import DecompositionFile
+            decomp = DecompositionFile.load(_Path(edited_path))
+        except Exception as exc:
+            logger.warning("Could not read edited PKL for flagged MU check (%s): %s",
+                           edited_path, exc)
+            return
+
+        pkl_data = decomp._pkl
+        if pkl_data is None:
+            return
+
+        raw = pkl_data.get("flagged_mus", {})
+        flagged_mus = {port: indices for port, indices in raw.items() if indices}
+        if not flagged_mus:
+            return
+
+        stem = os.path.splitext(os.path.basename(edited_path))[0]
+        dialog = FlaggedMUsDialog(stem, flagged_mus, is_final_check=is_final_check, parent=self)
+        dialog.exec_()
+
+        if dialog.choice == "delete":
+            self._apply_flagged_mu_deletion(edited_path, decomp, flagged_mus)
+
+    def _apply_flagged_mu_deletion(self, edited_path: str, decomp,
+                                   flagged_mus: dict) -> None:
+        """Remove flagged MUs from the PKL and overwrite the file in-place."""
+        from pathlib import Path as _Path
+
+        if decomp._pkl is None:
+            return
+
+        ports = decomp._pkl.get("ports", [])
+        dt_list = decomp._pkl.get("discharge_times", [])
+
+        keep_by_port: dict = {}
+        for port_idx, dt_port in enumerate(dt_list):
+            port_name = ports[port_idx] if port_idx < len(ports) else str(port_idx)
+            flagged = set(flagged_mus.get(port_name, []))
+            keep_by_port[port_idx] = {i for i in range(len(dt_port)) if i not in flagged}
+
+        # Clear the flag before saving so the check is not re-triggered next session
+        decomp._pkl["flagged_mus"] = {}
+        decomp._pkl_keep_indices = keep_by_port
+
+        try:
+            decomp.save(_Path(edited_path))
+            removed = sum(len(v) for v in flagged_mus.values())
+            logger.info("Deleted %d flagged MU(s) from %s", removed, edited_path)
+        except Exception as exc:
+            logger.error("Failed to save PKL after flagged MU deletion (%s): %s",
+                         edited_path, exc)
+
+    def _do_final_flagged_mus_check(self) -> None:
+        """Check all edited PKLs for unhandled flagged MUs before marking the step complete."""
+        unhandled = [p for p in self.edited_pkl_files if p not in self._flagged_mus_handled]
+        for edited_path in unhandled:
+            self._check_flagged_mus_in_file(edited_path, is_final_check=True)
 
     def _scd_skip_file(self, pkl_path, reason=""):
         self.scd_skipped_files[pkl_path] = reason
