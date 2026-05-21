@@ -1,11 +1,14 @@
 import json
-import os
+import shutil
 import enum
+from pathlib import Path
 from threading import Lock
-from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe._log.log_config import logger, APP_DIR
 from hdsemg_pipe.config.config_enums import Settings
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+CONFIG_FILE = APP_DIR / "config.json"
+_LEGACY_CONFIG_FILE = Path(__file__).parent / "config.json"
+
 
 class ConfigManager:
     _instance = None
@@ -20,9 +23,17 @@ class ConfigManager:
                 cls._instance.load_config()
         return cls._instance
 
+    def _migrate_legacy_config(self):
+        """Copy config from old package location to user dir on first run."""
+        if not CONFIG_FILE.exists() and _LEGACY_CONFIG_FILE.exists():
+            CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_LEGACY_CONFIG_FILE, CONFIG_FILE)
+            logger.info(f"Migrated config to {CONFIG_FILE}")
+
     def load_config(self):
         """Load configuration from JSON file."""
-        if os.path.exists(CONFIG_FILE):
+        self._migrate_legacy_config()
+        if CONFIG_FILE.exists():
             with open(CONFIG_FILE, "r") as f:
                 try:
                     self.settings = json.load(f)
@@ -32,15 +43,15 @@ class ConfigManager:
                     logger.error("Failed to open config file.")
                     self.check_installations()
         else:
-            logger.error("Config file does not exist yet. Creating...")
-            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-            open(CONFIG_FILE, "a").close()
+            logger.info("Config file not found, creating new one...")
+            CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            CONFIG_FILE.touch()
             self.settings = {}
             self.check_installations()
 
     def save_config(self):
         """Save configuration to JSON file."""
-        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
         with open(CONFIG_FILE, "w") as f:
             json.dump(self.settings, f, indent=4)

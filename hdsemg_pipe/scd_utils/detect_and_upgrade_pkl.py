@@ -88,6 +88,7 @@ def upgrade_in_place(path: Path, data: dict, sampling_rate: int = 2000, backup: 
         shutil.copy2(path, path.with_suffix(".pkl.bak"))
 
     emg = n_ch = ch_idx = None
+    mat_file = grid_key = None
     if mat_dirs:
         from convert_pkl_to_scd_edition import find_mat_for_pkl, load_emg_from_mat
         n_pkl_samples = len(data.get("source", [{}])[0]) if data.get("source") else None
@@ -100,7 +101,11 @@ def upgrade_in_place(path: Path, data: dict, sampling_rate: int = 2000, backup: 
                 print(f"      EMG load failed: {e}")
 
     new_data = convert(data, sampling_rate=sampling_rate, emg=emg, n_channels=n_ch, channel_indices_global=ch_idx)
-    with open(path, "wb") as f:
+    if mat_file and grid_key:
+        etype = _get_electrode_type(mat_file, grid_key)
+        if etype is not None:
+            new_data["electrodes"] = [etype]
+    with open(path, "wb") as f:  # noqa: S403 - trusted internal SCD output
         pickle.dump(new_data, f)
 
 

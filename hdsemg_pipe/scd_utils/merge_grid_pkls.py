@@ -487,6 +487,10 @@ def _load_and_convert(pkl_path: Path, mat_dirs: list,
                     data["chans_per_electrode"] = [n_ch_new]
                     data["channel_indices"]     = [list(range(n_ch_new))]
                     data["plateau_coords"]      = [0, int(emg_new.shape[1])]
+                    if data.get("electrodes", [None])[0] is None:
+                        etype = _get_electrode_type(mat_file, grid_key)
+                        if etype is not None:
+                            data["electrodes"] = [etype]
                     print(f"      Re-embedded EMG: {emg_new.shape}  "
                           f"(start_sample={plateau_start})")
                     aux = load_aux_channels_from_mat(

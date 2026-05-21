@@ -1,7 +1,15 @@
 import logging
 import logging.config
+from pathlib import Path
+
+APP_DIR = Path.home() / ".hdsemg-pipe"
+LOG_DIR = APP_DIR / "logs"
+
 
 def setup_logging():
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = str(LOG_DIR / "hdsemg-pipe.log")
+
     logging_config = {
         'version': 1,
         'disable_existing_loggers': False,
@@ -24,7 +32,7 @@ def setup_logging():
                 'class': 'logging.handlers.RotatingFileHandler',
                 'formatter': 'standard',
                 'level': 'DEBUG',
-                'filename': 'hdsemg-pipe.log',
+                'filename': log_file,
                 'mode': 'a',
                 'maxBytes': 1_000_000,  # 1 MB
                 'backupCount': 3,  # Keep 3 backup files
