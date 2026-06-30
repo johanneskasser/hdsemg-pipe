@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "hdsemg-pipe"
+abstract: "A PyQt5-based desktop pipeline for HD-sEMG preprocessing, quality control, and motor unit workflow orchestration."
+type: software
+authors:
+  - family-names: Kasser
+    given-names: Johannes
+    orcid: "https://orcid.org/0009-0009-3124-7755"
+  - family-names: Penasso
+    given-names: Harald
+    orcid: "https://orcid.org/0000-0002-4583-9948"
+repository-code: "https://github.com/johanneskasser/hdsemg-pipe"
+license: MIT
+version: 0.3.0
+date-released: 2026-06-30
