@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFontMetrics, QPainter
+from PyQt5.QtWidgets import QStyleFactory
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -56,8 +57,9 @@ from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.decomposition_file import DecompositionFile, ReliabilityThresholds
 from hdsemg_pipe.actions.file_grouping import get_group_key, shorten_group_labels
 from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.ui_elements.elided_label import ElidedLabel
 from hdsemg_pipe.ui_elements.loading_overlay import LoadingOverlay
-from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Spacing, Styles
+from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Fonts, Spacing, Styles
 from hdsemg_pipe.ui_elements.toast import toast_manager
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 
@@ -486,7 +488,49 @@ class _CustomGroupingDialog(QDialog):
 # File list items
 # ---------------------------------------------------------------------------
 
-_LIST_ROW_HEIGHT = 26  # Shared fixed height for group headers and file items
+_LIST_ROW_HEIGHT = 28  # Shared fixed height for group headers and file items
+
+_INPUT_STYLE = f"""
+    QDoubleSpinBox {{
+        background-color: {Colors.BG_PRIMARY};
+        color: {Colors.TEXT_PRIMARY};
+        border: 1px solid {Colors.BORDER_DEFAULT};
+        border-radius: {BorderRadius.MD};
+        padding: 3px 6px;
+        font-size: {Fonts.SIZE_BASE};
+    }}
+    QDoubleSpinBox:focus {{ border-color: {Colors.BLUE_500}; }}
+"""
+
+_MU_TABLE_STYLE = f"""
+    QTableWidget {{
+        background-color: {Colors.BG_PRIMARY};
+        border: 1px solid {Colors.BORDER_MUTED};
+        border-radius: {BorderRadius.MD};
+        gridline-color: {Colors.BG_PRIMARY};
+        font-size: {Fonts.SIZE_BASE};
+        color: {Colors.TEXT_PRIMARY};
+    }}
+    QHeaderView::section {{
+        background-color: {Colors.BG_SECONDARY};
+        color: {Colors.TEXT_SECONDARY};
+        border: none;
+        border-bottom: 1px solid {Colors.BORDER_MUTED};
+        padding: 8px 10px;
+        font-size: {Fonts.SIZE_SM};
+        font-weight: {Fonts.WEIGHT_SEMIBOLD};
+    }}
+"""
+
+
+def _name_within_group(filepath: str, group_key: str) -> str:
+    """File name without the group prefix (the group header already shows it)."""
+    name = Path(filepath).name
+    if group_key and name.startswith(group_key):
+        rest = name[len(group_key):].lstrip("_")
+        if rest and not rest.startswith("."):  # only the extension left -> keep the full name
+            return rest
+    return name
 
 
 class _ElidedLabel(QLabel):
@@ -607,10 +651,9 @@ class _FileListItem(QWidget):
         )
         layout.addWidget(self.checkbox)
 
-        self.name_label = QLabel(label)
-        self.name_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
-        layout.addWidget(self.name_label)
-        layout.addStretch()
+        self.name_label = ElidedLabel(label, Fonts.SIZE_SM, Fonts.WEIGHT_NORMAL, Colors.TEXT_PRIMARY)
+        self.name_label.setToolTip(Path(filepath).name)
+        layout.addWidget(self.name_label, 1)
 
         self.setCursor(Qt.PointingHandCursor)
 
@@ -649,13 +692,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM
         )
         self.main_layout.setSpacing(Spacing.XS)
-        self.content_card.setStyleSheet(f"""
-            QFrame {{
-                background-color: {Colors.BG_PRIMARY};
-                border: 1px solid {Colors.BORDER_DEFAULT};
-                border-radius: {BorderRadius.LG};
-            }}
-        """)
+        self.use_scoped_content_card()
         self.content_layout.setContentsMargins(
             Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM
         )
@@ -716,7 +753,12 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # names are elided instead
+        scroll.setStyleSheet(f"""
+            QScrollBar:vertical {{ background: transparent; width: 8px; }}
+            QScrollBar::handle:vertical {{ background: {Colors.GRAY_300}; border-radius: 4px; min-height: 20px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+        """)
 
         self._file_list_widget = QWidget()
         self._file_list_layout = QVBoxLayout(self._file_list_widget)
@@ -738,7 +780,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._pills_col_scroll.setFrameShape(QFrame.NoFrame)
         self._pills_col_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._pills_col_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._pills_col_scroll.setFixedWidth(90)
+        self._pills_col_scroll.setFixedWidth(104)
 
         # Bidirectional V-scroll sync (Qt skips signal if value unchanged → no loop)
         scroll.verticalScrollBar().valueChanged.connect(
@@ -786,9 +828,20 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
         # Threshold bar
         threshold_bar = QFrame()
-        threshold_bar.setStyleSheet(Styles.card())
+        threshold_bar.setObjectName("thresholdBar")
+        threshold_bar.setStyleSheet(
+            f"QFrame#thresholdBar {{ background: {Colors.BG_SECONDARY}; border: 1px solid {Colors.BORDER_MUTED};"
+            f" border-radius: {BorderRadius.LG}; }}"
+        )
         tb_layout = QHBoxLayout(threshold_bar)
-        tb_layout.setContentsMargins(Spacing.MD, Spacing.SM, Spacing.MD, Spacing.SM)
+        tb_layout.setContentsMargins(Spacing.LG, Spacing.SM, Spacing.LG, Spacing.SM)
+        tb_layout.setSpacing(Spacing.MD)
+        tb_caption = QLabel("A motor unit is kept when")
+        tb_caption.setStyleSheet(
+            f"QLabel {{ color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};"
+            " border: none; padding: 0; background: transparent; }"
+        )
+        tb_layout.addWidget(tb_caption)
 
         self._sil_check = QCheckBox("SIL >=")
         self._sil_check.setChecked(True)
@@ -816,6 +869,10 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._covisi_spin.setValue(30.0)
         self._covisi_spin.setSuffix(" %")
 
+        for spin in (self._sil_spin, self._pnr_spin, self._covisi_spin):
+            spin.setStyle(QStyleFactory.create("Fusion"))
+            spin.setStyleSheet(_INPUT_STYLE)
+            spin.setMinimumWidth(96)
         for w in [
             self._sil_check, self._sil_spin,
             self._pnr_check, self._pnr_spin,
@@ -838,6 +895,9 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._plot_dropdown.addItems(
             ["Discharge Rate (IDR)", "Discharge Times", "MUAPs"]
         )
+        self._plot_dropdown.setStyle(QStyleFactory.create("Fusion"))
+        self._plot_dropdown.setStyleSheet(Styles.combobox())
+        self._plot_dropdown.setMaximumWidth(240)
         plot_layout.addWidget(self._plot_dropdown)
 
         self._canvas_container = QWidget()
@@ -865,7 +925,14 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._mu_table.setHorizontalHeaderLabels(
             ["#", "SIL", "PNR (dB)", "CoVISI (%)", "DR (pps)", "Spikes", "Decision"]
         )
+        self._mu_table.setStyleSheet(_MU_TABLE_STYLE)
         self._mu_table.horizontalHeader().setStretchLastSection(True)
+        for col in range(6):
+            self._mu_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        self._mu_table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._mu_table.verticalHeader().setVisible(False)
+        self._mu_table.verticalHeader().setDefaultSectionSize(32)
+        self._mu_table.setShowGrid(False)
         self._mu_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._mu_table.setSelectionMode(QTableWidget.NoSelection)
         self._mu_table.setToolTip("Click Decision cell to toggle Keep / Filter override")
@@ -873,14 +940,20 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         table_layout.addWidget(self._mu_table)
         content_splitter.addWidget(table_panel)
 
-        content_splitter.setSizes([650, 350])
+        content_splitter.setSizes([560, 640])
+        content_splitter.setStyleSheet(
+            f"QSplitter::handle {{ background: {Colors.BORDER_MUTED}; }} QSplitter::handle:horizontal {{ width: 2px; }}"
+        )
         right_layout.addWidget(content_splitter, stretch=1)
 
         # Footer
         self._footer_label = QLabel()
         self._footer_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
+            f"QLabel {{ color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_SM};"
+            f" background: {Colors.BG_SECONDARY}; border: 1px solid {Colors.BORDER_MUTED};"
+            f" border-radius: {BorderRadius.MD}; padding: 6px 12px; }}"
         )
+        self._footer_label.setVisible(False)  # shown once there is something to report
         right_layout.addWidget(self._footer_label)
 
         # Proceed button
@@ -894,7 +967,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         right_layout.addLayout(btn_row)
 
         outer_splitter.addWidget(right)
-        outer_splitter.setSizes([240, 760])
+        outer_splitter.setSizes([420, 1080])
 
         # Connect threshold controls
         for w in [self._sil_check, self._pnr_check, self._covisi_check]:
@@ -1016,7 +1089,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
             insert_pos += 1
             for fp in fps:
-                item = _FileListItem(fp, Path(fp).name)
+                item = _FileListItem(fp, _name_within_group(fp, key))
                 item.toggled.connect(self._on_file_toggled)
                 item.selected.connect(self._on_file_selected)
                 self._items[fp] = item
@@ -1205,6 +1278,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             label = ("Keep" if final_keep else "Filter") + (" *" if is_overridden else "")
             decision_item = QTableWidgetItem(label)
             decision_item.setBackground(green if final_keep else red)
+            decision_item.setForeground(QColor(Colors.GREEN_800 if final_keep else Colors.RED_700))
             self._mu_table.setItem(row_idx, 6, decision_item)
 
     def _on_table_cell_clicked(self, row: int, col: int):
@@ -1514,6 +1588,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._footer_label.setText(
             f"{filtered_mus} of {total_mus} total MUs filtered"
         )
+        self._footer_label.setVisible(True)
 
     def _open_custom_grouping_dialog(self):
         dialog = _CustomGroupingDialog(
