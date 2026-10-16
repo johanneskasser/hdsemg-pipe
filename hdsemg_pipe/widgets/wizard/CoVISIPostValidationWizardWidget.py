@@ -14,12 +14,14 @@ import csv
 import json
 import math
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -30,6 +32,7 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -264,6 +267,83 @@ class PklPostValidationWorker(QThread):
             self.error.emit(f"PKL post-validation failed: {str(e)}")
 
 
+_RESULTS_TABLE_STYLE = f"""
+    QTableWidget {{
+        background-color: {Colors.BG_PRIMARY};
+        alternate-background-color: {Colors.BG_SECONDARY};
+        border: 1px solid {Colors.BORDER_MUTED};
+        border-radius: {BorderRadius.MD};
+        gridline-color: transparent;
+        font-size: {Fonts.SIZE_BASE};
+        color: {Colors.TEXT_PRIMARY};
+    }}
+    QTableWidget::item {{
+        padding: 2px {Spacing.MD}px;
+    }}
+    QTableWidget::item:selected {{
+        background-color: {Colors.BLUE_50};
+        color: {Colors.TEXT_PRIMARY};
+    }}
+    QHeaderView::section {{
+        background-color: {Colors.BG_SECONDARY};
+        color: {Colors.TEXT_SECONDARY};
+        padding: 8px {Spacing.MD}px;
+        border: none;
+        border-bottom: 1px solid {Colors.BORDER_MUTED};
+        font-weight: {Fonts.WEIGHT_SEMIBOLD};
+        font-size: {Fonts.SIZE_SM};
+    }}
+"""
+
+
+def _plain_label(text: str = "", size: str = Fonts.SIZE_BASE, color: str = Colors.TEXT_PRIMARY,
+                 weight: str = Fonts.WEIGHT_NORMAL) -> QLabel:
+    """QLabel without any inherited frame border/padding."""
+    lbl = QLabel(text)
+    lbl.setStyleSheet(
+        f"QLabel {{ color: {color}; font-size: {size}; font-weight: {weight};"
+        " border: none; padding: 0; background: transparent; }"
+    )
+    return lbl
+
+
+class _FileNameDelegate(QStyledItemDelegate):
+    """Shows file names without the repetitive processing suffix.
+
+    Only the *displayed* text changes; the item keeps the full name (tooltip, CSV export).
+    """
+
+    _SUFFIX = re.compile(r"(_covisi_filtered)?(_muedit)?(\.mat)?(_edited)?(\.mat|\.pkl)?$")
+
+    def displayText(self, value, locale):
+        return self._SUFFIX.sub("", str(value))
+
+
+def _configure_results_table(table: QTableWidget, row_height: int = 34) -> None:
+    """Shared look for the inline and the expanded results table."""
+    table.setStyleSheet(_RESULTS_TABLE_STYLE)
+    table.setAlternatingRowColors(True)
+    table.setShowGrid(False)
+    table.setEditTriggers(QTableWidget.NoEditTriggers)
+    table.setTextElideMode(Qt.ElideLeft)  # the distinguishing part of a name is at its end
+    table.verticalHeader().setVisible(False)
+    table.verticalHeader().setDefaultSectionSize(row_height)
+    table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    table.setItemDelegateForColumn(0, _FileNameDelegate(table))
+    # Header alignment follows the cell alignment: MU index / status centred, numbers right
+    for col in range(table.columnCount()):
+        item = table.horizontalHeaderItem(col)
+        if item is not None and col > 0:
+            align = Qt.AlignCenter if col in (1, 7) else Qt.AlignRight | Qt.AlignVCenter
+            item.setTextAlignment(align)
+
+
+# Cell colours: light tint + dark text instead of saturated blocks
+_GOOD = (QColor(Colors.GREEN_100), QColor(Colors.GREEN_800))
+_WARN = (QColor(Colors.YELLOW_100), QColor(Colors.ORANGE_800))
+_BAD = (QColor(Colors.RED_100), QColor(Colors.RED_700))
+
+
 class CoVISIPostValidationWizardWidget(WizardStepWidget):
     """
     Step 9.5: CoVISI Post-Validation.
@@ -286,6 +366,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         )
 
         super().__init__(step_index, step_name, description, parent)
+        self.use_scoped_content_card()
 
         self.muedit_folder = None  # where edited MAT files live
         self.json_source_folder = None  # where source JSONs live (covisi_filtered or auto)
@@ -316,133 +397,102 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         container_layout.setSpacing(Spacing.MD)
         container_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Status label
-        self.status_label = QLabel("Waiting for MUedit cleaned files...")
-        self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet(
-            f"""
-            QLabel {{
-                color: {Colors.TEXT_SECONDARY};
-                font-size: {Fonts.SIZE_BASE};
-                padding: {Spacing.SM}px;
-                background-color: {Colors.BG_TERTIARY};
-                border-radius: {BorderRadius.SM};
-            }}
-        """
+        # Status line (progress and result messages)
+        self.status_label = _plain_label(
+            "Waiting for MUedit cleaned files...", Fonts.SIZE_SM, Colors.TEXT_SECONDARY
         )
+        self.status_label.setWordWrap(True)
         container_layout.addWidget(self.status_label)
 
-        # Summary and warning row
-        info_row = QHBoxLayout()
-        info_row.setSpacing(Spacing.MD)
-
-        # Summary panel
-        self.summary_frame = QFrame()
-        self.summary_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.summary_frame.setStyleSheet(
-            f"""
-            QFrame {{
-                background-color: {Colors.BG_TERTIARY};
-                border: 1px solid {Colors.BORDER_DEFAULT};
-                border-radius: {BorderRadius.MD};
-                padding: {Spacing.MD}px;
-            }}
-        """
-        )
-        summary_layout = QVBoxLayout(self.summary_frame)
-        summary_layout.setSpacing(Spacing.SM)
-
-        self.summary_title = QLabel("Validation Summary")
-        self.summary_title.setStyleSheet(
-            f"font-weight: {Fonts.WEIGHT_BOLD}; font-size: {Fonts.SIZE_LG}; color: {Colors.TEXT_PRIMARY};"
-        )
-        summary_layout.addWidget(self.summary_title)
-
-        self.summary_content = QLabel("")
-        self.summary_content.setWordWrap(True)
-        self.summary_content.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_BASE};")
-        summary_layout.addWidget(self.summary_content)
-
-        self.summary_frame.setVisible(False)
-        info_row.addWidget(self.summary_frame)
-
-        # Warning panel (for MUs exceeding threshold)
-        self.warning_frame = QFrame()
-        self.warning_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.warning_frame.setStyleSheet(
-            f"""
-            QFrame {{
-                background-color: #FEF3C7;
-                border: 1px solid #F59E0B;
-                border-radius: {BorderRadius.MD};
-                padding: {Spacing.MD}px;
-            }}
-        """
-        )
-        warning_layout = QVBoxLayout(self.warning_frame)
-        warning_layout.setSpacing(Spacing.SM)
-
-        warning_title = QLabel("Warning")
-        warning_title.setStyleSheet(f"font-weight: {Fonts.WEIGHT_BOLD}; font-size: {Fonts.SIZE_LG}; color: #92400E;")
-        warning_layout.addWidget(warning_title)
-
-        self.warning_label = QLabel("")
-        self.warning_label.setWordWrap(True)
-        self.warning_label.setStyleSheet(f"color: #92400E; font-size: {Fonts.SIZE_BASE};")
-        warning_layout.addWidget(self.warning_label)
-
-        self.warning_frame.setVisible(False)
-        info_row.addWidget(self.warning_frame)
-
-        container_layout.addLayout(info_row)
-
-        # Progress bar
+        # Progress bar (thin)
         self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(14)
         self.progress_bar.setStyleSheet(
             f"""
             QProgressBar {{
-                border: 1px solid {Colors.BORDER_DEFAULT};
-                border-radius: {BorderRadius.SM};
+                border: none;
+                border-radius: 7px;
                 text-align: center;
-                height: 24px;
-                background-color: {Colors.BG_SECONDARY};
+                background-color: {Colors.GRAY_200};
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {Fonts.SIZE_XS};
             }}
             QProgressBar::chunk {{
                 background-color: {Colors.BLUE_600};
-                border-radius: {BorderRadius.SM};
+                border-radius: 7px;
             }}
         """
         )
         self.progress_bar.setVisible(False)
         container_layout.addWidget(self.progress_bar)
 
-        # Table section with header and export button
+        # Summary band: four figures that answer "did cleaning help?"
+        self.summary_frame = QFrame()
+        self.summary_frame.setObjectName("summaryBand")
+        self.summary_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.summary_frame.setStyleSheet(
+            f"QFrame#summaryBand {{ background: {Colors.BG_SECONDARY}; border: 1px solid {Colors.BORDER_MUTED};"
+            f" border-radius: {BorderRadius.LG}; }}"
+        )
+        summary_layout = QHBoxLayout(self.summary_frame)
+        summary_layout.setContentsMargins(Spacing.XL, Spacing.MD, Spacing.XL, Spacing.MD)
+        summary_layout.setSpacing(Spacing.XXXL)
+        self._summary_values = {}
+        for key, caption in (
+            ("files", "files validated"),
+            ("mus", "MUs before → after cleaning"),
+            ("improvement", "average CoVISI improvement"),
+            ("exceeding", "still above threshold"),
+        ):
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            value = _plain_label("–", "24px", Colors.TEXT_PRIMARY, Fonts.WEIGHT_SEMIBOLD)
+            col.addWidget(value)
+            col.addWidget(_plain_label(caption, Fonts.SIZE_SM, Colors.TEXT_SECONDARY))
+            host = QWidget()
+            host.setLayout(col)
+            host.setStyleSheet("background: transparent;")
+            summary_layout.addWidget(host)
+            self._summary_values[key] = value
+        summary_layout.addStretch(1)
+        self.summary_frame.setVisible(False)
+        container_layout.addWidget(self.summary_frame)
+
+        # Warning callout (MUs exceeding the threshold)
+        self.warning_frame = QFrame()
+        self.warning_frame.setObjectName("warningCallout")
+        self.warning_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.warning_frame.setStyleSheet(
+            f"QFrame#warningCallout {{ background: {Colors.ORANGE_50}; border: 1px solid {Colors.ORANGE_500};"
+            f" border-radius: {BorderRadius.LG}; }}"
+        )
+        warning_layout = QVBoxLayout(self.warning_frame)
+        warning_layout.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
+        warning_layout.setSpacing(Spacing.XS)
+        self.warning_label = _plain_label("", Fonts.SIZE_BASE, Colors.ORANGE_800)
+        self.warning_label.setWordWrap(True)
+        self.warning_label.setTextFormat(Qt.RichText)
+        warning_layout.addWidget(self.warning_label)
+        self.warning_frame.setVisible(False)
+        container_layout.addWidget(self.warning_frame)
+
+        # Table section: title + actions above the table
         table_section = QFrame()
         table_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         table_section_layout = QVBoxLayout(table_section)
-        table_section_layout.setContentsMargins(0, 0, 0, 0)
+        table_section_layout.setContentsMargins(0, Spacing.SM, 0, 0)
         table_section_layout.setSpacing(Spacing.SM)
 
-        # Table header row
         table_header_row = QHBoxLayout()
         table_header_row.setSpacing(Spacing.MD)
 
-        self.table_header = QLabel("Pre/Post Comparison Results")
-        self.table_header.setStyleSheet(
-            f"""
-            QLabel {{
-                color: {Colors.TEXT_PRIMARY};
-                font-size: {Fonts.SIZE_LG};
-                font-weight: {Fonts.WEIGHT_MEDIUM};
-            }}
-        """
+        self.table_header = _plain_label(
+            "Pre/post comparison", Fonts.SIZE_LG, Colors.TEXT_PRIMARY, Fonts.WEIGHT_SEMIBOLD
         )
         self.table_header.setVisible(False)
         table_header_row.addWidget(self.table_header)
-
         table_header_row.addStretch()
 
-        # Export button
         self.btn_export_csv = QPushButton("Export to CSV")
         self.btn_export_csv.setStyleSheet(Styles.button_secondary())
         self.btn_export_csv.setToolTip("Export validation results to CSV file")
@@ -450,7 +500,6 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.btn_export_csv.setEnabled(False)
         table_header_row.addWidget(self.btn_export_csv)
 
-        # Expand table button
         self.btn_expand_table = QPushButton("Expand Table")
         self.btn_expand_table.setStyleSheet(Styles.button_secondary())
         self.btn_expand_table.setToolTip("Open table in a resizable window for easier review")
@@ -476,40 +525,13 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                 "Status",
             ]
         )
-        self.results_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.Stretch
-        )
+        header = self.results_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
         for col in range(1, 8):
-            self.results_table.horizontalHeader().setSectionResizeMode(
-                col, QHeaderView.ResizeToContents
-            )
-        self.results_table.setAlternatingRowColors(True)
+            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
         self.results_table.setSortingEnabled(True)
-        self.results_table.setStyleSheet(
-            f"""
-            QTableWidget {{
-                background-color: {Colors.BG_PRIMARY};
-                alternate-background-color: {Colors.BG_SECONDARY};
-                border: 1px solid {Colors.BORDER_DEFAULT};
-                border-radius: {BorderRadius.MD};
-                gridline-color: {Colors.BORDER_DEFAULT};
-                font-size: {Fonts.SIZE_BASE};
-            }}
-            QTableWidget::item {{
-                padding: {Spacing.SM}px {Spacing.MD}px;
-            }}
-            QHeaderView::section {{
-                background-color: {Colors.BG_TERTIARY};
-                color: {Colors.TEXT_PRIMARY};
-                padding: {Spacing.MD}px;
-                border: none;
-                border-bottom: 2px solid {Colors.BORDER_DEFAULT};
-                font-weight: {Fonts.WEIGHT_BOLD};
-                font-size: {Fonts.SIZE_BASE};
-            }}
-        """
-        )
-        self.results_table.setMinimumHeight(300)
+        _configure_results_table(self.results_table)
+        self.results_table.setMinimumHeight(440)
         self.results_table.setVisible(False)
         table_section_layout.addWidget(self.results_table, stretch=1)
 
@@ -524,7 +546,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
         self.btn_validate.setEnabled(False)
         self.buttons.append(self.btn_validate)
 
-        self.btn_accept = QPushButton("Accept All & Continue")
+        self.btn_accept = QPushButton("Accept All && Continue")
         self.btn_accept.setStyleSheet(Styles.button_primary())
         self.btn_accept.setToolTip("Accept all MUs and proceed to final results")
         self.btn_accept.clicked.connect(self.accept_and_continue)
@@ -854,6 +876,7 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
             # File name
             file_item = QTableWidgetItem(filename)
+            file_item.setToolTip(filename)
             self.results_table.setItem(table_row, 0, file_item)
 
             # MU index - use setData for proper numeric sorting
@@ -913,14 +936,13 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             # Color code post value
             if pd.notna(post_val):
                 if post_val <= DEFAULT_COVISI_THRESHOLD:
-                    post_item.setBackground(Qt.darkGreen)
-                    post_item.setForeground(Qt.white)
+                    bg, fg = _GOOD
                 elif post_val <= 50.0:
-                    post_item.setBackground(Qt.darkYellow)
-                    post_item.setForeground(Qt.black)
+                    bg, fg = _WARN
                 else:
-                    post_item.setBackground(Qt.darkRed)
-                    post_item.setForeground(Qt.white)
+                    bg, fg = _BAD
+                post_item.setBackground(bg)
+                post_item.setForeground(fg)
 
             self.results_table.setItem(table_row, 5, post_item)
 
@@ -932,9 +954,9 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
                 improvement_item.setData(Qt.EditRole, float(improvement))
                 improvement_item.setData(Qt.DisplayRole, display_text)
                 if improvement > 0:
-                    improvement_item.setForeground(Qt.darkGreen)
+                    improvement_item.setForeground(QColor(Colors.GREEN_700))
                 elif improvement < 0:
-                    improvement_item.setForeground(Qt.red)
+                    improvement_item.setForeground(QColor(Colors.RED_600))
             else:
                 improvement_item.setText("N/A")
             improvement_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -943,10 +965,10 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             # Status
             if detail["exceeds_threshold"]:
                 status_item = QTableWidgetItem("Exceeds")
-                status_item.setForeground(Qt.red)
+                status_item.setForeground(QColor(Colors.RED_600))
             else:
                 status_item = QTableWidgetItem("Pass")
-                status_item.setForeground(Qt.darkGreen)
+                status_item.setForeground(QColor(Colors.GREEN_700))
             status_item.setTextAlignment(Qt.AlignCenter)
             self.results_table.setItem(table_row, 7, status_item)
 
@@ -960,30 +982,27 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
 
         # Update summary
         self.summary_frame.setVisible(True)
-        summary_lines = [
-            f"Files validated: {overall_report['files_validated']}",
-            f"Total MUs (pre-cleaning): {overall_report['total_mus_pre']}",
-            f"Total MUs (post-cleaning): {overall_report['total_mus_post']}",
-        ]
-
-        if overall_report["avg_improvement_overall"] is not None:
-            summary_lines.append(
-                f"Average CoVISI improvement: {overall_report['avg_improvement_overall']:.1f}%"
-            )
-
-        self.summary_content.setText("\n".join(summary_lines))
+        failing_count = overall_report["mus_exceeding_threshold"]
+        improvement = overall_report["avg_improvement_overall"]
+        self._summary_values["files"].setText(str(overall_report["files_validated"]))
+        self._summary_values["mus"].setText(
+            f"{overall_report['total_mus_pre']} → {overall_report['total_mus_post']}"
+        )
+        self._summary_values["improvement"].setText("–" if improvement is None else f"{improvement:.1f}%")
+        self._summary_values["exceeding"].setText(str(failing_count))
+        self._summary_values["exceeding"].setStyleSheet(
+            f"QLabel {{ color: {Colors.RED_600 if failing_count else Colors.GREEN_700}; font-size: 24px;"
+            f" font-weight: {Fonts.WEIGHT_SEMIBOLD}; border: none; padding: 0; background: transparent; }}"
+        )
 
         # Show warning if there are failing MUs
-        failing_count = overall_report["mus_exceeding_threshold"]
         if failing_count > 0:
             self.warning_frame.setVisible(True)
             self.warning_label.setText(
-                f"{failing_count} motor unit(s) still exceed the {DEFAULT_COVISI_THRESHOLD}% "
-                f"CoVISI threshold after cleaning.\n\n"
-                "Options:\n"
-                "• Accept All: Keep these MUs (may be valid despite high CoVISI)\n"
-                "• Filter Failing: Remove MUs exceeding threshold\n"
-                "• Return to MUedit: Clean further in MUedit"
+                f"<b>{failing_count} motor unit(s) still exceed the {DEFAULT_COVISI_THRESHOLD}% "
+                f"CoVISI threshold after cleaning.</b><br>"
+                "Accept All keeps them (they may be valid despite a high CoVISI), "
+                "Filter Failing removes them, Return to MUedit cleans further."
             )
             self.btn_filter.setVisible(True)
             self.btn_filter.setEnabled(True)
@@ -1224,32 +1243,8 @@ class CoVISIPostValidationWizardWidget(WizardStepWidget):
             expanded_table.horizontalHeader().setSectionResizeMode(
                 col, QHeaderView.ResizeToContents
             )
-        expanded_table.setAlternatingRowColors(True)
         expanded_table.setSortingEnabled(True)
-        expanded_table.setStyleSheet(
-            f"""
-            QTableWidget {{
-                background-color: {Colors.BG_PRIMARY};
-                alternate-background-color: {Colors.BG_SECONDARY};
-                border: 1px solid {Colors.BORDER_DEFAULT};
-                border-radius: {BorderRadius.MD};
-                gridline-color: {Colors.BORDER_DEFAULT};
-                font-size: {Fonts.SIZE_BASE};
-            }}
-            QTableWidget::item {{
-                padding: {Spacing.SM}px {Spacing.MD}px;
-            }}
-            QHeaderView::section {{
-                background-color: {Colors.BG_TERTIARY};
-                color: {Colors.TEXT_PRIMARY};
-                padding: {Spacing.MD}px;
-                border: none;
-                border-bottom: 2px solid {Colors.BORDER_DEFAULT};
-                font-weight: {Fonts.WEIGHT_BOLD};
-                font-size: {Fonts.SIZE_BASE};
-            }}
-        """
-        )
+        _configure_results_table(expanded_table)
 
         # Copy data from original table
         expanded_table.setRowCount(self.results_table.rowCount())
