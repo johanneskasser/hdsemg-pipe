@@ -12,7 +12,7 @@ import os
 from typing import List, Optional
 
 from PyQt5.QtCore import QRectF, Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QFontMetrics, QPainter
+from PyQt5.QtGui import QColor, QPainter
 from PyQt5.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
 from hdsemg_pipe.actions.channel_selection_summary import (
     DISCARDED, KEPT, PENDING, FileSummary, GridSummary,
 )
+from hdsemg_pipe.ui_elements.elided_label import ElidedLabel
 from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Fonts, Spacing
 
 STATUS_COLOR = {KEPT: Colors.GREEN_600, DISCARDED: Colors.RED_500, PENDING: Colors.GRAY_400}
@@ -35,28 +36,6 @@ def _label(text: str = "", size: str = Fonts.SIZE_BASE, color: str = Colors.TEXT
         " border: none; padding: 0; background: transparent; }"
     )
     return lbl
-
-
-class _ElidedLabel(QLabel):
-    """Single-line label that elides in the middle instead of forcing the row wider."""
-
-    def __init__(self, text: str, size: str, weight: str, color: str):
-        super().__init__()
-        self._full = text
-        self._color = color
-        self.setToolTip(text)
-        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.setStyleSheet(
-            f"QLabel {{ color: {color}; font-size: {size}; font-weight: {weight};"
-            " border: none; padding: 0; background: transparent; }"
-        )
-
-    def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setFont(self.font())
-        painter.setPen(QColor(self._color))
-        text = QFontMetrics(self.font()).elidedText(self._full, Qt.ElideMiddle, self.width())
-        painter.drawText(self.rect(), Qt.AlignVCenter | Qt.AlignLeft, text)
 
 
 class _SegmentBar(QWidget):
@@ -152,7 +131,7 @@ class _FileRow(QFrame):
         # Left: name + one-line facts
         left = QVBoxLayout()
         left.setSpacing(2)
-        name = _ElidedLabel(display_name, Fonts.SIZE_BASE, Fonts.WEIGHT_SEMIBOLD, Colors.TEXT_PRIMARY)
+        name = ElidedLabel(display_name, Fonts.SIZE_BASE, Fonts.WEIGHT_SEMIBOLD, Colors.TEXT_PRIMARY)
         name.setToolTip(f.name)
         left.addWidget(name)
         left.addWidget(_label(self._facts(f), Fonts.SIZE_SM, Colors.TEXT_SECONDARY))
