@@ -697,6 +697,61 @@ def _read_mat_signal_h5py(path: Path) -> Optional[dict]:
         return None
 
 
+def _collect_numeric_arrays_h5py(f, obj, depth: int = 0) -> list:
+    """Flatten (possibly nested) MATLAB cell arrays into a list of numeric arrays.
+
+    MUedit writes some fields as a flat cell, others as a 1x1 cell that wraps the
+    real cell (or matrix). Following references until a numeric dataset is reached
+    handles every nesting depth, so the layout does not matter.
+    """
+    if depth > 4 or not isinstance(obj, h5py.Dataset):
+        return []
+    if h5py.check_dtype(ref=obj.dtype) is None:  # numeric leaf
+        arr = np.asarray(obj[()])
+        return [arr] if arr.size else []
+    out = []
+    for ref in np.asarray(obj[()]).flat:
+        if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)) and bool(ref):
+            out.extend(_collect_numeric_arrays_h5py(f, f[ref], depth + 1))
+    return out
+
+
+def _orient_pulse_trains(arrays: list, n_samples: int) -> list:
+    """Return 2-D float arrays shaped (nMU, n_samples) with a common length.
+
+    h5py shows MATLAB arrays with reversed dimensions, so a (nMU x T) matrix can
+    arrive as (T, nMU); 1-D arrays are single pulse trains. ``n_samples`` (from
+    ``edition.time``) decides the orientation; when unknown, arrays are kept as read.
+    """
+    parts = []
+    for a in arrays:
+        g = np.asarray(a, dtype=np.float64)
+        if g.ndim == 1:
+            g = g.reshape(1, -1)
+        if g.ndim != 2 or g.size == 0:
+            continue
+        if n_samples and g.shape[1] != n_samples and g.shape[0] == n_samples:
+            g = g.T
+        if parts and g.shape[1] != parts[0].shape[1]:
+            continue  # not a pulse train of the same recording
+        parts.append(g)
+    return parts
+
+
+def _read_nested_cell_h5py(f, ds, depth: int = 0) -> list:
+    """Read a MATLAB cell of arrays, keeping MU order (empty/invalid entries -> ``None``).
+
+    Unwraps a 1x1 cell that merely wraps another cell, so flat and nested layouts
+    (depending on the MUedit version) read identically.
+    """
+    refs = list(np.asarray(ds[()]).flat)
+    if len(refs) == 1 and depth < 4 and isinstance(refs[0], (h5py.Reference, h5py.h5r.Reference)) and bool(refs[0]):
+        inner = f[refs[0]]
+        if h5py.check_dtype(ref=inner.dtype) is not None:
+            return _read_nested_cell_h5py(f, inner, depth + 1)
+    return _cell_row_read_h5py(f, ds)
+
+
 def _read_mat_edited_h5py(path: Path) -> Optional[dict]:
     """Read ``edition.*`` from a MUedit-edited MAT (HDF5/v7.3 format).
 
@@ -716,16 +771,10 @@ def _read_mat_edited_h5py(path: Path) -> Optional[dict]:
 
             if "Pulsetrainclean" not in edit:
                 return None
-            pt_cells = _cell_row_read_h5py(f, edit["Pulsetrainclean"])
-            pt_parts = []
-            for cell in pt_cells:
-                if cell is None:
-                    continue
-                g = np.asarray(cell, dtype=np.float64)
-                if g.ndim == 1:
-                    g = g.reshape(1, -1)
-                if g.size > 0:
-                    pt_parts.append(g)
+            n_samples = int(edit["time"].size) if "time" in edit else 0
+            pt_parts = _orient_pulse_trains(
+                _collect_numeric_arrays_h5py(f, edit["Pulsetrainclean"]), n_samples
+            )
 
             if not pt_parts:
                 return None
@@ -738,10 +787,7 @@ def _read_mat_edited_h5py(path: Path) -> Optional[dict]:
             # Distimeclean: 1×1 cell → inner 1×nMU cell of refs
             mupulses = []
             if "Distimeclean" in edit:
-                top = edit["Distimeclean"][()]
-                inner_ref = top.flat[0]
-                inner_ds = f[inner_ref]
-                disc_nested = _cell_row_read_h5py(f, inner_ds)
+                disc_nested = _read_nested_cell_h5py(f, edit["Distimeclean"])
                 for mu_timing in disc_nested:
                     if mu_timing is not None and np.asarray(mu_timing).size > 0:
                         ts = np.asarray(mu_timing, dtype=np.int64).flatten() - 1
