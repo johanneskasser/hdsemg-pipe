@@ -9,6 +9,7 @@ from matplotlib.widgets import SpanSelector
 from hdsemg_shared.fileio.file_io import EMGFile, Grid
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.load_helpers import show_load_errors
+from hdsemg_pipe.actions.span_utils import clamp_to_range
 from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
 
 @dataclass
@@ -341,7 +342,11 @@ class CropRoiDialog(QtWidgets.QDialog):
         if self.toolbar.mode != '':
             return
 
-        x_pos = int(event.xdata)
+        _, x_max = self.compute_data_xrange()
+        x_pos = clamp_to_range(event.xdata, 0, x_max)
+        if x_pos is None:
+            return
+        x_pos = int(x_pos)
 
         if self.first_click_pos is None:
             # First click - set start position
@@ -370,8 +375,11 @@ class CropRoiDialog(QtWidgets.QDialog):
         # Reset click mode when dragging
         self.first_click_pos = None
 
-        self.lower_threshold = int(xmin)
-        self.upper_threshold = int(xmax)
+        _, x_max = self.compute_data_xrange()
+        self.lower_threshold = int(clamp_to_range(xmin, 0, x_max))
+        self.upper_threshold = int(clamp_to_range(xmax, 0, x_max))
+        if self.span_selector is not None:
+            self.span_selector.extents = (self.lower_threshold, self.upper_threshold)
         self.update_roi_info()
         self.draw_threshold_lines()
         logger.debug(f"ROI selected via drag: {self.lower_threshold} - {self.upper_threshold}")

@@ -26,6 +26,7 @@ import matplotlib.pyplot as plt
 from hdsemg_shared.fileio.file_io import EMGFile, Grid
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.load_helpers import show_load_errors
+from hdsemg_pipe.actions.span_utils import clamp_to_range
 from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
 from hdsemg_pipe.state.global_state import global_state
 
@@ -652,9 +653,20 @@ class RMSQualityDialog(QtWidgets.QDialog):
         self.selection_figure.tight_layout()
         self.selection_canvas.draw_idle()
 
+    def _signal_duration_s(self):
+        """Duration of the longest plotted signal in seconds."""
+        sf = self.grid_items[0].emgfile.sampling_frequency if self.grid_items else 2048
+        return max((len(s) for s in self.performed_path_map.values()), default=0) / sf
+
     def _on_span_select(self, xmin, xmax):
         """Handle span selection (drag mode)."""
         self.first_click_pos = None
+        t_max = self._signal_duration_s()
+        xmin, xmax = clamp_to_range(xmin, 0.0, t_max), clamp_to_range(xmax, 0.0, t_max)
+        if xmax <= xmin:  # drag happened entirely in the empty axis margin
+            return
+        if self.span_selector is not None:
+            self.span_selector.extents = (xmin, xmax)  # snap the visible span to the clamped one
         self.selected_region = (xmin, xmax)
         self._update_roi_display()
         self._draw_selection_lines()
@@ -668,7 +680,9 @@ class RMSQualityDialog(QtWidgets.QDialog):
         if self.toolbar.mode != '':
             return
 
-        x_pos = event.xdata
+        x_pos = clamp_to_range(event.xdata, 0.0, self._signal_duration_s())
+        if x_pos is None:
+            return
 
         if self.first_click_pos is None:
             self.first_click_pos = x_pos
@@ -792,7 +806,10 @@ class RMSQualityDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(self, "No Selection", "Please select a region first.")
             return
 
-        start_s, end_s = self.selected_region
+        # Clamp here as well (spin boxes allow values beyond the signal) so the
+        # reported window is always the one actually analysed.
+        t_max = self._signal_duration_s()
+        start_s, end_s = (clamp_to_range(v, 0.0, t_max) for v in self.selected_region)
         sf = self.grid_items[0].emgfile.sampling_frequency if self.grid_items else 2048
 
         start_idx = int(start_s * sf)

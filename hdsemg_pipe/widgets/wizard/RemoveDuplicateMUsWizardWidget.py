@@ -43,6 +43,7 @@ from PyQt5.QtWidgets import (
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.decomposition_file import DecompositionFile
 from hdsemg_pipe.actions.process_log import read_manual_cleaning_tool
+from hdsemg_pipe.actions.skip_marker import ask_skip_reason, save_skip_marker
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.GridGroupingDialog import GridGroupingDialog
@@ -70,6 +71,13 @@ except ImportError:
 # ============================================================================
 # WORKER THREAD
 # ============================================================================
+
+def _fmt(value, spec):
+    """Format a number, or an em dash when it is missing/NaN."""
+    if isinstance(value, (int, float)) and value == value:
+        return format(value, spec)
+    return "—"
+
 
 class DuplicateDetectionWorker(QThread):
     """Worker thread for duplicate detection."""
@@ -238,9 +246,9 @@ class ViewDuplicateDialog(QDialog):
             pnr = scores.get('pnr', float('nan'))
             covisi = scores.get('covisi', float('nan'))
             n_spikes = scores.get('n_spikes', '—')
-            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{sil:.3f if isinstance(sil, float) else '—'}</td>"
-            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{pnr:.1f if isinstance(pnr, float) else '—'}</td>"
-            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{covisi:.1f if isinstance(covisi, float) else '—'}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{_fmt(sil, '.3f')}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{_fmt(pnr, '.1f')}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{_fmt(covisi, '.1f')}</td>"
             rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{n_spikes}</td>"
             rel_str += "</tr>"
         rel_str += "</table>"
@@ -779,6 +787,10 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         self.scan_json_files()
         return True
 
+    def on_shown(self):
+        # Reconstruction cannot scan (steps 8/9 not yet completed there); do it on open.
+        self.check()
+
     def scan_json_files(self):
         """Scan for JSON files to process."""
         # Priority order:
@@ -1284,7 +1296,16 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                 'total_files': self.detection_results['total_files'],
                 'total_duplicate_groups': self.detection_results['total_duplicate_groups'],
                 'total_mus_removed': self.detection_results['total_mus_to_remove']
-            }
+            },
+            # Offset-tolerant cross-grid pairs (file indices refer to the group's file list)
+            'cross_grid_pairs': [
+                {
+                    'group': g['group_name'],
+                    'files': [Path(p).name for p in g['json_paths']],
+                    'pairs': g['detection'].get('cross_grid_pairs', []),
+                }
+                for g in self.detection_results['groups']
+            ],
         }
 
         with open(report_path, 'w') as f:
@@ -1302,14 +1323,15 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
     def skip_step(self):
         """Skip duplicate detection step - copy files and export to MAT."""
+        reason = "User skipped duplicate detection"
+        note = ask_skip_reason(self, reason)
+        if note is None:
+            return
         try:
             output_folder = global_state.get_decomposition_removed_duplicates_path()
             os.makedirs(output_folder, exist_ok=True)
 
-            # Save skip marker
-            skip_marker_path = os.path.join(output_folder, '.skip_marker.json')
-            with open(skip_marker_path, 'w') as f:
-                json.dump({'skipped': True, 'reason': 'User skipped duplicate detection'}, f)
+            save_skip_marker(output_folder, reason, note)
 
             # Copy all source files to output folder
             self.saved_json_paths = []

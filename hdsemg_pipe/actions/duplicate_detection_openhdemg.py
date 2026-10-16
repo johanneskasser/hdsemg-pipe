@@ -24,6 +24,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.cross_grid_duplicates import find_cross_grid_duplicates
 
 _LAUNCHER_SCRIPT = Path(__file__).parent / "_tracking_gui_launcher.py"
 
@@ -373,6 +374,7 @@ def detect_duplicates_in_group(
     derivation: str = "sd",
     orientations: Optional[list] = None,
     show_gui: bool = False,
+    lag_search: bool = True,
 ) -> dict:
     """Detect duplicate MUs in a group of emgfiles using openhdemg tracking.
 
@@ -435,7 +437,7 @@ def detect_duplicates_in_group(
 
     if n_total == 0:
         logger.warning("detect_duplicates_in_group: no MUs found in group")
-        return {"duplicate_groups": [], "all_mus": [], "unique_mus": []}
+        return {"duplicate_groups": [], "all_mus": [], "unique_mus": [], "cross_grid_pairs": []}
 
     logger.info(
         "openhdemg tracking: %d MUs across %d file(s), XCC threshold=%.2f, orientations=%s",
@@ -484,6 +486,22 @@ def detect_duplicates_in_group(
             xcc_map[(i, mi1, j, mi2)] = xcc
             logger.debug("  Duplicate detected: %s <-> %s (XCC=%.3f)", mu1, mu2, xcc)
 
+    # Offset-tolerant pass (#153): discharge times of the same MU on two grids are shifted
+    # by a constant lag, so compare over +-25 ms and confirm by MUAP shape.
+    cross_grid_pairs: list = []
+    if lag_search and n_files > 1:
+        cross_grid_pairs = find_cross_grid_duplicates(emgfiles)
+        for p in cross_grid_pairs:
+            if p["decision"] != "duplicate":
+                continue
+            mu1, mu2 = (p["file_a"], p["mu_a"]), (p["file_b"], p["mu_b"])
+            duplicate_pairs.append((mu_to_gidx[mu1], mu_to_gidx[mu2]))
+            xcc_map.setdefault((*mu1, *mu2), p["muap_r"])
+        logger.info(
+            "Lag search: %d candidate pair(s), %d confirmed by MUAP",
+            len(cross_grid_pairs), sum(p["decision"] == "duplicate" for p in cross_grid_pairs),
+        )
+
     # Connected components via union-find
     comp_sets = _union_find_groups(duplicate_pairs, n_total)
 
@@ -505,6 +523,14 @@ def detect_duplicates_in_group(
             len(group_mus), group_mus, survivor,
         )
 
+    # Record the keep/remove decision on every confirmed pair so the removal is reproducible.
+    for p in cross_grid_pairs:
+        mu1, mu2 = (p["file_a"], p["mu_a"]), (p["file_b"], p["mu_b"])
+        for g in duplicate_groups:
+            if mu1 in g["mus"] and mu2 in g["mus"] and p["decision"] == "duplicate":
+                p["kept"] = list(g["survivor"])
+                p["removed"] = [list(mu) for mu in (mu1, mu2) if mu != g["survivor"]]
+
     mus_in_dups: set = {mu for g in duplicate_groups for mu in g["mus"]}
     unique_mus = [mu for mu in all_mus if mu not in mus_in_dups]
 
@@ -517,6 +543,7 @@ def detect_duplicates_in_group(
         "duplicate_groups": duplicate_groups,
         "all_mus": all_mus,
         "unique_mus": unique_mus,
+        "cross_grid_pairs": cross_grid_pairs,
     }
 
 

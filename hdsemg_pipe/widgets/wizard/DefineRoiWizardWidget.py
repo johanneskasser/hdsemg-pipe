@@ -1,11 +1,13 @@
+import json
 import os
+from datetime import datetime
 import numpy as np
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QPushButton
 
 from hdsemg_pipe.actions.crop_roi import CropRoiDialog
 from hdsemg_pipe.actions.file_utils import copy_files
-from hdsemg_pipe.actions.skip_marker import save_skip_marker
+from hdsemg_pipe.actions.skip_marker import ask_skip_reason, save_skip_marker
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.state.global_state import global_state
@@ -38,11 +40,15 @@ class DefineRoiWizardWidget(WizardStepWidget):
 
     def skip_step(self):
         logger.debug("Skipping ROI step.")
+        reason = "ROI cropping skipped - using full signal"
+        note = ask_skip_reason(self, reason)
+        if note is None:
+            return
         dest = global_state.get_cropped_signal_path()
         try:
             global_state.cropped_files = copy_files(global_state.line_noise_cleaned_files, dest)
             # Save skip marker for state reconstruction
-            save_skip_marker(dest, "ROI cropping skipped - using full signal")
+            save_skip_marker(dest, reason, note)
             # Call parent skip_step to mark as skipped in GlobalState
             super().skip_step("ROI cropping skipped - using full signal")
         except Exception as e:
@@ -82,6 +88,7 @@ class DefineRoiWizardWidget(WizardStepWidget):
         # Group grid_items by their source EMGFile to avoid duplicate processing
         # Each EMGFile should only be processed once, even if it contains multiple grids
         processed_files = set()
+        crop_record = {}
 
         for gd in self.roi_dialog.grid_items:
             emg: EMGFile = gd.emgfile
@@ -112,8 +119,10 @@ class DefineRoiWizardWidget(WizardStepWidget):
                 continue
 
             # Build ROI slice - crop the data for ALL channels (including all grids)
-            i0 = int(np.floor(lower_val))
-            i1 = int(np.ceil(upper_val))
+            # Never let a negative index wrap around to "from the end"
+            i0 = max(0, int(np.floor(lower_val)))
+            i1 = min(emg.data.shape[0], int(np.ceil(upper_val)))
+            crop_record[original_filename] = {"start_sample": i0, "end_sample": i1}
             emg.data = emg.data[i0:i1, :]
             emg.time = emg.time[i0:i1]
 
@@ -122,6 +131,13 @@ class DefineRoiWizardWidget(WizardStepWidget):
             emg.save(out_path)
             logger.info("Saved ROI data to %s (containing %d grids)", out_path, len(emg.grids))
             global_state.cropped_files.append(out_path)
+
+        # Persist the applied boundaries so a bad crop is detectable after the fact
+        try:
+            with open(os.path.join(dest, "roi_crop.json"), "w") as fh:
+                json.dump({"timestamp": datetime.now().isoformat(), "files": crop_record}, fh, indent=2)
+        except OSError as exc:
+            logger.warning("Could not write roi_crop.json: %s", exc)
 
         QtWidgets.QMessageBox.information(
             self,

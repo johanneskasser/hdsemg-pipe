@@ -436,10 +436,9 @@ def _apply_reconstruction_plan(data: ReconstructionData) -> int:
         global_state.skip_widget("step9")
 
     try:
-        _multigrid_config()
+        _duplicate_removal_restore()
     except Exception as exc:
-        logger.info(f"Skipping multi-grid configuration reconstruction: {exc}")
-        global_state.skip_widget("step10")
+        logger.warning(f"Duplicate removal reconstruction failed: {exc}")
 
     try:
         _muedit_cleaning()
@@ -509,25 +508,21 @@ def _mu_quality_review_from_data(data: ReconstructionData) -> None:
     global_state.complete_widget("step9")
 
 
-def _multigrid_config() -> None:
-    multigrid_widget = global_state.get_widget("step10")
-    if multigrid_widget:
-        multigrid_widget.init_file_checking()
-        if multigrid_widget.grid_groupings is not None and multigrid_widget.is_completed():
-            if len(multigrid_widget.grid_groupings) > 0:
-                logger.info("Step 10 state reconstructed: groupings loaded and MUEdit files found")
-            else:
-                logger.info("Step 10 state reconstructed: no multi-grid groups (single grids only)")
-            global_state.complete_widget("step10")
-        elif multigrid_widget.grid_groupings == {} and multigrid_widget.is_completed():
-            logger.info("Step 10 state reconstructed: no groupings JSON but MUEdit files exist (backwards compat)")
-            multigrid_widget.save_groupings_to_json()
-            global_state.complete_widget("step10")
-        else:
-            logger.info("Step 10 not completed: no MUEdit files found or step not yet processed")
+def _duplicate_removal_restore() -> None:
+    """Step 10: derive state from the removed-duplicates folder (files are scanned in on_shown)."""
+    widget = global_state.get_widget("step10")
+    if not widget:
+        raise ValueError("Duplicate removal widget not found in global state.")
+    folder = global_state.get_decomposition_removed_duplicates_path()
+    if not os.path.isdir(folder) or not any(f.endswith(".json") for f in os.listdir(folder)):
+        logger.info("Step 10 not completed: no files in the removed-duplicates folder")
+        return
+    if check_skip_marker(folder):
+        logger.info("Step 10 state reconstructed: duplicate removal skipped")
+        global_state.skip_widget("step10")
     else:
-        logger.warning("Multi-grid configuration widget not found in global state.")
-        raise ValueError("Multi-grid configuration widget not found in global state.")
+        logger.info("Step 10 state reconstructed: duplicate-removed files found")
+        global_state.complete_widget("step10")
 
 
 def _muedit_cleaning() -> None:
