@@ -194,6 +194,13 @@ class WizardStepWidget(QWidget):
         """Checks if the step can be completed. Subclasses should implement this."""
         raise NotImplementedError("Subclasses must implement the check method.")
 
+    def on_shown(self):
+        """Called when this step becomes the visible step.
+
+        Override to defer expensive loading (file scans, plots, caches) until the
+        user actually opens the step instead of doing it at startup/reconstruction.
+        """
+
     def complete_step(self):
         """Marks the step as completed."""
         # Show message only on first completion

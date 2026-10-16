@@ -266,6 +266,7 @@ class WizardMainWindow(QMainWindow):
             self.step_stack.setCurrentIndex(self.current_step_index)
             self.progress_indicator.setActiveStep(step_index)
             self.updateNavigation()
+            self.steps[self.current_step_index].on_shown()
             logger.debug(f"Navigated to step {step_index}")
 
     def navigatePrevious(self):
@@ -275,6 +276,7 @@ class WizardMainWindow(QMainWindow):
             self.step_stack.setCurrentIndex(self.current_step_index)
             self.progress_indicator.setActiveStep(self.current_step_index + 1)
             self.updateNavigation()
+            self.steps[self.current_step_index].on_shown()
 
     def navigateNext(self):
         """Navigate to next step."""
@@ -283,6 +285,7 @@ class WizardMainWindow(QMainWindow):
             self.step_stack.setCurrentIndex(self.current_step_index)
             self.progress_indicator.setActiveStep(self.current_step_index + 1)
             self.updateNavigation()
+            self.steps[self.current_step_index].on_shown()
 
     def updateNavigation(self):
         """Update navigation button states."""

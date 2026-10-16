@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter,
@@ -25,6 +25,7 @@ from matplotlib.figure import Figure
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.file_grouping import get_group_key, shorten_group_labels
+from hdsemg_pipe.actions.load_helpers import basenames
 from hdsemg_pipe.actions.tracking_error_metrics import (
     DEFAULT_THRESHOLDS, METRIC_NAMES, METRIC_NRMSE,
     TIER_ORDER, compute_metric,
@@ -32,6 +33,7 @@ from hdsemg_pipe.actions.tracking_error_metrics import (
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.ui_elements.loading_overlay import LoadingOverlay
 from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Fonts, Spacing, Styles
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.dialogs.TrackingErrorThresholdsDialog import (
@@ -453,6 +455,68 @@ class _GroupHeader(QWidget):
 # Main widget
 # ---------------------------------------------------------------------------
 
+def _read_signals(file_path: str) -> Tuple:
+    """Return (required, performed, n_grids, warnings, fsamp). Thread-safe (no Qt)."""
+    try:
+        from hdsemg_shared.fileio.file_io import EMGFile
+        emg = EMGFile.load(file_path)
+    except Exception as e:
+        return (None, None, 0, [f"Failed to load file: {str(e)[:100]}"], 2048.0)
+
+    if not hasattr(emg, 'grids') or not emg.grids:
+        return (None, None, 0, ["No grid information found in file."], 2048.0)
+
+    n_grids = len(emg.grids)
+    grid = emg.grids[0]
+    warnings = []
+
+    if n_grids > 1:
+        warnings.append(f"Multi-grid file — showing grid 1 of {n_grids}.")
+
+    fsamp = float(
+        getattr(emg, 'fsamp', None)
+        or getattr(emg, 'FSAMP', None)
+        or 2048.0
+    )
+
+    required = None
+    performed = None
+
+    # requested_path_idx / performed_path_idx are direct column indices
+    # into emgfile.data (same convention as crop_roi.py).
+    req_idx = getattr(grid, 'requested_path_idx', None)
+    if req_idx is not None:
+        try:
+            required = np.array(emg.data[:, req_idx], dtype=float)
+        except Exception as e:
+            warnings.append(f"Could not read required path: {e}")
+    else:
+        warnings.append("No required path signal defined.")
+
+    perf_idx = getattr(grid, 'performed_path_idx', None)
+    if perf_idx is not None:
+        try:
+            performed = np.array(emg.data[:, perf_idx], dtype=float)
+        except Exception as e:
+            warnings.append(f"Could not read performed path: {e}")
+    else:
+        warnings.append("No performed path signal defined.")
+
+    return (required, performed, n_grids, warnings, fsamp)
+
+
+class _SignalLoadWorker(QThread):
+    """Loads a file's tracking signals off the UI thread."""
+    loaded = pyqtSignal(str, object)
+
+    def __init__(self, file_path: str):
+        super().__init__()
+        self.file_path = file_path
+
+    def run(self):
+        self.loaded.emit(self.file_path, _read_signals(self.file_path))
+
+
 class FileQualitySelectionWizardWidget(WizardStepWidget):
     """Wizard step 5 – per-file quality review and include/exclude selection."""
 
@@ -471,6 +535,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._group_headers: Dict[str, _GroupHeader] = {}  # group_key → header widget
         self._custom_group_regex: Optional[str] = None
         self._all_mat_files: List[str] = []
+        self._signal_workers: Dict[str, _SignalLoadWorker] = {}
+        self._loading_overlay: Optional[LoadingOverlay] = None
         # Tracking-error metric (persisted in config)
         self._active_metric: str = config.get(Settings.TRACKING_ERROR_METRIC, METRIC_NRMSE)
 
@@ -866,6 +932,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             return
 
         self.clear_status()
+        self.additional_information_label.setText("")
         self.setActionButtonsEnabled(True)
         self._populate_file_list()
         self._load_rms_csv()
@@ -875,6 +942,10 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         elif self._file_items:
             self._on_file_selected(next(iter(self._file_items)))
         self._update_confirm_button()
+
+    def on_shown(self):
+        # Deferred from reconstruction: build the list only once the step is opened.
+        self.check()
 
     # ------------------------------------------------------------------
     # File list population
@@ -931,7 +1002,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         for fp in all_files:
             item = _FileListItem(fp, self._list_container)
             if saved_selection is not None:
-                item.set_checked(fp in saved_selection)
+                item.set_checked(os.path.basename(fp) in saved_selection)
             item.clicked.connect(self._on_file_selected)
             item.selection_changed.connect(self._on_selection_changed)
             self._list_layout.insertWidget(self._list_layout.count() - 1, item)
@@ -955,7 +1026,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             for fp in files:
                 item = _FileListItem(fp, self._list_container)
                 if saved_selection is not None:
-                    item.set_checked(fp in saved_selection)
+                    item.set_checked(os.path.basename(fp) in saved_selection)
                 item.clicked.connect(self._on_file_selected)
                 item.selection_changed.connect(self._on_selection_changed)
                 self._list_layout.insertWidget(self._list_layout.count() - 1, item)
@@ -1099,67 +1170,6 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
     # Signal loading
     # ------------------------------------------------------------------
 
-    def _load_signals(self, file_path: str) -> Tuple:
-        """Return (required, performed, n_grids, warnings, fsamp).
-
-        required / performed are np.ndarray or None.
-        """
-        if file_path in self._signal_cache:
-            return self._signal_cache[file_path]
-
-        try:
-            from hdsemg_shared.fileio.file_io import EMGFile
-            emg = EMGFile.load(file_path)
-        except Exception as e:
-            result = (None, None, 0, [f"Failed to load file: {str(e)[:100]}"], 2048.0)
-            self._signal_cache[file_path] = result
-            return result
-
-        if not hasattr(emg, 'grids') or not emg.grids:
-            result = (None, None, 0, ["No grid information found in file."], 2048.0)
-            self._signal_cache[file_path] = result
-            return result
-
-        n_grids = len(emg.grids)
-        grid = emg.grids[0]
-        warnings = []
-
-        if n_grids > 1:
-            warnings.append(f"Multi-grid file — showing grid 1 of {n_grids}.")
-
-        fsamp = float(
-            getattr(emg, 'fsamp', None)
-            or getattr(emg, 'FSAMP', None)
-            or 2048.0
-        )
-
-        required = None
-        performed = None
-
-        # requested_path_idx / performed_path_idx are direct column indices
-        # into emgfile.data (same convention as crop_roi.py).
-        req_idx = getattr(grid, 'requested_path_idx', None)
-        if req_idx is not None:
-            try:
-                required = np.array(emg.data[:, req_idx], dtype=float)
-            except Exception as e:
-                warnings.append(f"Could not read required path: {e}")
-        else:
-            warnings.append("No required path signal defined.")
-
-        perf_idx = getattr(grid, 'performed_path_idx', None)
-        if perf_idx is not None:
-            try:
-                performed = np.array(emg.data[:, perf_idx], dtype=float)
-            except Exception as e:
-                warnings.append(f"Could not read performed path: {e}")
-        else:
-            warnings.append("No performed path signal defined.")
-
-        result = (required, performed, n_grids, warnings, fsamp)
-        self._signal_cache[file_path] = result
-        return result
-
     # ------------------------------------------------------------------
     # File selection handler
     # ------------------------------------------------------------------
@@ -1176,8 +1186,42 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._filename_display.setText(os.path.basename(file_path))
         self._filename_display.setToolTip(file_path)
 
-        # Load signals
-        required, performed, _n, warnings, fsamp = self._load_signals(file_path)
+        # Load signals (cached, otherwise off the UI thread)
+        cached = self._signal_cache.get(file_path)
+        if cached is not None:
+            self._hide_loading()
+            self._render_file(file_path, cached)
+            return
+        self._draw_placeholder("Loading signals…")
+        self._show_loading()
+        if file_path not in self._signal_workers:
+            worker = _SignalLoadWorker(file_path)
+            worker.loaded.connect(self._on_signals_loaded)
+            self._signal_workers[file_path] = worker
+            worker.start()
+
+    def _show_loading(self):
+        if self._loading_overlay is None:
+            self._loading_overlay = LoadingOverlay.show_over(self._canvas, "Loading file…")
+
+    def _hide_loading(self):
+        if self._loading_overlay is not None:
+            self._loading_overlay.hide()
+            self._loading_overlay.deleteLater()
+            self._loading_overlay = None
+
+    def _on_signals_loaded(self, file_path: str, result: tuple):
+        self._signal_cache[file_path] = result
+        worker = self._signal_workers.pop(file_path, None)
+        if worker is not None:
+            worker.deleteLater()
+        # Ignore results for a file the user has already navigated away from.
+        if file_path == self._current_file:
+            self._hide_loading()
+            self._render_file(file_path, result)
+
+    def _render_file(self, file_path: str, signals: tuple):
+        required, performed, _n, warnings, fsamp = signals
 
         # Warning strip
         if warnings:
@@ -1413,7 +1457,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             if os.path.exists(sel_path):
                 with open(sel_path, 'r') as f:
                     data = json.load(f)
-                return set(data.get("selected", []))
+                # Match by basename: stored paths may predate a workfolder move/rename.
+                return basenames(data.get("selected", []))
         except Exception as e:
             logger.warning(f"Could not load saved selection: {e}")
         return None

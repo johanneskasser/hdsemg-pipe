@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -55,6 +56,7 @@ from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.decomposition_file import DecompositionFile, ReliabilityThresholds
 from hdsemg_pipe.actions.file_grouping import get_group_key, shorten_group_labels
 from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.ui_elements.loading_overlay import LoadingOverlay
 from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Spacing, Styles
 from hdsemg_pipe.ui_elements.toast import toast_manager
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
@@ -79,6 +81,42 @@ class _ReliabilityWorker(QThread):
             self.finished.emit(df)
         except Exception as exc:
             self.error.emit(str(exc))
+
+
+class _FileLoadWorker(QThread):
+    """Loads decomposition files and computes their reliability off the UI thread.
+
+    Files are processed one at a time from a shared queue so the UI can
+    ``prioritize`` the file the user is currently looking at.
+    """
+    file_ready = pyqtSignal(str, object, object)   # path, reliability df, emgfile for plotting
+    file_error = pyqtSignal(str, str)
+
+    def __init__(self, filepaths: List[str], thresholds: ReliabilityThresholds):
+        super().__init__()
+        self._queue = list(filepaths)
+        self._lock = threading.Lock()
+        self._thresholds = thresholds
+
+    def prioritize(self, filepath: str):
+        with self._lock:
+            if filepath in self._queue:
+                self._queue.remove(filepath)
+                self._queue.insert(0, filepath)
+
+    def run(self):
+        while True:
+            with self._lock:
+                if not self._queue or self.isInterruptionRequested():
+                    return
+                fp = self._queue.pop(0)
+            try:
+                dec = DecompositionFile.load(Path(fp))
+                emgfile = dec.get_emgfile_for_plotting()
+                df = dec.compute_reliability(self._thresholds)
+                self.file_ready.emit(fp, df, emgfile)
+            except Exception as exc:
+                self.file_error.emit(fp, str(exc))
 
 
 class _STAWorker(QThread):
@@ -636,7 +674,9 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         self._current_file: Optional[str] = None
         self._sta_cache: Dict[str, object] = {}
         self._worker: Optional[QThread] = None
-        self._bg_workers: List[QThread] = []   # keeps preload workers alive
+        self._loader: Optional[_FileLoadWorker] = None
+        self._retired_loaders: List[_FileLoadWorker] = []
+        self._overlay: Optional[LoadingOverlay] = None
         self._custom_group_regex: Optional[str] = None
         self._all_filepaths: List[str] = []
         # Debounce timer for override-warning dialog
@@ -883,6 +923,8 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             and not any(p.name.startswith(ex) for ex in _EXCLUDED_PREFIXES)
         )
         if files:
+            if files == self._all_filepaths and self._items:
+                return  # already built (and cached) for this folder
             self._populate_file_list(files)
             manifest_path = Path(global_state.get_analysis_path()) / "mu_quality_selection.json"
             if manifest_path.exists():
@@ -892,6 +934,10 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
                     self.restore_from_manifest(manifest)
                 except Exception as exc:
                     logger.warning("Could not restore MU quality manifest: %s", exc)
+
+    def on_shown(self):
+        # Deferred from reconstruction: MUs are only indexed once the step is opened.
+        self.check()
 
     # -- Public API ------------------------------------------------------------
 
@@ -934,6 +980,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
     # -- Private helpers -------------------------------------------------------
 
     def _populate_file_list(self, filepaths: List[str]):
+        self._retire_loader()
         self._all_filepaths = filepaths
         # Clear both layouts (keep the stretch item at the end of each)
         for layout in (self._file_list_layout, self._pills_col_layout):
@@ -988,34 +1035,54 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
         if filepaths:
             self._on_file_selected(filepaths[0])
-        self._preload_all_reliability()
+        self._start_loading()  # no-op if selecting the first file already started it
 
-    def _preload_all_reliability(self):
-        """Launch background reliability workers for every file not yet cached.
+    def _start_loading(self):
+        """Load every not-yet-cached file in ONE background thread (current file first)."""
+        if self._loader is not None and self._loader.isRunning():
+            return
+        pending = [fp for fp in self._all_filepaths if fp not in self._reliability_cache]
+        if self._current_file in pending:
+            pending.remove(self._current_file)
+            pending.insert(0, self._current_file)
+        if not pending:
+            return
+        self._show_loading()
+        loader = _FileLoadWorker(pending, self._thresholds)
+        loader.file_ready.connect(self._on_file_loaded)
+        loader.file_error.connect(self._on_file_error)
+        self._loader = loader
+        loader.start()
 
-        This populates the group-header MU counters without requiring the user
-        to manually click through each file first.
-        """
-        self._bg_workers.clear()
-        for fp in self._all_filepaths:
-            if fp in self._reliability_cache:
-                continue
-            try:
-                dec = DecompositionFile.load(Path(fp))
-            except Exception as exc:
-                logger.warning("Preload: could not load %s: %s", fp, exc)
-                continue
-            if fp not in self._emgfile_cache:
-                self._emgfile_cache[fp] = dec.get_emgfile_for_plotting()
-            worker = _ReliabilityWorker(dec, self._thresholds)
-            worker.finished.connect(
-                lambda df, p=fp: self._on_reliability_loaded(p, df)
-            )
-            worker.error.connect(
-                lambda err: logger.warning("Preload reliability error: %s", err)
-            )
-            self._bg_workers.append(worker)
-            worker.start()
+    def _retire_loader(self):
+        """Stop feeding the current loader (non-blocking); it exits after its current file."""
+        if self._loader is not None:
+            self._loader.requestInterruption()
+            self._retired_loaders = [w for w in self._retired_loaders if w.isRunning()]
+            self._retired_loaders.append(self._loader)  # keep alive until the thread ends
+            self._loader = None
+
+    def _show_loading(self):
+        if self._overlay is None:
+            self._overlay = LoadingOverlay.show_over(self.content_card, "Loading motor units…")
+
+    def _hide_loading(self):
+        if self._overlay is not None:
+            self._overlay.hide()
+            self._overlay.deleteLater()
+            self._overlay = None
+
+    def _on_file_loaded(self, filepath: str, df, emgfile):
+        self._emgfile_cache[filepath] = emgfile
+        self._on_reliability_loaded(filepath, df)
+        if filepath == self._current_file:
+            self._hide_loading()
+
+    def _on_file_error(self, filepath: str, error: str):
+        logger.warning("Could not load %s: %s", filepath, error)
+        # Don't leave the overlay up forever on a failing current file.
+        if filepath == self._current_file:
+            self._hide_loading()
 
     def _on_file_toggled(self, filepath: str, checked: bool):
         self._checked[filepath] = checked
@@ -1049,24 +1116,16 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
 
     def _load_file_data(self, filepath: str):
         if filepath in self._reliability_cache:
+            self._hide_loading()
             self._refresh_mu_table(filepath)
             self._refresh_plot(filepath)
             return
-        try:
-            dec = DecompositionFile.load(Path(filepath))
-        except Exception as exc:
-            logger.warning("Could not load %s: %s", filepath, exc)
-            return
-        self._emgfile_cache[filepath] = dec.get_emgfile_for_plotting()
-        worker = _ReliabilityWorker(dec, self._thresholds)
-        worker.finished.connect(
-            lambda df, fp=filepath: self._on_reliability_loaded(fp, df)
-        )
-        worker.error.connect(
-            lambda err: logger.warning("Reliability worker error: %s", err)
-        )
-        self._worker = worker
-        worker.start()
+        # Not cached yet: bump it to the front of the running loader (or start one).
+        self._show_loading()
+        if self._loader is not None and self._loader.isRunning():
+            self._loader.prioritize(filepath)
+        else:
+            self._start_loading()
 
     def _on_reliability_loaded(self, filepath: str, df):
         self._reliability_cache[filepath] = df

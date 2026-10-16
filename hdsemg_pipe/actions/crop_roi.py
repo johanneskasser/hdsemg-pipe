@@ -8,6 +8,7 @@ from matplotlib.widgets import SpanSelector
 
 from hdsemg_shared.fileio.file_io import EMGFile, Grid
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.load_helpers import show_load_errors
 from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
 
 @dataclass
@@ -49,6 +50,7 @@ class CropRoiDialog(QtWidgets.QDialog):
 
     def load_files(self):
         """Load each file via EMGFile and collect its Grids."""
+        load_errors = []
         for fp in self.file_paths:
             try:
                 logger.info("Loading file: %s", fp)
@@ -58,7 +60,8 @@ class CropRoiDialog(QtWidgets.QDialog):
                 logger.debug("→ %d grids from %s", len(emg.grids), Path(fp).name)
             except Exception as e:
                 logger.error("Failed to load %s: %s", fp, e, exc_info=True)
-                QtWidgets.QMessageBox.warning(self, "Loading Error", f"Failed to load {fp}:\n{e}")
+                load_errors.append((fp, str(e)))
+        show_load_errors(self, load_errors)
 
         logger.info("Total grids loaded: %d", len(self.grid_items))
 
