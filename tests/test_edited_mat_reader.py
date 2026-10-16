@@ -83,3 +83,45 @@ def test_discharge_times_keep_mu_order_for_nested_and_flat_cells(tmp_path, flat_
     assert [len(p) for p in ef["MUPULSES"]][1] == 0       # the empty MU stays at index 1
     assert len(ef["MUPULSES"][0]) > 0 and len(ef["MUPULSES"][2]) > 0
     assert ef["IPTS"].shape == (T, N_MU)
+
+
+def _add_original_signal(f, n_mu):
+    """The original (pre-edit) `signal` struct that MUedit keeps inside *_edited.mat files."""
+    rng = np.random.default_rng(1)
+    refs = f.require_group("#refs#")
+    sig = f.create_group("signal")
+    sig.create_dataset("fsamp", data=np.array([[2048.0]]))
+    trains = rng.normal(0, 0.05, (T, n_mu))           # h5py view of MATLAB (nMU x T)
+    discharges = [np.arange(40 + 5 * k, T - 10, 28 + 3 * k) for k in range(n_mu)]
+    for k, d in enumerate(discharges):
+        trains[d, k] += 1.0
+    _nest(f, sig, "Pulsetrain", refs.create_dataset("sig_pt", data=trains))
+    _cell(f, sig, "Dischargetimes", [(d + 1).astype(float).reshape(-1, 1) for d in discharges])
+    return discharges
+
+
+def test_edited_file_that_also_contains_signal_is_read_as_edited(tmp_path):
+    """*_edited.mat keeps the original `signal` next to `edition`; the edited data must win."""
+    path = tmp_path / "rec_muedit.mat_edited.mat"
+    _make_edited_mat(path, "nested_cell")
+    with h5py.File(path, "a") as f:
+        _add_original_signal(f, N_MU + 1)             # original had one more MU before cleaning
+
+    df = DecompositionFile.load(path).compute_reliability(ReliabilityThresholds())
+
+    assert len(df) == N_MU
+
+
+def test_unedited_signal_reader_handles_time_first_pulsetrain(tmp_path):
+    from hdsemg_pipe.actions.decomposition_file import _read_mat_signal_h5py
+
+    path = tmp_path / "rec_muedit.mat"
+    with h5py.File(path, "w") as f:
+        discharges = _add_original_signal(f, N_MU)
+
+    ef = _read_mat_signal_h5py(path)
+
+    assert ef["NUMBER_OF_MUS"] == N_MU
+    assert ef["EMG_LENGTH"] == T
+    assert ef["IPTS"].shape == (T, N_MU)
+    assert [len(p) for p in ef["MUPULSES"]] == [len(d) for d in discharges]

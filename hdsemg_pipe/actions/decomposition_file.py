@@ -66,27 +66,31 @@ _MAT_UNKNOWN = "unknown"
 
 
 def _detect_mat_subtype(path: Path) -> str:
-    """Inspect a MAT file and return its subtype string."""
+    """Inspect a MAT file and return its subtype string.
+
+    ``*_edited.mat`` files keep the original ``signal`` struct next to the new
+    ``edition`` struct, so ``edition`` is checked first: the edited data must win.
+    """
     if not _H5PY_AVAILABLE:
         return _MAT_UNKNOWN
 
     # Try legacy scipy format first
     try:
         mat_data = sio.loadmat(str(path), squeeze_me=True, struct_as_record=False)
-        if "signal" in mat_data and hasattr(mat_data["signal"], "Dischargetimes"):
-            return _MAT_PULSETRAIN
         if "edition" in mat_data:
             return _MAT_EDITED
+        if "signal" in mat_data and hasattr(mat_data["signal"], "Dischargetimes"):
+            return _MAT_PULSETRAIN
     except Exception:
         pass
 
     # HDF5/v7.3 format
     try:
         with h5py.File(str(path), "r") as f:
-            if "signal" in f and "Dischargetimes" in f["signal"]:
-                return _MAT_PULSETRAIN
             if "edition" in f and "Distimeclean" in f["edition"]:
                 return _MAT_EDITED
+            if "signal" in f and "Dischargetimes" in f["signal"]:
+                return _MAT_PULSETRAIN
     except Exception:
         pass
 
@@ -631,20 +635,13 @@ def _read_mat_signal_h5py(path: Path) -> Optional[dict]:
                         ref_signal = pd.DataFrame(a.reshape(-1, 1))
                         break
 
-            # Pulsetrain: (1 × ngrid) of refs, each (nMU × n_samples)
+            # Pulsetrain: one matrix per grid, possibly wrapped in a 1x1 cell; h5py shows
+            # MATLAB (nMU x T) as (T, nMU), so orient by the longer (time) axis.
             if "Pulsetrain" not in sig:
                 return None
-            pt_obj = sig["Pulsetrain"][()]  # (1, ngrid)
-            pt_parts = []
-            ngrid = pt_obj.shape[1] if pt_obj.ndim >= 2 else len(pt_obj)
-            for g_idx in range(ngrid):
-                ref = pt_obj[0, g_idx] if pt_obj.ndim >= 2 else pt_obj[g_idx]
-                if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)) and bool(ref):
-                    arr = np.array(f[ref], dtype=np.float64)
-                    if arr.ndim == 1:
-                        arr = arr.reshape(1, -1)
-                    if arr.size > 0:
-                        pt_parts.append(arr)
+            pt_parts = _orient_pulse_trains(
+                _collect_numeric_arrays_h5py(f, sig["Pulsetrain"]), 0
+            )
 
             if not pt_parts:
                 return None
@@ -654,23 +651,30 @@ def _read_mat_signal_h5py(path: Path) -> Optional[dict]:
             emg_length = pt_combined.shape[1]
             ipts_df = pd.DataFrame(pt_combined.T)
 
-            # Dischargetimes: (ngrid × maxMU) of refs
+            # Dischargetimes: a single row/column is one cell per MU in MU order;
+            # a real (ngrid x maxMU) grid keeps the per-grid indexing.
             mupulses = []
             if "Dischargetimes" in sig:
-                dt_obj = sig["Dischargetimes"][()]
-                if dt_obj.ndim < 2:
-                    dt_obj = dt_obj.reshape(1, -1)
-                for g_idx, pt_grid in enumerate(pt_parts):
-                    for mu_local in range(pt_grid.shape[0]):
-                        if g_idx < dt_obj.shape[0] and mu_local < dt_obj.shape[1]:
-                            ref = dt_obj[g_idx, mu_local]
-                            if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)) and bool(ref):
-                                ts = np.array(f[ref], dtype=np.int64).flatten() - 1
-                                mupulses.append(ts)
+                dt_ds = sig["Dischargetimes"]
+                empty = np.array([], dtype=np.int64)
+                if len(dt_ds.shape) < 2 or 1 in dt_ds.shape:
+                    for cell in _read_nested_cell_h5py(f, dt_ds):
+                        mupulses.append(
+                            np.asarray(cell, dtype=np.int64).flatten() - 1 if cell is not None else empty
+                        )
+                    mupulses = (mupulses + [empty] * n_mus)[:n_mus]
+                else:
+                    dt_obj = dt_ds[()]
+                    for g_idx, pt_grid in enumerate(pt_parts):
+                        for mu_local in range(pt_grid.shape[0]):
+                            if g_idx < dt_obj.shape[0] and mu_local < dt_obj.shape[1]:
+                                ref = dt_obj[g_idx, mu_local]
+                                if isinstance(ref, (h5py.Reference, h5py.h5r.Reference)) and bool(ref):
+                                    mupulses.append(np.array(f[ref], dtype=np.int64).flatten() - 1)
+                                else:
+                                    mupulses.append(empty)
                             else:
-                                mupulses.append(np.array([], dtype=np.int64))
-                        else:
-                            mupulses.append(np.array([], dtype=np.int64))
+                                mupulses.append(empty)
             else:
                 mupulses = [np.array([], dtype=np.int64)] * n_mus
 
@@ -721,7 +725,8 @@ def _orient_pulse_trains(arrays: list, n_samples: int) -> list:
 
     h5py shows MATLAB arrays with reversed dimensions, so a (nMU x T) matrix can
     arrive as (T, nMU); 1-D arrays are single pulse trains. ``n_samples`` (from
-    ``edition.time``) decides the orientation; when unknown, arrays are kept as read.
+    ``edition.time``) decides the orientation; when unknown, the longer axis is the
+    time axis (a recording always has far more samples than motor units).
     """
     parts = []
     for a in arrays:
@@ -730,7 +735,10 @@ def _orient_pulse_trains(arrays: list, n_samples: int) -> list:
             g = g.reshape(1, -1)
         if g.ndim != 2 or g.size == 0:
             continue
-        if n_samples and g.shape[1] != n_samples and g.shape[0] == n_samples:
+        if n_samples:
+            if g.shape[1] != n_samples and g.shape[0] == n_samples:
+                g = g.T
+        elif g.shape[0] > g.shape[1]:
             g = g.T
         if parts and g.shape[1] != parts[0].shape[1]:
             continue  # not a pulse train of the same recording
