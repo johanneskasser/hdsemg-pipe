@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 
 from hdsemg_shared.fileio.file_io import EMGFile, Grid
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.load_helpers import show_load_errors
 from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
 from hdsemg_pipe.state.global_state import global_state
 
@@ -183,6 +184,7 @@ class RMSQualityDialog(QtWidgets.QDialog):
         # Select which file paths to use
         paths_to_load = self.original_file_paths if self.use_original_files else self.file_paths
 
+        load_errors = []
         for fp in paths_to_load:
             try:
                 logger.info("Loading file: %s", fp)
@@ -192,7 +194,8 @@ class RMSQualityDialog(QtWidgets.QDialog):
                 logger.debug("→ %d grids from %s", len(emg.grids), Path(fp).name)
             except Exception as e:
                 logger.error("Failed to load %s: %s", fp, e, exc_info=True)
-                QtWidgets.QMessageBox.warning(self, "Loading Error", f"Failed to load {fp}:\n{e}")
+                load_errors.append((fp, str(e)))
+        show_load_errors(self, load_errors)
 
         logger.info("Total grids loaded: %d", len(self.grid_items))
         self._build_performed_path_map()

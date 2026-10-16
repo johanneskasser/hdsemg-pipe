@@ -9,10 +9,12 @@ import numpy as np
 
 class ChannelSelectionWorker(QThread):
     finished = pyqtSignal()  # Signal emitted when the process is completed
+    failed = pyqtSignal(str)  # hdsemg-select could not be started
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, output_path=None):
         super().__init__()
         self.file_path = file_path
+        self.output_path = output_path  # None → channelselection/<basename>
 
     def run(self):
         """Starts the Channel Selection application and waits for it to complete."""
@@ -42,8 +44,11 @@ class ChannelSelectionWorker(QThread):
 
         except Exception as e:
             logger.error(f"Failed to start Channel Selection app: {e}")
+            self.failed.emit(str(e))
 
     def get_output_filepath(self):
+        if self.output_path:
+            return os.path.normpath(self.output_path)
         filename = os.path.basename(self.file_path)
         output_filepath = os.path.join(global_state.get_channel_selection_path(), filename)
         output_filepath = os.path.normpath(output_filepath)

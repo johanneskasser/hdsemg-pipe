@@ -252,6 +252,39 @@ class MultiGridConfigWizardWidget(WizardStepWidget):
 
         return True
 
+    def on_shown(self):
+        """Show the restored grouping/export state once the step is opened."""
+        if not global_state.workfolder:
+            return
+        self.check()
+        if not self.grid_groupings:
+            self.load_groupings_from_json()
+        self._show_restored_summary()
+
+    def _show_restored_summary(self):
+        if not self.json_files:
+            return
+        in_groups = {f for files in self.grid_groupings.values() for f in files}
+        n_singles = sum(
+            1 for f in self.json_files
+            if os.path.basename(f).replace("_covisi_filtered.json", ".json") not in in_groups
+        )
+        lines = [self.status_label.text()]
+        if self.grid_groupings:
+            for name, files in self.grid_groupings.items():
+                lines.append(f"Group '{name}': {len(files)} file(s)")
+        lines.append(f"Single-grid files: {n_singles}")
+        muedit = global_state.get_decomposition_muedit_path()
+        n_exported = (
+            sum(1 for f in os.listdir(muedit) if f.endswith(".mat"))
+            if os.path.isdir(muedit) else 0
+        )
+        lines.append(
+            "MUEdit export: complete" if self.is_completed()
+            else f"MUEdit export: {n_exported} file(s) exported, not complete"
+        )
+        self.status_label.setText("\n".join(lines))
+
     def _update_source_folder(self):
         """Determine whether to read JSONs from covisi_filtered or decomposition_auto."""
         covisi_folder = global_state.get_decomposition_covisi_filtered_path()

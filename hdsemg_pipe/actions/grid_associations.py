@@ -9,6 +9,7 @@ import numpy as np
 from PyQt5 import QtWidgets, QtCore
 
 from hdsemg_pipe._log.log_config import logger
+from hdsemg_pipe.actions.load_helpers import show_load_errors
 from hdsemg_shared.fileio.file_io import EMGFile, Grid
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.ui_elements.theme import Colors, Spacing, BorderRadius, Fonts, Styles
@@ -27,6 +28,7 @@ class AssociationDialog(QtWidgets.QDialog):
 
     def load_files(self):
         logger.debug("Starting file loading process")
+        load_errors = []
         for fp in self.file_paths:
             try:
                 logger.info("Loading file: %s", fp)
@@ -37,8 +39,9 @@ class AssociationDialog(QtWidgets.QDialog):
                     logger.debug("Added grid %s from %s", grid.grid_key, emg.file_name)
             except Exception as e:
                 logger.error(f"Failed to load {fp}: {str(e)}", exc_info=True)
-                QtWidgets.QMessageBox.warning(self, "Loading Error", f"Failed to load {fp}:\n{str(e)}")
-            logger.info("Total files loaded: %d", len(self.emg_files))
+                load_errors.append((fp, str(e)))
+        logger.info("Total files loaded: %d", len(self.emg_files))
+        show_load_errors(self, load_errors)
 
     def init_ui(self):
         """Initialize modern UI with GitHub-style design."""

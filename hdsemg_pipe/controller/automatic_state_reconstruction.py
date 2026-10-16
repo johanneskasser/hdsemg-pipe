@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.enum.FolderNames import FolderNames, FOLDER_NAME_MIGRATIONS
 from hdsemg_pipe.actions.file_manager import get_channel_selection_status
+from hdsemg_pipe.actions.load_helpers import rebase_paths_to_folder
 from hdsemg_pipe.actions.process_log import read_process_log
 from hdsemg_pipe.actions.skip_marker import check_skip_marker
 from hdsemg_pipe.config.config_enums import Settings
@@ -217,7 +218,10 @@ def _collect_reconstruction_data(folderpath: str) -> ReconstructionData:
         if os.path.exists(sel_path):
             with open(sel_path, "r") as fh:
                 sel_data = json.load(fh)
-            selected = sel_data.get("selected", [])
+            # The manifest stores absolute paths from when it was written; the
+            # workfolder may have been moved/renamed since, so re-anchor by basename.
+            lnc_dir = os.path.join(folderpath, str(FolderNames.LINE_NOISE_CLEANED.value))
+            selected = rebase_paths_to_folder(sel_data.get("selected", []), lnc_dir)
             if selected:
                 data.file_quality_selected = selected
         # No file or empty list → file_quality_selected stays None → mark as skipped later
@@ -499,13 +503,8 @@ def _mu_quality_review_from_data(data: ReconstructionData) -> None:
     if not data.covisi_has_filtered:
         return
 
-    widget = global_state.get_widget("step9")
-    if data.mu_quality_manifest is not None and widget is not None:
-        try:
-            widget.restore_from_manifest(data.mu_quality_manifest)
-        except Exception as exc:
-            logger.warning("Could not restore mu_quality_selection.json: %s", exc)
-
+    # The widget loads the file list and restores mu_quality_selection.json lazily
+    # (see MUQualityReviewWizardWidget.on_shown) so reconstruction stays cheap.
     # Mark complete regardless (backwards compatibility with old workfolders)
     global_state.complete_widget("step9")
 
