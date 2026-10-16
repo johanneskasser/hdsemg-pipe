@@ -6,8 +6,8 @@ of decomposition files to their source channel selection files.
 """
 import os
 import json
-from PyQt5.QtCore import QFileSystemWatcher, QTimer
-from PyQt5.QtWidgets import QPushButton, QLabel, QVBoxLayout, QFrame
+from PyQt5.QtCore import QFileSystemWatcher, Qt, QTimer
+from PyQt5.QtWidgets import QApplication, QPushButton, QLabel, QProgressDialog, QVBoxLayout, QFrame
 
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.state.global_state import global_state
@@ -15,6 +15,7 @@ from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.MappingDialog import MappingDialog
 from hdsemg_pipe.ui_elements.theme import Styles, Colors, Spacing, Fonts
 from hdsemg_pipe.actions.file_grouping import build_auto_mapping
+from hdsemg_pipe.actions.result_provenance import annotate_result_json
 
 
 class DecompositionResultsWizardWidget(WizardStepWidget):
@@ -220,6 +221,7 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
 
         # Save state to JSON
         self.save_mapping_to_json()
+        self.annotate_results()
 
         # Mark step as completed
         self.complete_step()
@@ -254,6 +256,7 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
             )
             logger.info(f"Auto decomposition mapping: {self.decomp_mapping}")
             self.save_mapping_to_json()
+            self.annotate_results()
             self.complete_step()
         else:
             logger.info("Auto-mapping not possible – opening manual mapping dialog.")
@@ -283,11 +286,31 @@ class DecompositionResultsWizardWidget(WizardStepWidget):
 
                 # Save state to JSON
                 self.save_mapping_to_json()
+                self.annotate_results()
 
                 # Mark step as completed
                 self.complete_step()
             else:
                 logger.info("No mapping configured.")
+
+    def annotate_results(self):
+        """Write decomposition route + channel set into every result JSON (#152)."""
+        jsons = [f for f in self.resultfiles if f.endswith(".json")]
+        chan_dir = global_state.get_channel_selection_path()
+        progress = QProgressDialog("Recording channel provenance in result files...", None, 0, len(jsons), self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        written = 0
+        for i, path in enumerate(jsons):
+            progress.setValue(i)
+            QApplication.processEvents()
+            chan_name = (self.decomp_mapping or {}).get(os.path.basename(path))
+            try:
+                written += annotate_result_json(path, os.path.join(chan_dir, chan_name) if chan_name else None)
+            except Exception as exc:  # never block the step on a provenance write
+                logger.warning("Provenance failed for %s: %s", os.path.basename(path), exc)
+        progress.setValue(len(jsons))
+        logger.info("Channel provenance written to %d/%d result file(s)", written, len(jsons))
 
     def is_completed(self):
         """Check if this step is completed."""
