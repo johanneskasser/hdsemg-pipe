@@ -12,12 +12,13 @@ from hdsemg_pipe._log.log_config import logger
 SKIP_MARKER_FILENAME = ".skip_marker.json"
 
 
-def save_skip_marker(folder_path, reason="User skipped this step"):
+def save_skip_marker(folder_path, reason="User skipped this step", user_note=None):
     """Save a skip marker file in the specified folder.
 
     Args:
         folder_path: Path to the output folder for this step
-        reason: Reason for skipping (default: "User skipped this step")
+        reason: Default reason for skipping (default: "User skipped this step")
+        user_note: Optional free-text justification given by the operator
 
     Returns:
         bool: True if marker was saved successfully, False otherwise
@@ -29,6 +30,8 @@ def save_skip_marker(folder_path, reason="User skipped this step"):
             "timestamp": datetime.now().isoformat(),
             "reason": reason
         }
+        if user_note:
+            marker_data["user_note"] = user_note
 
         os.makedirs(folder_path, exist_ok=True)
         with open(marker_path, 'w') as f:
@@ -60,3 +63,19 @@ def check_skip_marker(folder_path):
     except Exception as e:
         logger.debug(f"Could not read skip marker from {folder_path}: {e}")
         return False
+
+
+def ask_skip_reason(parent, default_reason):
+    """Ask the operator why a step is skipped; the dialog is prefilled with ``default_reason``.
+
+    Returns the (stripped) text, "" when left empty, or None if the dialog was cancelled
+    (callers should then abort the skip).
+    """
+    from PyQt5.QtWidgets import QInputDialog
+
+    text, ok = QInputDialog.getText(
+        parent, "Reason for skipping",
+        "Why is this step skipped? (stored in the workfolder for later reference)",
+        text=default_reason,
+    )
+    return text.strip() if ok else None

@@ -43,6 +43,7 @@ from PyQt5.QtWidgets import (
 from hdsemg_pipe._log.log_config import logger
 from hdsemg_pipe.actions.decomposition_file import DecompositionFile
 from hdsemg_pipe.actions.process_log import read_manual_cleaning_tool
+from hdsemg_pipe.actions.skip_marker import ask_skip_reason, save_skip_marker
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
 from hdsemg_pipe.widgets.GridGroupingDialog import GridGroupingDialog
@@ -1313,14 +1314,15 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
     def skip_step(self):
         """Skip duplicate detection step - copy files and export to MAT."""
+        reason = "User skipped duplicate detection"
+        note = ask_skip_reason(self, reason)
+        if note is None:
+            return
         try:
             output_folder = global_state.get_decomposition_removed_duplicates_path()
             os.makedirs(output_folder, exist_ok=True)
 
-            # Save skip marker
-            skip_marker_path = os.path.join(output_folder, '.skip_marker.json')
-            with open(skip_marker_path, 'w') as f:
-                json.dump({'skipped': True, 'reason': 'User skipped duplicate detection'}, f)
+            save_skip_marker(output_folder, reason, note)
 
             # Copy all source files to output folder
             self.saved_json_paths = []
