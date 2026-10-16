@@ -523,6 +523,29 @@ _MU_TABLE_STYLE = f"""
 """
 
 
+def _basename(path: str) -> str:
+    """File name of a path written on any OS (manifests may hold Windows paths)."""
+    return os.path.basename(str(path).replace("\\", "/"))
+
+
+def _overrides_by_name(overrides: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]:
+    """Key manual MU overrides by file name (independent of where the workfolder lives)."""
+    return {_basename(fp): dict(v) for fp, v in overrides.items() if v}
+
+
+def _overrides_for_paths(by_name: Dict[str, Dict[str, str]], filepaths) -> Dict[str, Dict[str, str]]:
+    """Map name-keyed (or legacy path-keyed) overrides onto the files of the current workfolder."""
+    names = {_basename(k): v for k, v in by_name.items()}
+    return {fp: dict(names[_basename(fp)]) for fp in filepaths if names.get(_basename(fp))}
+
+
+def _kept_names_from_filtered_folder(folder: Path) -> set:
+    """Source file names that were forwarded to the next step (``x_covisi_filtered.json`` -> ``x.json``)."""
+    if not folder.is_dir():
+        return set()
+    return {p.name.replace("_covisi_filtered.json", ".json") for p in folder.glob("*_covisi_filtered.json")}
+
+
 def _name_within_group(filepath: str, group_key: str) -> str:
     """File name without the group prefix (the group header already shows it)."""
     name = Path(filepath).name
@@ -1007,6 +1030,12 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
                     self.restore_from_manifest(manifest)
                 except Exception as exc:
                     logger.warning("Could not restore MU quality manifest: %s", exc)
+            else:
+                # Older workfolders have no manifest: the files that reached the next
+                # step are the ones that were actually used.
+                kept = _kept_names_from_filtered_folder(Path(global_state.get_decomposition_covisi_filtered_path()))
+                if kept:
+                    self.restore_from_manifest({"kept_files": sorted(kept)})
 
     def on_shown(self):
         # Deferred from reconstruction: MUs are only indexed once the step is opened.
@@ -1036,8 +1065,8 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         ]:
             w.blockSignals(False)
 
-        self._overrides = manifest.get("mu_overrides", {})
-        kept_files = set(manifest.get("kept_files", []))
+        self._overrides = _overrides_for_paths(manifest.get("mu_overrides", {}), self._items.keys())
+        kept_files = {_basename(n) for n in manifest.get("kept_files", [])}
 
         for filepath, item in self._items.items():
             basename = Path(filepath).name
@@ -1047,8 +1076,12 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
             item.checkbox.blockSignals(False)
             self._checked[filepath] = should_check
 
+        # The current file may already be displayed (cached): redraw with the restored decisions.
+        if self._current_file in self._reliability_cache:
+            self._refresh_mu_table(self._current_file)
         self._update_group_headers()
         self._update_proceed_button()
+        self._update_footer()
 
     # -- Private helpers -------------------------------------------------------
 
@@ -1642,7 +1675,7 @@ class MUQualityReviewWizardWidget(WizardStepWidget):
         worker = _ProceedWorker(
             kept_files=kept_files,
             thresholds=self._build_thresholds(),
-            overrides=self._overrides,
+            overrides=_overrides_by_name(self._overrides),
             source_dir=source_dir,
             dest_dir=dest_dir,
             manifest_path=manifest_path,
