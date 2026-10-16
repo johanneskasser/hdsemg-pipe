@@ -3,7 +3,7 @@ import os
 from PyQt5.QtWidgets import QPushButton, QDialog
 
 from hdsemg_pipe.actions.file_utils import copy_files
-from hdsemg_pipe.actions.skip_marker import save_skip_marker
+from hdsemg_pipe.actions.skip_marker import ask_skip_reason, save_skip_marker
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
@@ -46,12 +46,16 @@ class GridAssociationWizardWidget(WizardStepWidget):
 
     def skip_step(self):
         """Skip the grid association step by copying files to the destination folder."""
+        reason = "Grid association skipped - files copied directly"
+        note = ask_skip_reason(self, reason)
+        if note is None:
+            return
         dest_folder = global_state.get_associated_grids_path()
         files = global_state.get_original_files()
         try:
             global_state.associated_files = copy_files(files, dest_folder)
             # Save skip marker for state reconstruction
-            save_skip_marker(dest_folder, "Grid association skipped - files copied directly")
+            save_skip_marker(dest_folder, reason, note)
             # Call parent skip_step to mark as skipped in GlobalState
             super().skip_step("Grid association skipped - files copied directly")
             return

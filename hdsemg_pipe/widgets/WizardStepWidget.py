@@ -174,6 +174,23 @@ class WizardStepWidget(QWidget):
 
         self.main_layout.addWidget(self.content_card)
 
+    def use_scoped_content_card(self):
+        """Limit the content card's frame styling to the card itself.
+
+        The default card stylesheet is a bare ``QFrame {{ ... padding }}`` rule, which
+        cascades into every QFrame descendant (QLabel, QTableWidget, QScrollArea, ...)
+        and gives them borders and 24px padding. Steps with rich custom content call
+        this so their children render with their own styling.
+        """
+        self.content_card.setObjectName("contentCard")
+        self.content_card.setStyleSheet(f"""
+            QFrame#contentCard {{
+                background-color: {Colors.BG_PRIMARY};
+                border: 1px solid {Colors.BORDER_DEFAULT};
+                border-radius: {BorderRadius.LG};
+            }}
+        """)
+
     def _createStatusArea(self):
         """Create the status message area (deprecated - using toasts now)."""
         # Status area removed - using toast notifications instead
