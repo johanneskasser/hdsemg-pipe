@@ -1,9 +1,7 @@
 import json
-import os
 
 from hdsemg_pipe.actions.process_log import STEP_NAMES
 from hdsemg_pipe.controller import automatic_state_reconstruction as asr
-from hdsemg_pipe.state.global_state import global_state
 from hdsemg_pipe.widgets.wizard.RemoveDuplicateMUsWizardWidget import _fmt
 
 
