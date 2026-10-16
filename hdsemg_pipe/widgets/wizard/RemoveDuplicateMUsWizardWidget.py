@@ -507,6 +507,84 @@ class PklDuplicateWorker(QThread):
 # MAIN WIDGET
 # ============================================================================
 
+def _plain_label(text: str = "", size: str = Fonts.SIZE_BASE, color: str = Colors.TEXT_PRIMARY,
+                 weight: str = Fonts.WEIGHT_NORMAL) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet(
+        f"QLabel {{ color: {color}; font-size: {size}; font-weight: {weight};"
+        " border: none; padding: 0; background: transparent; }"
+    )
+    return lbl
+
+
+def _section(title: str):
+    """Card with a heading; returns (card, body_layout)."""
+    card = QFrame()
+    card.setObjectName("sectionCard")
+    card.setStyleSheet(
+        f"QFrame#sectionCard {{ background: {Colors.BG_PRIMARY}; border: 1px solid {Colors.BORDER_MUTED};"
+        f" border-radius: {BorderRadius.LG}; }}"
+    )
+    outer = QVBoxLayout(card)
+    outer.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.LG)
+    outer.setSpacing(Spacing.MD)
+    outer.addWidget(_plain_label(title, Fonts.SIZE_BASE, Colors.TEXT_PRIMARY, Fonts.WEIGHT_SEMIBOLD))
+    return card, outer
+
+
+def _field(caption: str, control: QWidget) -> QWidget:
+    """Control with a small caption above it."""
+    host = QWidget()
+    host.setStyleSheet("background: transparent;")
+    col = QVBoxLayout(host)
+    col.setContentsMargins(0, 0, 0, 0)
+    col.setSpacing(Spacing.XS)
+    col.addWidget(_plain_label(caption, Fonts.SIZE_SM, Colors.TEXT_SECONDARY))
+    col.addWidget(control)
+    return host
+
+
+_INPUT_STYLE = f"""
+    QDoubleSpinBox, QSpinBox {{
+        background-color: {Colors.BG_PRIMARY};
+        color: {Colors.TEXT_PRIMARY};
+        border: 1px solid {Colors.BORDER_DEFAULT};
+        border-radius: {BorderRadius.MD};
+        padding: 3px 6px;
+        font-size: {Fonts.SIZE_BASE};
+    }}
+    QDoubleSpinBox:focus, QSpinBox:focus {{ border-color: {Colors.BLUE_500}; }}
+"""
+
+_TABLE_STYLE = f"""
+    QTableWidget {{
+        background-color: {Colors.BG_PRIMARY};
+        border: 1px solid {Colors.BORDER_MUTED};
+        border-radius: {BorderRadius.MD};
+        gridline-color: transparent;
+        font-size: {Fonts.SIZE_BASE};
+        color: {Colors.TEXT_PRIMARY};
+    }}
+    QHeaderView::section {{
+        background-color: {Colors.BG_SECONDARY};
+        color: {Colors.TEXT_SECONDARY};
+        border: none;
+        border-bottom: 1px solid {Colors.BORDER_MUTED};
+        padding: 8px 10px;
+        font-size: {Fonts.SIZE_SM};
+        font-weight: {Fonts.WEIGHT_SEMIBOLD};
+    }}
+    QTableWidget::item {{
+        padding: 4px 10px;
+        border-bottom: 1px solid {Colors.BORDER_MUTED};
+    }}
+    QTableWidget::item:selected {{
+        background-color: {Colors.BLUE_50};
+        color: {Colors.TEXT_PRIMARY};
+    }}
+"""
+
+
 class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
     """
     Step 10: Remove Duplicate MUs (Within/Between Grids)
@@ -533,6 +611,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         self.saved_json_paths = []  # Paths to cleaned JSONs (for export)
 
         super().__init__(step_index, step_name, description, parent)
+        self.use_scoped_content_card()
 
         self.init_ui()
         self.check()
@@ -592,60 +671,62 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
     def create_status_panel(self):
         """Create status information panel."""
-        group = QGroupBox("Status")
-        group.setStyleSheet(Styles.groupbox())
-        layout = QVBoxLayout(group)
+        group, layout = _section("Files")
+        layout.setSpacing(Spacing.XS)
 
-        self.lbl_files_found = QLabel("No files found")
+        self.lbl_files_found = _plain_label("No files found", Fonts.SIZE_BASE, Colors.TEXT_PRIMARY)
         layout.addWidget(self.lbl_files_found)
 
-        self.lbl_grouping_strategy = QLabel("Grouping: File + Muscle (default)")
+        self.lbl_grouping_strategy = _plain_label(
+            "Grouping: File + Muscle (default)", Fonts.SIZE_SM, Colors.TEXT_SECONDARY
+        )
         layout.addWidget(self.lbl_grouping_strategy)
 
         return group
 
     def create_parameter_panel(self):
         """Create parameter configuration panel."""
-        group = QGroupBox("Detection Parameters")
-        group.setStyleSheet(Styles.groupbox())
-
-        # Use compact single-row layout
-        row = QHBoxLayout(group)
-        row.setSpacing(Spacing.MD)
-        row.setContentsMargins(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM)
+        group, group_layout = _section("Detection parameters")
+        row = QHBoxLayout()
+        row.setSpacing(Spacing.XL)
+        group_layout.addLayout(row)
 
         # XCC threshold
-        row.addWidget(QLabel("XCC threshold:"))
         self.threshold_spin = QDoubleSpinBox()
+        self.threshold_spin.setStyle(QStyleFactory.create("Fusion"))
+        self.threshold_spin.setStyleSheet(_INPUT_STYLE)
         self.threshold_spin.setRange(0.5, 1.0)
         self.threshold_spin.setValue(0.9)
         self.threshold_spin.setSingleStep(0.05)
         self.threshold_spin.setDecimals(2)
-        self.threshold_spin.setFixedWidth(70)
+        self.threshold_spin.setFixedWidth(90)
         self.threshold_spin.setToolTip(
             "Minimum normalised 2-D cross-correlation to consider two MUs duplicates.\n"
             "openhdemg default: 0.9  (range 0–1, higher = stricter)"
         )
-        row.addWidget(self.threshold_spin)
+        row.addWidget(_field("XCC threshold", self.threshold_spin))
 
         # STA timewindow
-        row.addWidget(QLabel("Timewindow:"))
         self.timewindow_spin = QSpinBox()
+        self.timewindow_spin.setStyle(QStyleFactory.create("Fusion"))
+        self.timewindow_spin.setStyleSheet(_INPUT_STYLE)
         self.timewindow_spin.setRange(10, 200)
         self.timewindow_spin.setValue(50)
         self.timewindow_spin.setSuffix(" ms")
-        self.timewindow_spin.setFixedWidth(80)
+        self.timewindow_spin.setFixedWidth(100)
         self.timewindow_spin.setToolTip(
             "STA timewindow used to compute MUAPs (default: 50 ms)"
         )
-        row.addWidget(self.timewindow_spin)
+        row.addWidget(_field("Timewindow", self.timewindow_spin))
 
         # Fsamp (informational)
-        row.addWidget(QLabel("Fsamp:"))
         self.lbl_fsamp = QLabel("Auto")
-        self.lbl_fsamp.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-style: italic;")
+        self.lbl_fsamp.setStyleSheet(
+            f"QLabel {{ color: {Colors.TEXT_SECONDARY}; font-size: {Fonts.SIZE_BASE}; font-style: italic;"
+            " border: none; padding: 4px 0; background: transparent; }"
+        )
         self.lbl_fsamp.setMinimumWidth(80)
-        row.addWidget(self.lbl_fsamp)
+        row.addWidget(_field("Sampling rate", self.lbl_fsamp))
 
         # Per-file grid orientations — Grid 1 / Grid 2+
         base_tooltip = (
@@ -700,7 +781,6 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         popup_palette.setColor(QPalette.All, QPalette.Highlight, QColor(Colors.BLUE_100))
         popup_palette.setColor(QPalette.All, QPalette.HighlightedText, QColor(Colors.TEXT_PRIMARY))
 
-        row.addWidget(QLabel("Orientation:"))
         self.orientation1_combo = QComboBox()
         if fusion:
             self.orientation1_combo.setStyle(fusion)
@@ -709,12 +789,11 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         self.orientation1_combo.setItemData(0, QSize(80, 24), Qt.SizeHintRole)
         self.orientation1_combo.addItem("0°", 0)
         self.orientation1_combo.setItemData(1, QSize(80, 24), Qt.SizeHintRole)
-        self.orientation1_combo.setMinimumWidth(70)
+        self.orientation1_combo.setMinimumWidth(90)
         self.orientation1_combo.setToolTip("Grid 1 (first file in each group).\n" + base_tooltip)
         self.orientation1_combo.view().setStyleSheet(popup_view_style)
         self.orientation1_combo.view().setPalette(popup_palette)
-        row.addWidget(self.orientation1_combo)
-        row.addWidget(QLabel("/"))
+        row.addWidget(_field("Orientation, grid 1", self.orientation1_combo))
         self.orientation2_combo = QComboBox()
         if fusion:
             self.orientation2_combo.setStyle(fusion)
@@ -723,11 +802,11 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
         self.orientation2_combo.setItemData(0, QSize(80, 24), Qt.SizeHintRole)
         self.orientation2_combo.addItem("0°", 0)
         self.orientation2_combo.setItemData(1, QSize(80, 24), Qt.SizeHintRole)
-        self.orientation2_combo.setMinimumWidth(70)
+        self.orientation2_combo.setMinimumWidth(90)
         self.orientation2_combo.setToolTip("Grid 2+ (second and further files in each group).\n" + base_tooltip)
         self.orientation2_combo.view().setStyleSheet(popup_view_style)
         self.orientation2_combo.view().setPalette(popup_palette)
-        row.addWidget(self.orientation2_combo)
+        row.addWidget(_field("Orientation, grid 2+", self.orientation2_combo))
 
         # openhdemg GUI toggle
         self.chk_show_gui = QCheckBox("Show openhdemg GUI")
@@ -737,7 +816,7 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
             "visually inspect and manually confirm/reject MU pairs.\n"
             "Leave unchecked for fully automatic detection."
         )
-        row.addWidget(self.chk_show_gui)
+        row.addWidget(self.chk_show_gui, 0, Qt.AlignBottom)
 
         row.addStretch()
 
@@ -745,24 +824,43 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
     def create_results_panel(self):
         """Create results display panel."""
-        group = QGroupBox("Detection Results")
-        group.setStyleSheet(Styles.groupbox())
+        group, layout = _section("Detection results")
         group.setVisible(False)  # Hidden until detection runs
-        layout = QVBoxLayout(group)
 
         # Results table
         self.results_table = QTableWidget()
+        self.results_table.setStyleSheet(_TABLE_STYLE)
         self.results_table.setColumnCount(6)
         self.results_table.setHorizontalHeaderLabels([
-            "Group", "MUs in Duplicate", "Avg XCC", "Survivor", "Action", "View"
+            "Group", "MUs in duplicate", "Avg XCC", "Survivor", "Action", "View"
         ])
-        self.results_table.horizontalHeader().setStretchLastSection(False)
-        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        header = self.results_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        for col in range(1, 4):
+            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        # Cell widgets are not measured by ResizeToContents, so give them fixed room.
+        for col, width in ((4, 120), (5, 96)):
+            header.setSectionResizeMode(col, QHeaderView.Fixed)
+            header.resizeSection(col, width)
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.results_table.verticalHeader().setVisible(False)
+        self.results_table.verticalHeader().setDefaultSectionSize(40)
+        self.results_table.setShowGrid(False)
+        self.results_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.results_table.setTextElideMode(Qt.ElideMiddle)
         self.results_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.results_table.setMinimumHeight(160)
         layout.addWidget(self.results_table)
 
-        # Summary label
+        # Summary / progress message
         self.lbl_summary = QLabel("")
+        self.lbl_summary.setWordWrap(True)
+        self.lbl_summary.setStyleSheet(
+            f"QLabel {{ color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_SM};"
+            f" background: {Colors.BG_SECONDARY}; border: 1px solid {Colors.BORDER_MUTED};"
+            f" border-radius: {BorderRadius.MD}; padding: 8px 12px; }}"
+        )
         layout.addWidget(self.lbl_summary)
 
         return group
@@ -1081,7 +1179,9 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                 self.results_table.insertRow(row)
 
                 # Column 0: Group name
-                self.results_table.setItem(row, 0, QTableWidgetItem(group_result['group_name']))
+                name_item = QTableWidgetItem(group_result['group_name'])
+                name_item.setToolTip(group_result['group_name'])
+                self.results_table.setItem(row, 0, name_item)
 
                 # Column 1: MUs in duplicate
                 mus_str = ", ".join([f"F{f}M{m}" for f, m in dup_group['mus']])
@@ -1097,7 +1197,9 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                         if v is not None:
                             xcc_values.append(v)
                 avg_xcc = sum(xcc_values) / len(xcc_values) if xcc_values else 0.0
-                self.results_table.setItem(row, 2, QTableWidgetItem(f"{avg_xcc:.3f}"))
+                xcc_item = QTableWidgetItem(f"{avg_xcc:.3f}")
+                xcc_item.setForeground(QColor(Colors.GREEN_700 if avg_xcc >= self.threshold_spin.value() else Colors.ORANGE_700))
+                self.results_table.setItem(row, 2, xcc_item)
 
                 # Column 3: Survivor
                 survivor_str = f"F{dup_group['survivor'][0]}M{dup_group['survivor'][1]}"
@@ -1112,12 +1214,17 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                 # Column 5: View button
                 btn_view = QPushButton("View")
                 btn_view.setStyleSheet(Styles.button_secondary())
+                btn_view.setCursor(Qt.PointingHandCursor)
                 btn_view.clicked.connect(
                     lambda checked, gr=group_result, idx=dup_group_idx: self.view_duplicate(gr, idx)
                 )
                 self.results_table.setCellWidget(row, 5, btn_view)
 
                 row += 1
+
+        # Grow the table to its rows (up to a cap) instead of a cramped inner scroll area
+        rows_h = self.results_table.verticalHeader().defaultSectionSize() * self.results_table.rowCount()
+        self.results_table.setFixedHeight(max(160, min(520, rows_h + self.results_table.horizontalHeader().height() + 4)))
 
         # Update summary
         self.lbl_summary.setText(

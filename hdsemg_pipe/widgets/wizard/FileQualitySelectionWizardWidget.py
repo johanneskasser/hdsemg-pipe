@@ -33,6 +33,7 @@ from hdsemg_pipe.actions.tracking_error_metrics import (
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe.state.global_state import global_state
+from hdsemg_pipe.ui_elements.elided_label import ElidedLabel
 from hdsemg_pipe.ui_elements.loading_overlay import LoadingOverlay
 from hdsemg_pipe.ui_elements.theme import BorderRadius, Colors, Fonts, Spacing, Styles
 from hdsemg_pipe.widgets.WizardStepWidget import WizardStepWidget
@@ -309,9 +310,10 @@ class _FileListItem(QWidget):
     clicked = pyqtSignal(str)          # emits file_path on row click
     selection_changed = pyqtSignal(str, bool)  # emits (file_path, is_checked)
 
-    def __init__(self, file_path: str, parent=None):
+    def __init__(self, file_path: str, parent=None, display_name: Optional[str] = None):
         super().__init__(parent)
         self._file_path = file_path
+        self._display_name = display_name or os.path.basename(file_path)
         self._is_active = False
         self._setup_ui()
         self._apply_style(active=False)
@@ -337,16 +339,10 @@ class _FileListItem(QWidget):
         layout.addWidget(self._checkbox)
 
         # Filename label – full path as tooltip, elided display text
-        filename = os.path.basename(self._file_path)
-        self._name_label = QLabel(filename)
-        self._name_label.setToolTip(self._file_path)
-        self._name_label.setWordWrap(False)
-        self._name_label.setMinimumWidth(0)
-        self._name_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self._name_label.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: {Fonts.SIZE_SM};"
-            f"background: transparent; border: none;"
+        self._name_label = ElidedLabel(
+            self._display_name, Fonts.SIZE_SM, Fonts.WEIGHT_NORMAL, Colors.TEXT_PRIMARY
         )
+        self._name_label.setToolTip(self._file_path)
         layout.addWidget(self._name_label, 1)
 
     # ------------------------------------------------------------------
@@ -416,17 +412,8 @@ class _GroupHeader(QWidget):
         layout.setContentsMargins(Spacing.SM, Spacing.XS, Spacing.SM, Spacing.XS)
         layout.setSpacing(Spacing.XS)
 
-        lbl = QLabel(label.upper())
-        lbl.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.TEXT_SECONDARY};
-                font-size: {Fonts.SIZE_XS};
-                font-weight: {Fonts.WEIGHT_SEMIBOLD};
-                letter-spacing: 0.5px;
-                background: transparent;
-                border: none;
-            }}
-        """)
+        lbl = ElidedLabel(label, Fonts.SIZE_SM, Fonts.WEIGHT_SEMIBOLD, Colors.TEXT_SECONDARY)
+        lbl.setToolTip(label)
         layout.addWidget(lbl, 1)
 
         self._counter = QLabel("")
@@ -549,6 +536,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             )
         )
 
+        self.use_scoped_content_card()
+
         # Build the main split content area after super().__init__() has set up the card
         self._setup_main_content()
 
@@ -575,7 +564,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         splitter.addWidget(self._build_right_panel())
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([290, 710])
+        splitter.setSizes([380, 820])
 
         # Insert before button_container (which is the last item in content_layout)
         idx = self.content_layout.indexOf(self.button_container)
@@ -584,8 +573,8 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
 
     def _build_left_panel(self) -> QWidget:
         panel = QWidget()
-        panel.setMinimumWidth(220)
-        panel.setMaximumWidth(380)
+        panel.setMinimumWidth(260)
+        panel.setMaximumWidth(460)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(Spacing.SM)
@@ -597,14 +586,13 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         hdr_layout.setContentsMargins(0, 0, 0, 0)
         hdr_layout.setSpacing(Spacing.SM)
 
-        hdr = QLabel("FILES")
+        hdr = QLabel("Files")
         hdr.setStyleSheet(f"""
             QLabel {{
                 color: {Colors.TEXT_SECONDARY};
                 font-size: {Fonts.SIZE_XS};
                 font-weight: {Fonts.WEIGHT_SEMIBOLD};
-                letter-spacing: 0.6px;
-                background: transparent;
+                                background: transparent;
                 border: none;
             }}
         """)
@@ -645,7 +633,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setStyleSheet(f"""
             QScrollArea {{
@@ -736,16 +724,20 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
 
         # Stats row — flat labels, no card borders
         _ts = (f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};"
-               f"font-weight:{Fonts.WEIGHT_MEDIUM};letter-spacing:0.5px;"
+               f"font-weight:{Fonts.WEIGHT_MEDIUM};"
                f"background:transparent;border:none;")
-        _vs = (f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+        _vs = (f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_XXL};"
                f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;")
         _qs = f"color:{Colors.TEXT_MUTED};font-size:{Fonts.SIZE_XS};background:transparent;border:none;"
 
-        stats_row = QWidget()
-        stats_row.setStyleSheet("background:transparent;")
+        stats_row = QFrame()
+        stats_row.setObjectName("statsCard")
+        stats_row.setStyleSheet(
+            f"QFrame#statsCard {{ background: {Colors.BG_SECONDARY};"
+            f" border: 1px solid {Colors.BORDER_MUTED}; border-radius: {BorderRadius.LG}; }}"
+        )
         stats_layout = QHBoxLayout(stats_row)
-        stats_layout.setContentsMargins(0, Spacing.XS, 0, 0)
+        stats_layout.setContentsMargins(Spacing.LG, Spacing.MD, Spacing.LG, Spacing.MD)
         stats_layout.setSpacing(0)
 
         dev_col = QWidget()
@@ -761,7 +753,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         dev_hdr_layout.setContentsMargins(0, 0, 0, 0)
         dev_hdr_layout.setSpacing(Spacing.XS)
 
-        dev_hdr_layout.addWidget(QLabel("TRACKING DEVIATION", styleSheet=_ts))
+        dev_hdr_layout.addWidget(QLabel("Tracking deviation", styleSheet=_ts))
 
         self._metric_combo = QComboBox()
         # Force Fusion style so the popup list respects Qt stylesheets on macOS
@@ -853,7 +845,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         rms_cv = QVBoxLayout(rms_col)
         rms_cv.setContentsMargins(0, 0, 0, 0)
         rms_cv.setSpacing(2)
-        rms_cv.addWidget(QLabel("RMS NOISE QUALITY", styleSheet=_ts))
+        rms_cv.addWidget(QLabel("RMS noise quality", styleSheet=_ts))
         self._rms_grids_container = QWidget()
         self._rms_grids_container.setStyleSheet("background:transparent;")
         self._rms_grids_vbox = QVBoxLayout(self._rms_grids_container)
@@ -861,7 +853,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         self._rms_grids_vbox.setSpacing(0)
         placeholder = QLabel("—")
         placeholder.setStyleSheet(
-            f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+            f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_XXL};"
             f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
         )
         self._rms_grids_vbox.addWidget(placeholder)
@@ -1008,6 +1000,15 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             self._list_layout.insertWidget(self._list_layout.count() - 1, item)
             self._file_items[fp] = item
 
+    @staticmethod
+    def _name_within_group(file_path: str, group_key: str) -> str:
+        """File name minus the group prefix (the header already shows it)."""
+        name = os.path.basename(file_path)
+        if group_key and name.startswith(group_key):
+            rest = name[len(group_key):].lstrip("_")
+            return rest or name
+        return name
+
     def _populate_grouped(self, all_files: List[str], saved_selection):
         # Build groups preserving file order
         groups: Dict[str, List[str]] = {}
@@ -1024,7 +1025,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
             self._group_headers[key] = header
 
             for fp in files:
-                item = _FileListItem(fp, self._list_container)
+                item = _FileListItem(fp, self._list_container, self._name_within_group(fp, key))
                 if saved_selection is not None:
                     item.set_checked(os.path.basename(fp) in saved_selection)
                 item.clicked.connect(self._on_file_selected)
@@ -1305,7 +1306,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
                      value_text: str, quality_label: str, color: str):
         value_lbl.setText(value_text)
         value_lbl.setStyleSheet(
-            f"color:{color};font-size:{Fonts.SIZE_LG};"
+            f"color:{color};font-size:{Fonts.SIZE_XXL};"
             f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
         )
         quality_lbl.setText(quality_label)
@@ -1316,7 +1317,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
     def _reset_stat(self, value_lbl: QLabel, quality_lbl: QLabel):
         value_lbl.setText("—")
         value_lbl.setStyleSheet(
-            f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+            f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_XXL};"
             f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
         )
         quality_lbl.setText("")
@@ -1336,7 +1337,7 @@ class FileQualitySelectionWizardWidget(WizardStepWidget):
         if not grids:
             placeholder = QLabel("—")
             placeholder.setStyleSheet(
-                f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_LG};"
+                f"color:{Colors.TEXT_PRIMARY};font-size:{Fonts.SIZE_XXL};"
                 f"font-weight:{Fonts.WEIGHT_SEMIBOLD};background:transparent;border:none;"
             )
             layout.addWidget(placeholder)

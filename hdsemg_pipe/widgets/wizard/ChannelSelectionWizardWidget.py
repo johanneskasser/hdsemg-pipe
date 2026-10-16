@@ -1,18 +1,16 @@
 import os
 from typing import List
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtWidgets import (
-    QAbstractItemView, QHeaderView, QLabel, QMessageBox, QPushButton,
-    QTableWidget, QTableWidgetItem,
-)
+from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtWidgets import QMessageBox
 
 from hdsemg_pipe.actions.channel_selection_summary import (
-    DISCARDED, KEPT, PENDING, FileSummary, collect_channel_selection_summary,
+    FileSummary, collect_channel_selection_summary,
 )
 from hdsemg_pipe.actions.file_manager import start_file_processing, get_channel_selection_status
 from hdsemg_pipe.actions.workers import ChannelSelectionWorker
 from hdsemg_pipe.ui_elements.loading_overlay import LoadingOverlay
+from hdsemg_pipe.widgets.channel_selection_view import ChannelSelectionSummaryView
 from hdsemg_pipe.config.config_enums import Settings
 from hdsemg_pipe.config.config_manager import config
 from hdsemg_pipe._log.log_config import logger
@@ -35,27 +33,6 @@ class _SummaryWorker(QThread):
         self.loaded.emit(collect_channel_selection_summary(self._cropped_files, self._dir))
 
 
-def _describe_grids(f: FileSummary) -> str:
-    if f.status == PENDING:
-        return "not processed yet"
-    if not f.grids:
-        return "no sidecar JSON found" if not f.has_sidecar else "no grids"
-    lines = []
-    for g in f.grids:
-        dims = f"{g.rows}×{g.columns}" if g.rows and g.columns else ""
-        ied = f", {g.ied_mm:g} mm" if isinstance(g.ied_mm, (int, float)) else ""
-        head = f"{g.grid_key} ({dims}{ied})" if dims else g.grid_key
-        line = f"{head}: {g.n_selected} kept, {g.n_dropped} dropped"
-        if g.n_refs_total:
-            line += f" · refs {g.n_refs_selected}/{g.n_refs_total}"
-        if g.n_labeled:
-            line += f" · {g.n_labeled} labeled"
-        if 0 < g.n_dropped <= 8:
-            line += f" (dropped ch: {', '.join(map(str, g.excluded_channels))})"
-        lines.append(line)
-    return "\n".join(lines)
-
-
 class ChannelSelectionWizardWidget(WizardStepWidget):
     def __init__(self):
         """Step 7: Channel selection from the loaded .mat files."""
@@ -66,7 +43,6 @@ class ChannelSelectionWizardWidget(WizardStepWidget):
         )
         self.processed_files = 0
         self.total_files = 0
-        self.additional_information_label.setText("0/0")
         self._summary_worker = None
         self._edit_worker = None
         self._overlay = None
@@ -74,26 +50,12 @@ class ChannelSelectionWizardWidget(WizardStepWidget):
         self._build_summary_ui()
 
     def _build_summary_ui(self):
-        """Summary of a previous/partial run (kept/dropped per file and grid)."""
-        self.summary_label = QLabel("")
-        self.summary_label.setWordWrap(True)
-        self.summary_label.setVisible(False)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["File", "Status", "Grids / channels", ""])
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setWordWrap(True)
-        self.table.setMinimumHeight(240)
-        hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(2, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.table.setVisible(False)
+        """Overview of a previous/partial run (kept/dropped per file and grid)."""
+        self.summary_view = ChannelSelectionSummaryView()
+        self.summary_view.edit_requested.connect(self._edit_file)
+        self.summary_view.setVisible(False)
         # Insert above the button row (index 0 is the info label, 1 the buttons).
-        self.content_layout.insertWidget(1, self.summary_label)
-        self.content_layout.insertWidget(2, self.table)
+        self.content_layout.insertWidget(1, self.summary_view)
 
     # ------------------------------------------------------------------
     # Lazy, asynchronous summary of an existing run
@@ -128,31 +90,8 @@ class ChannelSelectionWizardWidget(WizardStepWidget):
             self._overlay.deleteLater()
             self._overlay = None
         self._summary_key = key
-        n_kept = sum(1 for f in summaries if f.status == KEPT)
-        n_disc = sum(1 for f in summaries if f.status == DISCARDED)
-        n_pend = len(summaries) - n_kept - n_disc
-        done = n_kept + n_disc
-        self.additional_information_label.setText(f"{done}/{len(summaries)}")
-        self.summary_label.setText(
-            f"{n_kept} file(s) kept, {n_disc} discarded, {n_pend} pending."
-        )
-        self.summary_label.setVisible(bool(summaries))
-
-        self.table.setRowCount(len(summaries))
-        for row, f in enumerate(summaries):
-            self.table.setItem(row, 0, QTableWidgetItem(f.name))
-            status = f.status.capitalize()
-            if f.status == DISCARDED and f.reason:
-                status += f" ({f.reason})"
-            self.table.setItem(row, 1, QTableWidgetItem(status))
-            self.table.setItem(row, 2, QTableWidgetItem(_describe_grids(f)))
-            if f.status == KEPT:
-                btn = QPushButton("Edit…")
-                btn.setToolTip("Re-open this file in hdsemg-select")
-                btn.clicked.connect(lambda _=False, p=f.path: self._edit_file(p))
-                self.table.setCellWidget(row, 3, btn)
-        self.table.resizeRowsToContents()
-        self.table.setVisible(bool(summaries))
+        self.summary_view.set_summaries(summaries)
+        self.summary_view.setVisible(bool(summaries))
 
     def _edit_file(self, mat_path: str):
         if self._edit_worker is not None and self._edit_worker.isRunning():
@@ -163,16 +102,16 @@ class ChannelSelectionWizardWidget(WizardStepWidget):
         worker.finished.connect(self._on_edit_done)
         worker.failed.connect(self._on_edit_failed)
         self._edit_worker = worker
-        self.table.setEnabled(False)  # one external editor at a time
-        self.summary_label.setText("Editing in hdsemg-select… close it to continue.")
+        self.summary_view.set_editing(True)  # one external editor at a time
+        self.info("Editing in hdsemg-select — close it to continue.")
         worker.start()
 
     def _on_edit_done(self):
-        self.table.setEnabled(True)
+        self.summary_view.set_editing(False)
         self._refresh_summary(force=True)
 
     def _on_edit_failed(self, msg: str):
-        self.table.setEnabled(True)
+        self.summary_view.set_editing(False)
         self.warn(f"Could not start hdsemg-select: {msg}")
         self._refresh_summary(force=True)
 
