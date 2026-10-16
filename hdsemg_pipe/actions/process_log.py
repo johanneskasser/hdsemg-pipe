@@ -26,7 +26,7 @@ STEP_NAMES = {
     "step7": "Channel Selection",
     "step8": "Decomposition Results",
     "step9": "CoVISI Pre-Filter",
-    "step10": "Multi-Grid Configuration",
+    "step10": "Remove Duplicate MUs",
     "step11": "MUEdit Manual Cleaning",
     "step12": "CoVISI Post-Validation",
     "step13": "Final Results",

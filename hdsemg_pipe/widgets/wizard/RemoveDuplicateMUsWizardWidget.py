@@ -71,6 +71,13 @@ except ImportError:
 # WORKER THREAD
 # ============================================================================
 
+def _fmt(value, spec):
+    """Format a number, or an em dash when it is missing/NaN."""
+    if isinstance(value, (int, float)) and value == value:
+        return format(value, spec)
+    return "—"
+
+
 class DuplicateDetectionWorker(QThread):
     """Worker thread for duplicate detection."""
 
@@ -238,9 +245,9 @@ class ViewDuplicateDialog(QDialog):
             pnr = scores.get('pnr', float('nan'))
             covisi = scores.get('covisi', float('nan'))
             n_spikes = scores.get('n_spikes', '—')
-            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{sil:.3f if isinstance(sil, float) else '—'}</td>"
-            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{pnr:.1f if isinstance(pnr, float) else '—'}</td>"
-            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{covisi:.1f if isinstance(covisi, float) else '—'}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{_fmt(sil, '.3f')}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{_fmt(pnr, '.1f')}</td>"
+            rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{_fmt(covisi, '.1f')}</td>"
             rel_str += f"<td style='padding:5px;border:1px solid #ccc;'>{n_spikes}</td>"
             rel_str += "</tr>"
         rel_str += "</table>"
@@ -778,6 +785,10 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
 
         self.scan_json_files()
         return True
+
+    def on_shown(self):
+        # Reconstruction cannot scan (steps 8/9 not yet completed there); do it on open.
+        self.check()
 
     def scan_json_files(self):
         """Scan for JSON files to process."""
