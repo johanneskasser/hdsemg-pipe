@@ -1296,7 +1296,16 @@ class RemoveDuplicateMUsWizardWidget(WizardStepWidget):
                 'total_files': self.detection_results['total_files'],
                 'total_duplicate_groups': self.detection_results['total_duplicate_groups'],
                 'total_mus_removed': self.detection_results['total_mus_to_remove']
-            }
+            },
+            # Offset-tolerant cross-grid pairs (file indices refer to the group's file list)
+            'cross_grid_pairs': [
+                {
+                    'group': g['group_name'],
+                    'files': [Path(p).name for p in g['json_paths']],
+                    'pairs': g['detection'].get('cross_grid_pairs', []),
+                }
+                for g in self.detection_results['groups']
+            ],
         }
 
         with open(report_path, 'w') as f:
