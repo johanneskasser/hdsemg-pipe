@@ -23,38 +23,16 @@ extra:
 nav:
   - Home: index.md
   - Installation: installation.md
-  - General Documentation:
-      - Getting Started: general/getting_started.md
-      - Dashboard: general/dashboard.md
-      - Application Settings: general/application_settings.md
-      - Update Notifications: general/update_notifications.md
-  - Processing Steps:
-      - Opening Data: processing/opening_data.md
-      - Grid Association: processing/grid_association.md
-      - Line Noise Removal: processing/line_noise_removal.md
-      - RMS Quality Analysis: processing/rms_quality_analysis.md
-      - File Quality Selection: processing/file_quality_selection.md
-      - Crop to Region of Interest: processing/crop_to_roi.md
-      - Channel Selection: processing/channel_selection.md
-      - Decomposition Results: processing/decomposition_results.md
-      - CoVISI Filtering: processing/covisi_filtering.md
-      - MUEdit Export Workflow: processing/muedit_export_workflow.md
-      - Analysis Notebook: processing/analysis_notebook.md
-      - Database Export (SQLite): processing/database_export.md
-  - Developer Guide: developer.md
-  - Contributing: contributing.md
+  - Workflow: workflow.md
+  - The 13 steps: steps.md
+  - Settings: settings.md
+  - Analysis notebooks: analysis.md
+  - Development: developer.md
 
 markdown_extensions:
   - admonition
-  - codehilite
   - toc:
       permalink: true
-  - markdown_include.include:
-      base_path: docs/includes
 
 plugins:
   - search
-  - mkdocstrings:
-      handlers:
-        python:
-          paths: [hdsemg_pipe]
