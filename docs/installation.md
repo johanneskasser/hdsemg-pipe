@@ -1,200 +1,40 @@
-# Installation Guide
+# Installation
 
-This guide describes the available methods for installing hdsemg-pipe and setting up all required dependencies.
+Python 3.10+ is required. Use a virtual environment for organization.
 
-## Prerequisites
-
-Before installing hdsemg-pipe, please ensure you have the following installed:
-
-- Python 3.8 or higher
-- Git
-- (Optional) Conda package manager
-
-## Installation Methods
-
-There are three ways to install hdsemg-pipe:
-
-1. **PyPI package (recommended for most users)**
-2. **Conda environment with PyPI package**
-3. **From source**
-
-### Method 1: Install via PyPI
-
-1. **Create a virtual environment (recommended)**
-   ```bash
-   # Windows
-   python -m venv venv
-   venv\Scripts\activate
-
-   # Linux/macOS
-   python -m venv venv
-   source venv/bin/activate
-   ```
-2. **Install hdsemg-pipe**
-   ```bash
-   pip install hdsemg-pipe
-   ```
-
-3. **Start hdsemg-pipe**
-```bash
-   python -m hdsemg_pipe.main
-   ```
-
-### Method 2: Install via Conda with PyPI package
-
-This method uses Conda to manage the core dependencies while installing hdsemg-pipe from PyPI.
-
-1. **Download the environment file**
-   ```bash
-   wget https://raw.githubusercontent.com/johanneskasser/hdsemg-pipe/main/environment-pypi.yml
-   ```
-   Or download `environment.yml` directly from the repository.
-
-2. **Create and activate Conda environment**
-   ```bash
-   conda env create -f environment.yml
-   conda activate hdsemg-pipe
-   ```
-
-3. **Start hdsemg-pipe**
-   ```bash
-   python -m hdsemg_pipe.main
-   ```
-
-The environment will automatically install hdsemg-pipe and all its dependencies.
-
-### Method 3: Install from Source
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/johanneskasser/hdsemg-pipe.git
-   cd hdsemg-pipe
-   ```
-2. **Create a virtual environment (recommended)**
-   ```bash
-   # Windows
-   python -m venv venv
-   venv\Scripts\activate
-
-   # Linux/macOS
-   python -m venv venv
-   source venv/bin/activate
-   ```
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-#### Alternative: Install with Conda
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/johanneskasser/hdsemg-pipe.git
-   cd hdsemg-pipe
-   ```
-2. **Create and activate Conda environment**
-   ```bash
-   conda env create -f environment.yml
-   conda activate hdsemg-pipe
-   ```
-
-## Compile Resources (only for Source Installation)
-
-After installing the dependencies, you need to compile the Qt resources:
-
-1. **Change to the source directory**
-   ```bash
-   cd ./hdsemg_pipe
-   ```
-2. **Compile resources**
-   ```bash
-   pyrcc5 resources.qrc -o resources_rc.py
-   ```
-
-After installation, you can start the application with the following command:
+## With pip
 
 ```bash
-python hdsemg_pipe/main.py
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install hdsemg-pipe
+hdsemg-pipe
 ```
 
-## Additional Components
+## With conda
 
-### External Applications
+Download `environment.yml` from the repository, then:
 
-hdsemg-pipe requires two external applications:
+```bash
+conda env create -f environment.yml
+conda activate hdsemg-pipe
+hdsemg-pipe
+```
 
-1. **hdsemg-select App**
-   - Required for Channel Cleaning
-   - Installation: [hdsemg-select repository](https://github.com/johanneskasser/hdsemg-select.git)
-   - Path configuration in settings after installation
+If conda cannot find `hdsemg-shared`, drop it from the file and run `pip install hdsemg-shared` afterwards.
 
-2. **openhdemg**
-   - Required for visualizing Decomposition results
-   - Installation: [openhdemg repository](https://github.com/GiacomoValliPhD/openhdemg)
-   - Path to virtual environment configuration in settings
+## From source
 
-## Post-installation: Configuration
+```bash
+git clone https://github.com/johanneskasser/hdsemg-pipe.git
+cd hdsemg-pipe
+pip install -r requirements.txt
+cd hdsemg_pipe && pyrcc5 resources.qrc -o resources_rc.py && cd ..
+python -m hdsemg_pipe.main
+```
 
-1. **Start the application**
-   - Launch hdsemg-pipe as described above
-   - The application should open with the main dashboard
-2. **Configure settings**
-   - Open settings from the top menu
-   - Set working directory
-   - Configure paths to external applications
-   - Set logging level
+If your shell fails to locate `pyrcc5`, it is bundled with `pyqt5-tools`.
 
-## Verification
+## First start
 
-1. **Check dependencies**
-   ```bash
-   pip list  # or conda list if using Conda
-   ```
-2. **Test resource compilation** (only for Source Installation)
-   - Check if `resources_rc.py` was created in the src directory
-   - Look for compilation errors
-3. **Check external applications**
-   - Test hdsemg-select App path
-   - Check openhdemg environment
-
-## Troubleshooting
-
-### Common Installation Issues
-
-1. **Missing dependencies**
-   - Error: `ModuleNotFoundError`
-   - Solution: Install all requirements
-   ```bash
-   pip install -r requirements.txt --upgrade
-   ```
-2. **Resource compilation fails**
-   - Error: `pyrcc5 command not found`
-   - Solution: Install PyQt5 tools
-   ```bash
-   pip install pyqt5-tools
-   ```
-3. **Virtual environment issues**
-   - Problem: Incorrect Python version
-   - Solution: Create a new environment with the correct version
-   ```bash
-   python -m venv venv --clear
-   ```
-4. **hdsemg-shared lib not found (only for Conda)**
-   - Error: `ImportError: hdsemg-shared not found`
-   - Solution:
-     - Remove the hdsemg-shared package from environment.yml and reinstall.
-     - After successful installation, the package can be installed with pip:
-   ```bash
-   pip install hdsemg-shared
-   ```
-
-### Getting Help
-
-For installation issues:
-1. Check error messages
-2. Read the [documentation](https://github.com/johanneskasser/hdsemg-pipe)
-3. Open an issue on GitHub with:
-   - System information
-   - Installation method used
-   - Complete error message
-   - Steps to reproduce
+Open **Settings → Preferences** and pick a work folder. The same dialog installs hdsemg-select for you. openhdemg lives in its own environment, so enter its path there. MUedit needs MATLAB and its own entry under the MUEdit tab; scd-edition is optional.

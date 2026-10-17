@@ -1,110 +1,29 @@
-# Developer Guide for hdsemg-pipe
+# Development
 
-This guide is intended for developers who want to contribute to the hdsemg-pipe project.
-
-## Project Structure
-
-The project is structured as follows:
-
-- `src/` - Main source code
-  - `actions/` - Implementation of main functionalities (file management, ROI cropping, etc.)
-  - `config/` - Configuration management
-  - `controller/` - Control logic
-  - `settings/` - Settings dialogs
-  - `state/` - State management
-  - `ui_elements/` - Reusable UI components
-  - `widgets/` - Main widgets for different processing steps
-  - `_log/` - Logging functionality
-
-## Main Components
-
-### Processing Steps
-
-The application is divided into several processing steps, implemented through separate widget classes in the `widgets/` directory:
-
-1. `OpenFileStepWidget` - File selection and import
-2. `DefineRoiStepWidget` - Region of Interest (ROI) definition
-3. `ChannelSelectionStepWidget` - Channel selection
-4. `GridAssociationStepWidget` - Electrode grid association
-5. `DecompositionStepWidget` - Signal decomposition
-
-### State Management
-
-Global state management is handled through the `global_state.py` module in the `state/` directory. This ensures consistency between different processing steps.
-
-### Configuration
-
-Application configuration is managed in the `config/` directory:
-- `config_manager.py` - Management of configuration settings
-- `config.json` - Persistent configuration file
-- `config_enums.py` - Enumeration types for configuration options
-
-## Development Guidelines
-
-### Code Style
-
-- Follow PEP 8 for Python code style
-- Use meaningful variable and function names
-- Document complex functions with docstrings
-
-### Error Handling
-
-- Implement appropriate error handling with try-except blocks
-- Use the integrated logging system (`_log/` directory)
-- Catch Qt-specific exceptions appropriately
-
-### UI Development
-
-- New UI elements should inherit from existing base classes
-- Use Qt Designer for complex layouts
-- Ensure new UI elements are responsive
-
-### Testing
-
-- Write unit tests for new functionality
-- Test edge cases in signal processing
-- Perform manual UI testing
-
-## Build Process
-
-### Dependencies
-
-Project dependencies are defined in two files:
-- `requirements.txt` - Python packages for pip
-- `environment.yml` - Conda environment definition
-
-### Resources
-
-Qt resources are defined in `resources.qrc` and need to be recompiled after changes:
 ```bash
-pyrcc5 resources.qrc -o resources_rc.py
+git clone https://github.com/johanneskasser/hdsemg-pipe.git
+cd hdsemg-pipe
+pip install -r requirements.txt
+pytest
+mkdocs serve
 ```
 
-### Versioning
+## Layout
 
-Version management is handled through `make_version.py` and `version.py`.
+| Folder | Contents |
+|---|---|
+| `hdsemg_pipe/widgets/wizard` | One widget per step |
+| `hdsemg_pipe/actions` | Processing code the steps call |
+| `hdsemg_pipe/controller` | Restoring a working directory from disk |
+| `hdsemg_pipe/state` | Global state shared between steps |
+| `hdsemg_pipe/settings`, `config` | Preferences dialog and stored values |
+| `hdsemg_pipe/updates` | Update checks |
+| `hdsemg_pipe/scd_utils` | scd-edition conversion helpers |
 
-## Documentation
+## Writing a step
 
-- Use MkDocs for project documentation
-- Document changes in the corresponding markdown file in the `docs/` directory
-- Update screenshots in `docs/img/` directory when UI changes
+Subclass `WizardStepWidget`. Do heavy loading in `on_shown`, which runs when the user opens the step, and do it in a worker thread. If the step draws its own widgets, call `use_scoped_content_card()` so the card's frame styling does not leak into them. Qt resources are compiled with `pyrcc5 resources.qrc -o resources_rc.py`.
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Implement your changes
-4. Run tests
-5. Create a pull request
-
-## Support
-
-For questions or issues:
-- Check the existing documentation
-- Create an issue in the repository
-- Contact the development team
-
-## License
-
-Make sure your contributions comply with the project license.
+Open an issue first if the change is not small. Work on a branch, add a test for what you change, and open a pull request against `main`. Please include the Python version and operating system in bug reports.
